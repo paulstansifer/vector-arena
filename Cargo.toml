@@ -1,0 +1,15 @@
+[package]
+name = "vector-arena"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.18.1", features = ["dev"] }
+bevy_rapier2d = "0.34.0"
+geo = "0.33.1"
+
+[profile.dev]
+opt-level = 1 # Suggested by the Bevy docs
+
+[profile.dev.package."*"]
+opt-level = 3 # Suggested by the Bevy docs
