@@ -56,9 +56,8 @@ impl TerrainGeometry {
     }
 }
 
-// if a partition is a dead end, the probability it will be empty
-const EMPTY_PROB: f32 = 0.3;
-const CORRIDOR_PROB: f32 = 0.3;
+const EMPTY_PROB: f32 = 0.3; // if a partition is a dead end, the probability it will be empty
+const CORRIDOR_PROB: f32 = 0.3; // otherwise, the probability it will be a corridor
 
 enum PartitionRole {
     Room,
@@ -68,7 +67,34 @@ enum PartitionRole {
 
 // Dead ends may be empty or rooms. Other partitions may be corridors or rooms.
 fn allocate_roles(p: Vec<Partition>, rng: &mut ThreadRng) -> Vec<(Partition, PartitionRole)> {
-    todo!()
+    p.into_iter()
+        .map(|partition| {
+            let horz_count = partition.horz_conn.0.len() + partition.horz_conn.1.len();
+            let vert_count = partition.vert_conn.0.len() + partition.vert_conn.1.len();
+            let connection_count = horz_count + vert_count;
+
+            let role = match connection_count {
+                0 => panic!("Shouldn't be possible to generate an unconnected partition"),
+                1 => {
+                    if rng.gen_bool((1.0 - EMPTY_PROB).into()) {
+                        PartitionRole::Room
+                    } else {
+                        PartitionRole::Empty
+                    }
+                }
+                2 => {
+                    if rng.gen_bool(CORRIDOR_PROB.into()) {
+                        PartitionRole::Corridor
+                    } else {
+                        PartitionRole::Room
+                    }
+                }
+                _ => PartitionRole::Room,
+            };
+
+            (partition, role)
+        })
+        .collect()
 }
 
 const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
