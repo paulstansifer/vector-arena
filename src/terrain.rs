@@ -98,7 +98,7 @@ fn allocate_roles(p: Vec<Partition>, rng: &mut ThreadRng) -> Vec<(Partition, Par
 }
 
 const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
-const CORRIDOR_WIDTH: f32 = 35.0;
+pub const CORRIDOR_WIDTH: f32 = 35.0;
 
 // For rooms, shrink at least PADDING away from the edges (respecting MIN_ROOM_SIZE), adding hallways out to the edge.
 // For corridors, if there are two connections, draw a straight hallway between them; otherwise, draw hallways from all connections to the center point.

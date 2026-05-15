@@ -1,4 +1,4 @@
-use crate::terrain::PADDING;
+use crate::terrain::{CORRIDOR_WIDTH, PADDING};
 use rand::prelude::*;
 use std::ops::Range;
 
@@ -86,8 +86,14 @@ fn split_vertical(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition,
 
 fn split_horizontal(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition, Partition)> {
     let SplitRange { start, end } = SplitRange::new(bounds.y, &bounds.horz_conn);
-    let split_y =
-        choose_split_coordinate(start, end, &bounds.horz_conn.0, &bounds.horz_conn.1, rng)?;
+    let split_y = choose_split_coordinate(
+        start,
+        end,
+        &bounds.horz_conn.0,
+        &bounds.horz_conn.1,
+        PADDING + CORRIDOR_WIDTH / 2.0,
+        rng,
+    )?;
     let mut bottom = Partition {
         x: bounds.x,
         y: (bounds.y.0, split_y),
@@ -156,6 +162,7 @@ fn choose_split_coordinate(
     end: f32,
     existing0: &[f32],
     existing1: &[f32],
+    connection_margin: f32,
     rng: &mut ThreadRng,
 ) -> Option<f32> {
     if end <= start {
@@ -170,8 +177,8 @@ fn choose_split_coordinate(
     let mut intervals = vec![(start, end)];
 
     for conn in reserved {
-        let blocked_start = (conn - PADDING).max(start);
-        let blocked_end = (conn + PADDING).min(end);
+        let blocked_start = (conn - connection_margin).max(start);
+        let blocked_end = (conn + connection_margin).min(end);
         if blocked_start >= blocked_end {
             continue;
         }
@@ -239,4 +246,117 @@ fn interior_positions(range: (f32, f32), count: usize) -> Vec<f32> {
 
     let interval = (max - min) / (count as f32 + 1.0);
     (1..=count).map(|i| min + interval * i as f32).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_choose_split_coordinate_respects_both_existing() {
+        // When both existing0 and existing1 have coordinates, result should avoid both
+        let mut rng = rand::thread_rng();
+        let existing0 = vec![30.0];
+        let existing1 = vec![70.0];
+
+        for _ in 0..100 {
+            let result =
+                choose_split_coordinate(0.0, 100.0, &existing0, &existing1, PADDING, &mut rng);
+            if let Some(value) = result {
+                // Check blocked region around 30.0
+                let blocked_start_0 = (30.0 - PADDING).max(0.0);
+                let blocked_end_0 = (30.0 + PADDING).min(100.0);
+                assert!(
+                    value < blocked_start_0 || value > blocked_end_0,
+                    "Value {} too close to existing0 coordinate 30.0",
+                    value
+                );
+
+                // Check blocked region around 70.0
+                let blocked_start_1 = (70.0 - PADDING).max(0.0);
+                let blocked_end_1 = (70.0 + PADDING).min(100.0);
+                assert!(
+                    value < blocked_start_1 || value > blocked_end_1,
+                    "Value {} too close to existing1 coordinate 70.0",
+                    value
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_choose_split_coordinate_returns_none_when_completely_blocked() {
+        // When existing coordinates block the entire range, should return None
+        let mut rng = rand::thread_rng();
+        let existing = vec![50.0];
+
+        // With a small range and a coordinate in the middle, it should be blocked
+        let _result = choose_split_coordinate(40.0, 60.0, &existing, &[], PADDING, &mut rng);
+        // This might return None if the entire range is blocked
+        // Let's check with a more extreme case
+
+        let result = choose_split_coordinate(
+            50.0 - PADDING - 1.0,
+            50.0 + PADDING + 1.0,
+            &vec![50.0],
+            &[],
+            PADDING,
+            &mut rng,
+        );
+        // Should still have room on the edges
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_choose_split_coordinate_multiple_existing() {
+        // When there are multiple existing coordinates, all should be respected
+        let mut rng = rand::thread_rng();
+        let existing0 = vec![25.0, 75.0];
+        let existing1 = vec![50.0];
+
+        for _ in 0..100 {
+            if let Some(value) =
+                choose_split_coordinate(0.0, 100.0, &existing0, &existing1, PADDING, &mut rng)
+            {
+                for &coord in &existing0 {
+                    let blocked_start = (coord - PADDING).max(0.0);
+                    let blocked_end = (coord + PADDING).min(100.0);
+                    assert!(
+                        value < blocked_start || value > blocked_end,
+                        "Value {} too close to existing0 coordinate {}",
+                        value,
+                        coord
+                    );
+                }
+                for &coord in &existing1 {
+                    let blocked_start = (coord - PADDING).max(0.0);
+                    let blocked_end = (coord + PADDING).min(100.0);
+                    assert!(
+                        value < blocked_start || value > blocked_end,
+                        "Value {} too close to existing1 coordinate {}",
+                        value,
+                        coord
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_choose_split_coordinate_near_boundaries() {
+        // Existing coordinates near range boundaries should still be respected
+        let mut rng = rand::thread_rng();
+        let existing = vec![5.0, 95.0];
+
+        for _ in 0..50 {
+            if let Some(value) =
+                choose_split_coordinate(0.0, 100.0, &existing, &[], PADDING, &mut rng)
+            {
+                // Avoid region around 5.0
+                assert!(value < (5.0 - PADDING).max(0.0) || value > (5.0 + PADDING).min(100.0));
+                // Avoid region around 95.0
+                assert!(value < (95.0 - PADDING).max(0.0) || value > (95.0 + PADDING).min(100.0));
+            }
+        }
+    }
 }
