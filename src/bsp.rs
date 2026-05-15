@@ -1,9 +1,9 @@
+use crate::terrain::PADDING;
 use rand::prelude::*;
 use std::ops::Range;
 
-const PADDING: f32 = 10.0;
 const DOUBLE_CONNECTION_UNCERTAIN: Range<f32> = 500.0..750.0;
-const MIN_PARTITION_SIZE: Range<f32> = 100.0..550.0;
+const MIN_PARTITION_SIZE: Range<f32> = 150.0..550.0;
 const MIN_ROOM_SIZE: f32 = MIN_PARTITION_SIZE.start - PADDING * 2.0;
 
 #[derive(Clone, Debug)]
@@ -34,8 +34,8 @@ fn split_partition(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition
     let width = bounds.x.1 - bounds.x.0;
     let height = bounds.y.1 - bounds.y.0;
 
-    let can_split_vertical = width > MIN_PARTITION_SIZE.start * 2.0 + PADDING * 2.0;
-    let can_split_horizontal = height > MIN_PARTITION_SIZE.start * 2.0 + PADDING * 2.0;
+    let can_split_vertical = width > rng.gen_range(MIN_PARTITION_SIZE);
+    let can_split_horizontal = height > rng.gen_range(MIN_PARTITION_SIZE);
 
     if !can_split_vertical && !can_split_horizontal {
         return None;

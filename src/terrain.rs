@@ -3,12 +3,12 @@ use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
 use bevy_rapier2d::prelude::*;
 use geo::algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay};
-use geo::geometry::{Coord, MultiPolygon};
+use geo::geometry::MultiPolygon;
 use geo::{BooleanOps, Rect, Translate};
 use rand::prelude::*;
 
 pub const MARGIN: f32 = 10.0;
-pub const PADDING: f32 = 10.0;
+pub const PADDING: f32 = 30.0;
 
 #[derive(Component)]
 pub struct Terrain;
@@ -105,9 +105,257 @@ const CORRIDOR_WIDTH: f32 = 50.0;
 // Returns rooms and a multipolygon representing passable space.
 fn render(
     bsp: &[(Partition, PartitionRole)],
-    rng: &mut ThreadRng,
+    _rng: &mut ThreadRng,
 ) -> (Vec<Rect<f32>>, MultiPolygon<f32>) {
-    todo!()
+    let mut rooms = Vec::new();
+    let mut playables = MultiPolygon::new(vec![]);
+
+    for (partition, role) in bsp {
+        let mut region = MultiPolygon::new(vec![]);
+
+        match role {
+            PartitionRole::Empty => {
+                continue;
+            }
+            PartitionRole::Room => {
+                let room = shrink_room(partition);
+                let room_poly = room.to_polygon();
+                region = region.union(&room_poly);
+                rooms.push(room);
+
+                for connection in partition_connections(partition) {
+                    let hallway = connect_room_to_connection(&room, connection);
+                    for poly in hallway {
+                        region = region.union(&poly);
+                    }
+                }
+            }
+            PartitionRole::Corridor => {
+                let connections = partition_connections(partition);
+                if connections.len() == 2 {
+                    let corridor = connect_two_points(connections[0], connections[1]);
+                    for poly in corridor {
+                        region = region.union(&poly);
+                    }
+                } else {
+                    let center = partition_center(partition);
+                    for connection in connections {
+                        let corridor = connect_point_to_center(connection, center);
+                        for poly in corridor {
+                            region = region.union(&poly);
+                        }
+                    }
+                }
+            }
+        }
+
+        playables = playables.union(&region);
+    }
+
+    (rooms, playables)
+}
+
+#[derive(Copy, Clone)]
+enum ConnectionSide {
+    Left,
+    Right,
+    Bottom,
+    Top,
+}
+
+#[derive(Copy, Clone)]
+struct ConnectionPoint {
+    x: f32,
+    y: f32,
+    side: ConnectionSide,
+}
+
+fn partition_connections(partition: &Partition) -> Vec<ConnectionPoint> {
+    let mut connections = Vec::new();
+
+    for &y in &partition.horz_conn.0 {
+        connections.push(ConnectionPoint {
+            x: partition.x.0,
+            y,
+            side: ConnectionSide::Left,
+        });
+    }
+    for &y in &partition.horz_conn.1 {
+        connections.push(ConnectionPoint {
+            x: partition.x.1,
+            y,
+            side: ConnectionSide::Right,
+        });
+    }
+    for &x in &partition.vert_conn.0 {
+        connections.push(ConnectionPoint {
+            x,
+            y: partition.y.0,
+            side: ConnectionSide::Bottom,
+        });
+    }
+    for &x in &partition.vert_conn.1 {
+        connections.push(ConnectionPoint {
+            x,
+            y: partition.y.1,
+            side: ConnectionSide::Top,
+        });
+    }
+
+    connections
+}
+
+fn shrink_room(partition: &Partition) -> Rect<f32> {
+    let width = partition.x.1 - partition.x.0;
+    let height = partition.y.1 - partition.y.0;
+
+    let inner_width = (width - PADDING * 2.0).max(MIN_ROOM_SIZE);
+    let inner_height = (height - PADDING * 2.0).max(MIN_ROOM_SIZE);
+
+    let x0 = partition.x.0 + (width - inner_width) / 2.0;
+    let y0 = partition.y.0 + (height - inner_height) / 2.0;
+    let x1 = x0 + inner_width;
+    let y1 = y0 + inner_height;
+
+    Rect::new((x0, y0), (x1, y1))
+}
+
+fn partition_center(partition: &Partition) -> (f32, f32) {
+    (
+        (partition.x.0 + partition.x.1) / 2.0,
+        (partition.y.0 + partition.y.1) / 2.0,
+    )
+}
+
+fn connect_room_to_connection(
+    room: &Rect<f32>,
+    connection: ConnectionPoint,
+) -> Vec<geo::Polygon<f32>> {
+    let room_entry = match connection.side {
+        ConnectionSide::Left => (room.min().x, connection.y.clamp(room.min().y, room.max().y)),
+        ConnectionSide::Right => (room.max().x, connection.y.clamp(room.min().y, room.max().y)),
+        ConnectionSide::Bottom => (connection.x.clamp(room.min().x, room.max().x), room.min().y),
+        ConnectionSide::Top => (connection.x.clamp(room.min().x, room.max().x), room.max().y),
+    };
+
+    let corridor_width = CORRIDOR_WIDTH;
+    let mut polygons = Vec::new();
+
+    match connection.side {
+        ConnectionSide::Left | ConnectionSide::Right => {
+            polygons.push(rect_for_segment(
+                (connection.x, connection.y),
+                (room_entry.0, connection.y),
+                corridor_width,
+            ));
+            if (room_entry.1 - connection.y).abs() > 0.0 {
+                polygons.push(rect_for_segment(
+                    (room_entry.0, connection.y),
+                    room_entry,
+                    corridor_width,
+                ));
+            }
+        }
+        ConnectionSide::Bottom | ConnectionSide::Top => {
+            polygons.push(rect_for_segment(
+                (connection.x, connection.y),
+                (connection.x, room_entry.1),
+                corridor_width,
+            ));
+            if (room_entry.0 - connection.x).abs() > 0.0 {
+                polygons.push(rect_for_segment(
+                    (connection.x, room_entry.1),
+                    room_entry,
+                    corridor_width,
+                ));
+            }
+        }
+    }
+
+    polygons
+}
+
+fn connect_two_points(a: ConnectionPoint, b: ConnectionPoint) -> Vec<geo::Polygon<f32>> {
+    if (a.x - b.x).abs() < f32::EPSILON {
+        return vec![rect_for_segment((a.x, a.y), (b.x, b.y), CORRIDOR_WIDTH)];
+    }
+    if (a.y - b.y).abs() < f32::EPSILON {
+        return vec![rect_for_segment((a.x, a.y), (b.x, b.y), CORRIDOR_WIDTH)];
+    }
+
+    let horizontal_first = (a.x - b.x).abs() >= (a.y - b.y).abs();
+    if horizontal_first {
+        vec![
+            rect_for_segment((a.x, a.y), (b.x, a.y), CORRIDOR_WIDTH),
+            rect_for_segment((b.x, a.y), (b.x, b.y), CORRIDOR_WIDTH),
+        ]
+    } else {
+        vec![
+            rect_for_segment((a.x, a.y), (a.x, b.y), CORRIDOR_WIDTH),
+            rect_for_segment((a.x, b.y), (b.x, b.y), CORRIDOR_WIDTH),
+        ]
+    }
+}
+
+fn connect_point_to_center(
+    connection: ConnectionPoint,
+    center: (f32, f32),
+) -> Vec<geo::Polygon<f32>> {
+    if (connection.x - center.0).abs() < f32::EPSILON {
+        return vec![rect_for_segment(
+            (connection.x, connection.y),
+            center,
+            CORRIDOR_WIDTH,
+        )];
+    }
+    if (connection.y - center.1).abs() < f32::EPSILON {
+        return vec![rect_for_segment(
+            (connection.x, connection.y),
+            center,
+            CORRIDOR_WIDTH,
+        )];
+    }
+
+    let horizontal_first = (connection.x - center.0).abs() >= (connection.y - center.1).abs();
+    if horizontal_first {
+        vec![
+            rect_for_segment(
+                (connection.x, connection.y),
+                (center.0, connection.y),
+                CORRIDOR_WIDTH,
+            ),
+            rect_for_segment((center.0, connection.y), center, CORRIDOR_WIDTH),
+        ]
+    } else {
+        vec![
+            rect_for_segment(
+                (connection.x, connection.y),
+                (connection.x, center.1),
+                CORRIDOR_WIDTH,
+            ),
+            rect_for_segment((connection.x, center.1), center, CORRIDOR_WIDTH),
+        ]
+    }
+}
+
+fn rect_for_segment(a: (f32, f32), b: (f32, f32), width: f32) -> geo::Polygon<f32> {
+    if (a.0 - b.0).abs() < f32::EPSILON {
+        let min_y = a.1.min(b.1);
+        let max_y = a.1.max(b.1);
+        let half = width / 2.0;
+        Rect::new((a.0 - half, min_y), (a.0 + half, max_y)).to_polygon()
+    } else if (a.1 - b.1).abs() < f32::EPSILON {
+        let min_x = a.0.min(b.0);
+        let max_x = a.0.max(b.0);
+        let half = width / 2.0;
+        Rect::new((min_x, a.1 - half), (max_x, a.1 + half)).to_polygon()
+    } else {
+        let min_x = a.0.min(b.0);
+        let max_x = a.0.max(b.0);
+        let min_y = a.1.min(b.1);
+        let max_y = a.1.max(b.1);
+        Rect::new((min_x, min_y), (max_x, max_y)).to_polygon()
+    }
 }
 
 /// Convert the terrain geometry to a Bevy mesh for rendering.

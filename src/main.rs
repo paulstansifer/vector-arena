@@ -41,7 +41,7 @@ fn setup(
     let window_width = window.width();
     let window_height = window.height();
 
-    let terrain_geometry = if false {
+    let terrain_geometry = if true {
         // Create terrain geometry
         TerrainGeometry::new(window_width, window_height)
     } else {
