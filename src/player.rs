@@ -60,9 +60,9 @@ pub fn set_target_on_click(
 
 pub fn move_player(
     mut time: ResMut<Time<Virtual>>,
-    mut query: Query<(&mut Transform, &mut Velocity, &mut MoveTarget), With<Player>>,
+    mut query: Query<(&Transform, &mut Velocity, &mut MoveTarget), With<Player>>,
 ) {
-    for (mut transform, mut velocity, mut move_target) in query.iter_mut() {
+    for (transform, mut velocity, mut move_target) in query.iter_mut() {
         if !move_target.active {
             time.set_relative_speed(0.0);
             velocity.linear = Vec2::ZERO;
@@ -87,7 +87,6 @@ pub fn move_player(
 
         let step = desired_speed * time.delta_secs();
         if step >= distance {
-            transform.translation = move_target.destination.extend(transform.translation.z);
             velocity.linear = Vec2::ZERO;
             move_target.active = false;
         }

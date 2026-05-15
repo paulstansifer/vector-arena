@@ -77,17 +77,19 @@ fn setup(
         Vec2::ZERO // fallback
     };
 
-    commands.spawn((
-        Mesh2d(meshes.add(Circle::new(PLAYER_RADIUS))),
-        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
-        Transform::from_translation(player_position.extend(0.0)),
-        RigidBody::Dynamic,
-        Collider::ball(PLAYER_RADIUS),
-        LockedAxes::ROTATION_LOCKED,
-        Velocity::zero(),
-        Player,
-        MoveTarget::default(),
-    ));
+    commands
+        .spawn((
+            Mesh2d(meshes.add(Circle::new(PLAYER_RADIUS))),
+            MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
+            Transform::from_translation(player_position.extend(0.0)),
+            RigidBody::Dynamic,
+            Collider::ball(PLAYER_RADIUS),
+            LockedAxes::ROTATION_LOCKED,
+            Velocity::zero(),
+            Player,
+            MoveTarget::default(),
+        ))
+        .insert(Ccd::enabled());
 
     let monster_material = materials.add(ColorMaterial::from(Color::srgb(0.85, 0.12, 0.12)));
     let monster_mesh = meshes.add(Circle::new(MONSTER_RADIUS));
