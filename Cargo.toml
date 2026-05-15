@@ -8,6 +8,7 @@ bevy = { version = "0.18.1", features = ["dev"] }
 bevy_rapier2d = "0.34.0"
 bevy_mesh = "0.18"
 geo = "0.33.1"
+rand = "0.8"
 
 [profile.dev]
 opt-level = 1 # Suggested by the Bevy docs

@@ -149,15 +149,15 @@ mod tests {
         let (transform, move_target) = query.iter(&*world).next().unwrap();
 
         assert!(
-            !move_target.active,
-            "player should stop after reaching the destination"
-        );
-        assert!(
             transform.translation.truncate().distance(destination) <= STOP_THRESHOLD,
             "player final position {:?} should be within {} units of destination {:?}",
             transform.translation.truncate(),
             STOP_THRESHOLD,
             destination,
+        );
+        assert!(
+            !move_target.active,
+            "player should stop after reaching the destination"
         );
     }
 }

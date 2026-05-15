@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
+use geo::MultiPolygon;
+use rand::prelude::*;
 
+mod bsp;
 mod monster;
 mod player;
 mod terrain;
@@ -38,8 +41,18 @@ fn setup(
     let window_width = window.width();
     let window_height = window.height();
 
-    // Create terrain geometry
-    let terrain_geometry = TerrainGeometry::new(window_width, window_height);
+    let terrain_geometry = if false {
+        // Create terrain geometry
+        TerrainGeometry::new(window_width, window_height)
+    } else {
+        TerrainGeometry {
+            polygon: MultiPolygon::empty(),
+            rooms: vec![geo::geometry::Rect::new(
+                (0.0, 0.0),
+                (window_width, window_width),
+            )],
+        }
+    };
 
     // Spawn terrain entity with mesh and collider
     let terrain_mesh = geometry_to_mesh(&terrain_geometry.polygon);
@@ -54,10 +67,20 @@ fn setup(
         Terrain,
     ));
 
+    let mut rng = rand::thread_rng();
+
+    // Choose a random room for the player
+    let player_position = if let Some(room) = terrain_geometry.rooms.choose(&mut rng) {
+        let center = room.center();
+        Vec2::new(center.x, center.y)
+    } else {
+        Vec2::ZERO // fallback
+    };
+
     commands.spawn((
         Mesh2d(meshes.add(Circle::new(PLAYER_RADIUS))),
         MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
-        Transform::default(),
+        Transform::from_translation(player_position.extend(0.0)),
         RigidBody::Dynamic,
         Collider::ball(PLAYER_RADIUS),
         LockedAxes::ROTATION_LOCKED,
@@ -68,9 +91,19 @@ fn setup(
 
     let monster_material = materials.add(ColorMaterial::from(Color::srgb(0.85, 0.12, 0.12)));
     let monster_mesh = meshes.add(Circle::new(MONSTER_RADIUS));
-    let monster_positions = [Vec2::new(-220.0, 100.0), Vec2::new(220.0, -80.0)];
 
-    for position in monster_positions {
+    // Spawn monsters in other rooms
+    let mut monster_positions = Vec::new();
+    for room in &terrain_geometry.rooms {
+        let center = room.center();
+        let pos = Vec2::new(center.x, center.y);
+        if pos != player_position {
+            monster_positions.push(pos);
+        }
+    }
+
+    // Take up to 2 monsters
+    for position in monster_positions.into_iter().take(2) {
         commands.spawn((
             Mesh2d(monster_mesh.clone()),
             MeshMaterial2d(monster_material.clone()),
