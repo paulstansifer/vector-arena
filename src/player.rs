@@ -73,13 +73,6 @@ pub fn move_player(
         let direction = move_target.destination - current;
         let distance = direction.length();
 
-        if distance <= STOP_THRESHOLD || distance == 0.0 {
-            transform.translation = move_target.destination.extend(transform.translation.z);
-            velocity.linear = Vec2::ZERO;
-            move_target.active = false;
-            continue;
-        }
-
         // speed up after starting to move:
         let away_from_origin = (current.distance(move_target.origin) / 60.0).clamp(0.0, 1.0);
         let speed_multiplier = lerp(0.25, 1.0, away_from_origin);
