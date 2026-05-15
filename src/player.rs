@@ -1,5 +1,5 @@
+use avian2d::prelude::*;
 use bevy::prelude::*;
-use bevy_rapier2d::prelude::*;
 
 pub const PLAYER_RADIUS: f32 = 10.0;
 pub const PLAYER_SPEED: f32 = 480.0;
@@ -60,14 +60,15 @@ pub fn set_target_on_click(
 
 pub fn move_player(
     mut time: ResMut<Time<Virtual>>,
-    mut query: Query<(&Transform, &mut Velocity, &mut MoveTarget), With<Player>>,
+    mut query: Query<(&Transform, &mut LinearVelocity, &mut MoveTarget), With<Player>>,
 ) {
     for (transform, mut velocity, mut move_target) in query.iter_mut() {
         if !move_target.active {
             time.set_relative_speed(0.0);
-            velocity.linear = Vec2::ZERO;
+            *velocity = LinearVelocity::ZERO;
             continue;
         }
+        time.set_relative_speed(1.0);
 
         let current = transform.translation.truncate();
         let direction = move_target.destination - current;
@@ -75,19 +76,18 @@ pub fn move_player(
 
         // speed up after starting to move:
         let away_from_origin = (current.distance(move_target.origin) / 60.0).clamp(0.0, 1.0);
-        let speed_multiplier = lerp(0.25, 1.0, away_from_origin);
-        let new_speed = f32::max(speed_multiplier, time.relative_speed());
+        let adj_speed = lerp(0.25, 1.0, away_from_origin) * PLAYER_SPEED;
+        let new_speed = f32::max(adj_speed, velocity.length());
         // slow down approaching the target:
-        let speed_multiplier = lerp(0.25, 1.0, (distance / 60.0).clamp(0.0, 1.0));
-        let new_speed = f32::min(speed_multiplier, new_speed);
-        time.set_relative_speed(new_speed);
+        let adj_speed = lerp(0.25, 1.0, (distance / 60.0).clamp(0.0, 1.0)) * PLAYER_SPEED;
+        let new_speed = f32::min(adj_speed, new_speed);
 
-        let desired_speed = PLAYER_SPEED * time.relative_speed();
-        velocity.linear = direction.normalize_or_zero() * desired_speed;
+        let desired_speed = new_speed;
+        velocity.0 = direction.normalize_or_zero() * desired_speed;
 
         let step = desired_speed * time.delta_secs();
         if step >= distance {
-            velocity.linear = Vec2::ZERO;
+            *velocity = LinearVelocity::ZERO;
             move_target.active = false;
         }
     }
@@ -114,7 +114,6 @@ mod tests {
 
         app.world_mut().spawn((
             Transform::from_translation(Vec3::ZERO),
-            Velocity::zero(),
             MoveTarget {
                 destination,
                 origin: Vec2::ZERO,

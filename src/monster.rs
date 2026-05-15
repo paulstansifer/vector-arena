@@ -1,5 +1,5 @@
+use avian2d::prelude::*;
 use bevy::prelude::*;
-use bevy_rapier2d::prelude::*;
 
 use crate::player::Player;
 
@@ -12,7 +12,7 @@ pub struct Monster;
 
 pub fn move_monsters(
     player_query: Query<&Transform, (With<Player>, Without<Monster>)>,
-    mut monster_query: Query<(&Transform, &mut Velocity), With<Monster>>,
+    mut monster_query: Query<(&Transform, &mut LinearVelocity), With<Monster>>,
 ) {
     let player_transform = player_query.single().unwrap();
 
@@ -24,11 +24,11 @@ pub fn move_monsters(
         let distance = delta.length();
 
         if distance <= MONSTER_STOP_DIST {
-            velocity.linear = Vec2::ZERO;
+            *velocity = LinearVelocity::ZERO;
             continue;
         }
 
         let direction = delta.normalize_or_zero();
-        velocity.linear = direction * MONSTER_SPEED;
+        velocity.0 = direction * MONSTER_SPEED;
     }
 }

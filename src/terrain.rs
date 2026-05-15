@@ -1,7 +1,7 @@
 use crate::bsp::{Partition, partition_space};
+use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
-use bevy_rapier2d::prelude::*;
 use geo::algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay};
 use geo::geometry::MultiPolygon;
 use geo::{BooleanOps, Rect, Translate};
@@ -386,7 +386,7 @@ pub fn geometry_to_mesh(geometry: &MultiPolygon<f32>) -> Mesh {
 
 /// Convert the terrain geometry to a Rapier2D polyline collider.
 pub fn geometry_to_collider(geometry: &MultiPolygon<f32>) -> Collider {
-    let mut vertices = Vec::new();
+    let mut vertices: Vec<Vec2> = Vec::new();
     let mut indices = Vec::new();
 
     for polygon in geometry.iter() {
@@ -395,7 +395,7 @@ pub fn geometry_to_collider(geometry: &MultiPolygon<f32>) -> Collider {
 
             // Add vertices for the exterior ring (excluding the last point which is a duplicate of the first)
             for coord in ring.coords() {
-                vertices.push(Vect::new(coord.x, coord.y));
+                vertices.push((coord.x, coord.y).into());
             }
 
             let num_vertices = ring.coords().count() as u32;

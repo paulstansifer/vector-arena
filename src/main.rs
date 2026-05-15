@@ -1,5 +1,5 @@
+use avian2d::prelude::*;
 use bevy::prelude::*;
-use bevy_rapier2d::prelude::*;
 use geo::MultiPolygon;
 use rand::prelude::*;
 
@@ -14,14 +14,16 @@ use terrain::{Terrain, TerrainGeometry, geometry_to_collider, geometry_to_mesh};
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Vector Arena".into(),
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Vector Arena".into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
-        .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
+            avian2d::PhysicsPlugins::default(),
+        ))
         .add_systems(Startup, setup)
         .add_systems(Update, set_target_on_click)
         .add_systems(Update, move_player)
@@ -63,7 +65,7 @@ fn setup(
         MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.4, 0.4, 0.4)))),
         Transform::default(),
         terrain_collider,
-        RigidBody::Fixed,
+        RigidBody::Static,
         Terrain,
     ));
 
@@ -77,19 +79,18 @@ fn setup(
         Vec2::ZERO // fallback
     };
 
-    commands
-        .spawn((
-            Mesh2d(meshes.add(Circle::new(PLAYER_RADIUS))),
-            MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
-            Transform::from_translation(player_position.extend(0.0)),
-            RigidBody::Dynamic,
-            Collider::ball(PLAYER_RADIUS),
-            LockedAxes::ROTATION_LOCKED,
-            Velocity::zero(),
-            Player,
-            MoveTarget::default(),
-        ))
-        .insert(Ccd::enabled());
+    commands.spawn((
+        Mesh2d(meshes.add(Circle::new(PLAYER_RADIUS))),
+        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
+        Transform::from_translation(player_position.extend(0.0)),
+        RigidBody::Dynamic,
+        Collider::circle(PLAYER_RADIUS),
+        LockedAxes::ROTATION_LOCKED,
+        //Velocity::zero(),
+        Player,
+        MoveTarget::default(),
+    ));
+    //        .insert(Ccd::enabled());
 
     let monster_material = materials.add(ColorMaterial::from(Color::srgb(0.85, 0.12, 0.12)));
     let monster_mesh = meshes.add(Circle::new(MONSTER_RADIUS));
@@ -111,8 +112,8 @@ fn setup(
             MeshMaterial2d(monster_material.clone()),
             Transform::from_translation(position.extend(0.0)),
             RigidBody::Dynamic,
-            Collider::ball(MONSTER_RADIUS),
-            Velocity::zero(),
+            Collider::circle(MONSTER_RADIUS),
+            //Velocity::zero(),
             Monster,
         ));
     }
