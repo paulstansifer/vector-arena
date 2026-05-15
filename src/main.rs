@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use avian2d::prelude::*;
-use bevy::prelude::*;
+use bevy::{math::VectorSpace, prelude::*};
 use geo::MultiPolygon;
 use rand::prelude::*;
 
@@ -148,9 +148,10 @@ fn setup(
             Collider::circle(MONSTER_RADIUS),
             nav::Navigator {
                 speed: crate::monster::MONSTER_SPEED,
+                current: Vec2::ZERO, // TODO: allow omitting these two
+                next: vec![],
+                target: nav::Target::Follow(player),
             },
-            nav::Target::Follow(player),
-            nav::Path::default(),
         ));
     }
 }

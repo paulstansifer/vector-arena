@@ -8,15 +8,12 @@ use vleue_navigator::{NavMesh, prelude::*};
 #[derive(Component)]
 pub struct Navigator {
     pub speed: f32,
+    pub current: Vec2,
+    pub next: Vec<Vec2>,
+    pub target: Target,
 }
 
-#[derive(Component, Default)]
-pub struct Path {
-    current: Vec2,
-    next: Vec<Vec2>,
-}
-
-#[derive(Component)]
+#[derive(Clone, Copy)]
 pub enum Target {
     ILikeItHere,
     Follow(Entity),
@@ -24,8 +21,7 @@ pub enum Target {
 }
 
 pub fn refresh_path(
-    mut commands: Commands,
-    mut navigator: Query<(Entity, &Transform, &Target), With<Navigator>>,
+    mut navigator: Query<(Entity, &Transform, &mut Navigator)>,
     targets: Query<&Transform>,
     mut navmeshes: ResMut<Assets<NavMesh>>,
     navmesh: Single<(&ManagedNavMesh, Ref<NavMeshStatus>)>,
@@ -39,8 +35,8 @@ pub fn refresh_path(
         panic!("Need a navmesh!")
     };
 
-    for (entity, transform, target) in &mut navigator {
-        let dest_loc = match *target {
+    for (entity, transform, mut navigator) in &mut navigator {
+        let dest_loc = match navigator.target {
             Target::ILikeItHere => continue,
             Target::Follow(entity) => {
                 if let Ok(dest) = targets.get(entity) {
@@ -58,43 +54,41 @@ pub fn refresh_path(
             continue;
         }
         if !navmesh.transformed_is_in_mesh(dest_loc.extend(0.0)) {
-            commands.entity(entity).remove::<Path>();
+            navigator.current = Vec2::ZERO;
+            navigator.next.clear();
             continue;
         }
 
         let Some(new_path) = navmesh.transformed_path(transform.translation, dest_loc.extend(0.0))
         else {
-            commands.entity(entity).remove::<Path>();
+            navigator.current = Vec2::ZERO;
+            navigator.next.clear();
             continue;
         };
         if let Some((first, remaining)) = new_path.path.split_first() {
             let mut remaining = remaining.iter().map(|p| p.xy()).collect::<Vec<_>>();
             remaining.reverse();
-            commands.entity(entity).insert(Path {
-                current: first.xy(),
-                next: remaining,
-            });
-            // path.current = first.xy();
-            // path.next = remaining;
+            navigator.current = first.xy();
+            navigator.next = remaining;
             *delta = 0.0;
         }
     }
 }
 
 pub fn move_navigator(
-    mut commands: Commands,
-    mut navigator: Query<(&mut Transform, &mut Path, Entity, &Navigator)>,
+    mut navigator: Query<(&mut Transform, &mut Navigator, Entity)>,
     time: Res<Time>,
 ) {
-    for (mut transform, mut path, entity, navigator) in navigator.iter_mut() {
-        let move_direction = path.current - transform.translation.xy();
+    for (mut transform, mut nav, entity) in navigator.iter_mut() {
+        let move_direction = nav.current - transform.translation.xy();
         transform.translation +=
-            (move_direction.normalize() * time.delta_secs() * navigator.speed).extend(0.0);
-        while transform.translation.xy().distance(path.current) < navigator.speed / 50.0 {
-            if let Some(next) = path.next.pop() {
-                path.current = next;
+            (move_direction.normalize() * time.delta_secs() * nav.speed).extend(0.0);
+        while transform.translation.xy().distance(nav.current) < nav.speed / 50.0 {
+            if let Some(next) = nav.next.pop() {
+                nav.current = next;
             } else {
-                commands.entity(entity).remove::<Path>();
+                nav.current = Vec2::ZERO;
+                nav.next.clear();
                 break;
             }
         }
