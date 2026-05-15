@@ -16,8 +16,6 @@ use player::{MoveTarget, PLAYER_RADIUS, Player, move_player, set_target_on_click
 use terrain::{Terrain, TerrainGeometry, geometry_to_collider, geometry_to_mesh};
 use vleue_navigator::prelude::*;
 
-use crate::nav::Navigator;
-
 #[derive(Component, Debug)]
 struct Obstacle;
 
@@ -68,6 +66,7 @@ fn setup(
                 vec2(window_width, window_height),
                 vec2(-window_width, window_height),
             ]),
+            simplify: 0.01,
             ..default()
         },
         // Mark it for update as soon as obstacles are changed.
@@ -114,14 +113,13 @@ fn setup(
 
     let player = commands
         .spawn((
+            Player,
             Mesh2d(meshes.add(Circle::new(PLAYER_RADIUS))),
             MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
             Transform::from_translation(player_position.extend(0.0)),
             RigidBody::Dynamic,
             Collider::circle(PLAYER_RADIUS),
             LockedAxes::ROTATION_LOCKED,
-            //Velocity::zero(),
-            Player,
             MoveTarget::default(),
         ))
         .id();
@@ -142,6 +140,7 @@ fn setup(
 
     for position in monster_positions.into_iter().take(2) {
         commands.spawn((
+            Monster,
             Mesh2d(monster_mesh.clone()),
             MeshMaterial2d(monster_material.clone()),
             Transform::from_translation(position.extend(0.0)),
@@ -152,8 +151,6 @@ fn setup(
             },
             nav::Target::Follow(player),
             nav::Path::default(),
-            //Velocity::zero(),
-            Monster,
         ));
     }
 }

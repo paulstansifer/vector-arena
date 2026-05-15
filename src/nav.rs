@@ -36,7 +36,7 @@ pub fn refresh_path(
         return;
     }
     let Some(navmesh) = navmeshes.get_mut(*navmesh_handle) else {
-        return;
+        panic!("Need a navmesh!")
     };
 
     for (entity, transform, target) in &mut navigator {
