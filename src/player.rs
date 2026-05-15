@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_rapier2d::prelude::*;
 
 pub const PLAYER_RADIUS: f32 = 15.0;
 pub const PLAYER_SPEED: f32 = 480.0;
@@ -59,11 +60,12 @@ pub fn set_target_on_click(
 
 pub fn move_player(
     mut time: ResMut<Time<Virtual>>,
-    mut query: Query<(&mut Transform, &mut MoveTarget), With<Player>>,
+    mut query: Query<(&mut Transform, &mut Velocity, &mut MoveTarget), With<Player>>,
 ) {
-    for (mut transform, mut move_target) in query.iter_mut() {
+    for (mut transform, mut velocity, mut move_target) in query.iter_mut() {
         if !move_target.active {
             time.set_relative_speed(0.0);
+            velocity.linear = Vec2::ZERO;
             continue;
         }
 
@@ -71,7 +73,9 @@ pub fn move_player(
         let direction = move_target.destination - current;
         let distance = direction.length();
 
-        if distance <= STOP_THRESHOLD {
+        if distance <= STOP_THRESHOLD || distance == 0.0 {
+            transform.translation = move_target.destination.extend(transform.translation.z);
+            velocity.linear = Vec2::ZERO;
             move_target.active = false;
             continue;
         }
@@ -85,14 +89,14 @@ pub fn move_player(
         let new_speed = f32::min(speed_multiplier, new_speed);
         time.set_relative_speed(new_speed);
 
-        let step = PLAYER_SPEED * time.delta_secs();
+        let desired_speed = PLAYER_SPEED * time.relative_speed();
+        velocity.linear = direction.normalize_or_zero() * desired_speed;
 
+        let step = desired_speed * time.delta_secs();
         if step >= distance {
             transform.translation = move_target.destination.extend(transform.translation.z);
+            velocity.linear = Vec2::ZERO;
             move_target.active = false;
-        } else {
-            let translation = direction.normalize() * step;
-            transform.translation += translation.extend(0.0);
         }
     }
 }
@@ -118,6 +122,7 @@ mod tests {
 
         app.world_mut().spawn((
             Transform::from_translation(Vec3::ZERO),
+            Velocity::zero(),
             MoveTarget {
                 destination,
                 origin: Vec2::ZERO,

@@ -58,6 +58,10 @@ fn setup(
         Mesh2d(meshes.add(Circle::new(PLAYER_RADIUS))),
         MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
         Transform::default(),
+        RigidBody::Dynamic,
+        Collider::ball(PLAYER_RADIUS),
+        LockedAxes::ROTATION_LOCKED,
+        Velocity::zero(),
         Player,
         MoveTarget::default(),
     ));
@@ -71,6 +75,9 @@ fn setup(
             Mesh2d(monster_mesh.clone()),
             MeshMaterial2d(monster_material.clone()),
             Transform::from_translation(position.extend(0.0)),
+            RigidBody::Dynamic,
+            Collider::ball(MONSTER_RADIUS),
+            Velocity::zero(),
             Monster,
         ));
     }
