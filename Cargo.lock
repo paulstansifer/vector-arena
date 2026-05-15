@@ -5550,6 +5550,7 @@ name = "vector-arena"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_mesh",
  "bevy_rapier2d",
  "geo",
 ]
