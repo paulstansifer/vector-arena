@@ -60,7 +60,7 @@ fn setup(
 
     commands.spawn((
         Mesh2d(meshes.add(terrain_mesh)),
-        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.2, 0.7, 0.3)))),
+        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.4, 0.4, 0.4)))),
         Transform::default(),
         terrain_collider,
         RigidBody::Fixed,

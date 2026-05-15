@@ -3,7 +3,7 @@ use rand::prelude::*;
 use std::ops::Range;
 
 const DOUBLE_CONNECTION_UNCERTAIN: Range<f32> = 500.0..750.0;
-const MIN_PARTITION_SIZE: Range<f32> = 150.0..550.0;
+const MIN_PARTITION_SIZE: Range<f32> = 200.0..550.0;
 const MIN_ROOM_SIZE: f32 = MIN_PARTITION_SIZE.start - PADDING * 2.0;
 
 #[derive(Clone, Debug)]
@@ -12,6 +12,17 @@ pub struct Partition {
     pub y: (f32, f32),
     pub horz_conn: (Vec<f32>, Vec<f32>),
     pub vert_conn: (Vec<f32>, Vec<f32>),
+}
+
+impl Partition {
+    fn transpose(&self) -> Self {
+        Partition {
+            x: self.y,
+            y: self.x,
+            horz_conn: self.vert_conn.clone(),
+            vert_conn: self.horz_conn.clone(),
+        }
+    }
 }
 
 pub fn partition_space(bounds: Partition, rng: &mut ThreadRng) -> Vec<Partition> {
@@ -56,8 +67,8 @@ fn split_partition(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition
     };
 
     match axis {
-        SplitAxis::Vertical => split_vertical(bounds, rng),
-        SplitAxis::Horizontal => split_horizontal(bounds, rng),
+        SplitAxis::Vertical => split_vertical(&bounds, rng),
+        SplitAxis::Horizontal => split_horizontal(&bounds, rng),
     }
 }
 
@@ -70,33 +81,7 @@ enum SplitAxis {
 // TODO: Maybe we should write `fn transpose` and use that to simplify this:
 
 fn split_vertical(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition, Partition)> {
-    let SplitRange { start, end } = SplitRange::new(bounds.x, &bounds.vert_conn);
-    let split_x =
-        choose_split_coordinate(start, end, &bounds.vert_conn.0, &bounds.vert_conn.1, rng)?;
-    let mut left = Partition {
-        x: (bounds.x.0, split_x),
-        y: bounds.y,
-        horz_conn: (bounds.horz_conn.0.clone(), Vec::new()),
-        vert_conn: (Vec::new(), Vec::new()),
-    };
-    let mut right = Partition {
-        x: (split_x, bounds.x.1),
-        y: bounds.y,
-        horz_conn: (Vec::new(), bounds.horz_conn.1.clone()),
-        vert_conn: (Vec::new(), Vec::new()),
-    };
-
-    let count = internal_connection_count(bounds.y.1 - bounds.y.0, rng);
-    let interior_ys = interior_positions(bounds.y, count);
-    left.horz_conn.1 = interior_ys.clone();
-    right.horz_conn.0 = interior_ys;
-
-    left.vert_conn.0 = allocate_coords(&bounds.vert_conn.0, left.x);
-    left.vert_conn.1 = allocate_coords(&bounds.vert_conn.1, left.x);
-    right.vert_conn.0 = allocate_coords(&bounds.vert_conn.0, right.x);
-    right.vert_conn.1 = allocate_coords(&bounds.vert_conn.1, right.x);
-
-    Some((left, right))
+    split_horizontal(&bounds.transpose(), rng).map(|(a, b)| (a.transpose(), b.transpose()))
 }
 
 fn split_horizontal(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition, Partition)> {

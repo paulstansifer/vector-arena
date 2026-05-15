@@ -8,7 +8,7 @@ use geo::{BooleanOps, Rect, Translate};
 use rand::prelude::*;
 
 pub const MARGIN: f32 = 10.0;
-pub const PADDING: f32 = 30.0;
+pub const PADDING: f32 = 20.0;
 
 #[derive(Component)]
 pub struct Terrain;
@@ -57,7 +57,7 @@ impl TerrainGeometry {
 }
 
 const EMPTY_PROB: f32 = 0.3; // if a partition is a dead end, the probability it will be empty
-const CORRIDOR_PROB: f32 = 0.3; // otherwise, the probability it will be a corridor
+const CORRIDOR_PROB: f32 = 0.45; // otherwise, the probability it will be a corridor
 
 enum PartitionRole {
     Room,
@@ -98,7 +98,7 @@ fn allocate_roles(p: Vec<Partition>, rng: &mut ThreadRng) -> Vec<(Partition, Par
 }
 
 const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
-const CORRIDOR_WIDTH: f32 = 50.0;
+const CORRIDOR_WIDTH: f32 = 35.0;
 
 // For rooms, shrink at least PADDING away from the edges (respecting MIN_ROOM_SIZE), adding hallways out to the edge.
 // For corridors, if there are two connections, draw a straight hallway between them; otherwise, draw hallways from all connections to the center point.
