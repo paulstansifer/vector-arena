@@ -974,6 +974,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_landmass"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d3cd3372ac07d952c642099662bd864124d6b93a2c70bfc1f3b3b170ffc64f8"
+dependencies = [
+ "bevy_app",
+ "bevy_asset",
+ "bevy_color",
+ "bevy_ecs",
+ "bevy_gizmos",
+ "bevy_log",
+ "bevy_math",
+ "bevy_mesh",
+ "bevy_platform",
+ "bevy_reflect",
+ "bevy_time",
+ "bevy_transform",
+ "landmass",
+]
+
+[[package]]
 name = "bevy_light"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1763,15 +1784,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
-name = "bvh2d"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2a56b2e919a2fadaedb1fc194ca730d9adbf030e9e9f26bb9e7d3621c4f6622"
-dependencies = [
- "glam 0.30.10",
-]
-
-[[package]]
 name = "bytemuck"
 version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2234,6 +2246,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "disjoint"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c37b399c91d093763e38c7a57a740e0005e30e5aff7132e791aada5eef3fed99"
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2273,6 +2291,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
+]
+
+[[package]]
+name = "dodgy_2d"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d35627725e918aa4593ca54937cd8ef58078d3b9ab0fd060aee60c9bc3a2050e"
+dependencies = [
+ "glam 0.29.3",
+ "rand 0.9.4",
 ]
 
 [[package]]
@@ -2597,6 +2625,24 @@ dependencies = [
  "futures-task",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "geo"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fc1a1678e54befc9b4bcab6cd43b8e7f834ae8ea121118b0fd8c42747675b4a"
+dependencies = [
+ "earcutr",
+ "float_next_after",
+ "geo-types",
+ "geographiclib-rs",
+ "i_overlay",
+ "log",
+ "num-traits",
+ "robust",
+ "rstar",
+ "spade",
 ]
 
 [[package]]
@@ -3352,6 +3398,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kdtree"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f0a0e9f770b65bac9aad00f97a67ab5c5319effed07f6da385da3c2115e47ba"
+dependencies = [
+ "num-traits",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "khronos-egl"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3367,6 +3423,21 @@ name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
+
+[[package]]
+name = "landmass"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6a89496cbf307f53baa9d6a33e9d1eaa461452afb67e9c59ebc6b9a6a0cf28c"
+dependencies = [
+ "disjoint",
+ "dodgy_2d",
+ "geo 0.31.0",
+ "glam 0.30.10",
+ "kdtree",
+ "slotmap",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "lazy_static"
@@ -4351,23 +4422,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "polyanya"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a1cb0a84a11080ff93d943a023e9e386c34d3dcc3c988bc6785f990b1964277"
-dependencies = [
- "bvh2d",
- "geo",
- "glam 0.30.10",
- "hashbrown 0.16.1",
- "log",
- "rerecast",
- "smallvec",
- "spade",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4705,21 +4759,6 @@ name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
-
-[[package]]
-name = "rerecast"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd207dd0644bd506d8017195865d72274dae648923596438255a0da00836f548"
-dependencies = [
- "anyhow",
- "bevy_reflect",
- "bitflags 2.11.1",
- "glam 0.30.10",
- "slotmap",
- "thiserror 2.0.18",
- "tracing",
-]
 
 [[package]]
 name = "robust"
@@ -5519,12 +5558,12 @@ version = "0.1.0"
 dependencies = [
  "avian2d",
  "bevy",
+ "bevy_landmass",
  "bevy_mesh",
- "geo",
+ "geo 0.32.0",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
  "rand 0.8.6",
- "vleue_navigator",
 ]
 
 [[package]]
@@ -5532,19 +5571,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vleue_navigator"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50c0ffab1d042cfda27adc4c1ce39cc6db9967ab134f32d76b8a9cd6b9c4fa4c"
-dependencies = [
- "avian2d",
- "bevy",
- "itertools 0.14.0",
- "log",
- "polyanya",
-]
 
 [[package]]
 name = "walkdir"

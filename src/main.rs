@@ -1,7 +1,8 @@
-use std::ops::Deref;
-
 use avian2d::prelude::*;
-use bevy::{prelude::*};
+use bevy::prelude::*;
+use bevy_landmass::prelude::*;
+use bevy_landmass::debug::Landmass2dDebugPlugin;
+use bevy_landmass::NavMeshHandle;
 use geo::MultiPolygon;
 use rand::prelude::*;
 
@@ -11,13 +12,9 @@ mod nav;
 mod player;
 mod terrain;
 
-use monster::{MONSTER_RADIUS, Monster /*move_monsters*/};
+use monster::{MONSTER_RADIUS, Monster};
 use player::{MoveTarget, PLAYER_RADIUS, Player, move_player, set_target_on_click};
-use terrain::{Terrain, TerrainGeometry, geometry_to_collider, geometry_to_mesh};
-use vleue_navigator::prelude::*;
-
-#[derive(Component, Debug)]
-struct Obstacle;
+use terrain::{Terrain, TerrainGeometry, geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh};
 
 fn main() {
     App::new()
@@ -30,17 +27,13 @@ fn main() {
                 ..default()
             }),
             avian2d::PhysicsPlugins::default(),
-            vleue_navigator::VleueNavigatorPlugin,
-            // Auto update the navmesh.
-            // Obstacles will be entities with the `Obstacle` marker component,
-            NavmeshUpdaterPlugin::<Collider, Obstacle>::default(),
+            Landmass2dPlugin::default(),
+            Landmass2dDebugPlugin::default(),
         ))
         .add_systems(Startup, setup)
         .add_systems(Update, set_target_on_click)
         .add_systems(Update, move_player)
-        .add_systems(Update, nav::move_navigator)
-        .add_systems(Update, nav::refresh_path)
-        .add_systems(Update, display_mesh)
+        .add_systems(Update, nav::apply_agent_velocity)
         .insert_resource(Gravity::ZERO)
         .run();
 }
@@ -49,6 +42,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut nav_meshes: ResMut<Assets<NavMesh2d>>,
     window: Single<&Window>,
 ) {
     commands.spawn(Camera2d);
@@ -57,33 +51,25 @@ fn setup(
     let window_width = window.width();
     let window_height = window.height();
 
-    commands.spawn((
-        NavMeshSettings {
-            // Define the outer borders of the navmesh.
-            fixed: Triangulation::from_outer_edges(&[
-                vec2(-window_width, -window_height),
-                vec2(window_width, -window_height),
-                vec2(window_width, window_height),
-                vec2(-window_width, window_height),
-            ]),
-            simplify: 0.01,
-            ..default()
-        },
-        // Mark it for update as soon as obstacles are changed.
-        // Other modes can be debounced or manually triggered.
-        NavMeshUpdateMode::Direct,
-    ));
+    // Create the archipelago (the "world" for landmass pathfinding)
+    let archipelago_id = commands
+        .spawn(Archipelago2d::new(
+            ArchipelagoOptions::from_agent_radius(MONSTER_RADIUS),
+        ))
+        .id();
 
     let terrain_geometry = if true {
         // Create terrain geometry
         TerrainGeometry::new(window_width, window_height)
     } else {
+        let room = geo::geometry::Rect::new(
+            (0.0, 0.0),
+            (window_width, window_width),
+        );
         TerrainGeometry {
             polygon: MultiPolygon::empty(),
-            rooms: vec![geo::geometry::Rect::new(
-                (0.0, 0.0),
-                (window_width, window_width),
-            )],
+            playable_area: MultiPolygon::new(vec![room.to_polygon()]),
+            rooms: vec![room],
         }
     };
 
@@ -97,8 +83,22 @@ fn setup(
         Transform::default(),
         terrain_collider,
         RigidBody::Static,
-        Obstacle,
         Terrain,
+    ));
+
+    // Build the navigation mesh from the playable area
+    let valid_nav_mesh = playable_area_to_nav_mesh(&terrain_geometry.playable_area);
+    let nav_mesh_handle = nav_meshes.add(NavMesh2d {
+        nav_mesh: valid_nav_mesh,
+    });
+
+    // Spawn the island (navigation surface) for landmass
+    commands.spawn((
+        Island2dBundle {
+            island: Island,
+            archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
+            nav_mesh: NavMeshHandle(nav_mesh_handle.clone()),
+        },
     ));
 
     let mut rng = rand::thread_rng();
@@ -146,56 +146,16 @@ fn setup(
             Transform::from_translation(position.extend(0.0)),
             RigidBody::Dynamic,
             Collider::circle(MONSTER_RADIUS),
-            nav::Navigator {
-                speed: crate::monster::MONSTER_SPEED,
-                current: Vec2::ZERO, // TODO: allow omitting these two
-                next: vec![],
-                target: nav::Target::Follow(player),
+            Agent2dBundle {
+                agent: Default::default(),
+                settings: AgentSettings {
+                    radius: MONSTER_RADIUS,
+                    desired_speed: monster::MONSTER_SPEED,
+                    max_speed: monster::MONSTER_SPEED * 1.2,
+                },
+                archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
             },
+            AgentTarget2d::Entity(player),
         ));
     }
-}
-
-fn display_mesh(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    navmeshes: Res<Assets<NavMesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    mut current_mesh_entity: Local<Option<Entity>>,
-    navmesh: Single<(&ManagedNavMesh, Ref<NavMeshStatus>)>,
-) {
-    let (navmesh_handle, status) = navmesh.deref();
-    if !status.is_changed() || **status != NavMeshStatus::Built {
-        return;
-    }
-
-    let Some(navmesh) = navmeshes.get(*navmesh_handle) else {
-        return;
-    };
-    if let Some(entity) = *current_mesh_entity {
-        commands.entity(entity).despawn();
-    }
-
-    *current_mesh_entity = Some(
-        commands
-            .spawn((
-                Mesh2d(meshes.add(navmesh.to_mesh())),
-                MeshMaterial2d(materials.add(ColorMaterial::from(Color::Srgba(Srgba {
-                    red: 0.0,
-                    green: 0.0,
-                    blue: 0.5,
-                    alpha: 0.5,
-                })))),
-            ))
-            .with_children(|main_mesh| {
-                main_mesh.spawn((
-                    Mesh2d(meshes.add(navmesh.to_wireframe_mesh())),
-                    Transform::from_translation(Vec3::new(0.0, 0.0, 0.1)),
-                    MeshMaterial2d(materials.add(ColorMaterial::from(Color::Srgba(
-                        bevy::color::palettes::tailwind::TEAL_300,
-                    )))),
-                ));
-            })
-            .id(),
-    );
 }

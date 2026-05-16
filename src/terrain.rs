@@ -1,10 +1,12 @@
 use crate::bsp::{Partition, partition_space};
 use avian2d::prelude::*;
 use bevy::prelude::*;
+use bevy_landmass::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
 use geo::algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay};
 use geo::{BooleanOps, LineString, MultiPolygon, Polygon, Rect, Translate};
 use rand::prelude::*;
+use std::sync::Arc;
 
 pub const MARGIN: f32 = 10.0;
 pub const PADDING: f32 = 20.0;
@@ -14,6 +16,7 @@ pub struct Terrain;
 
 pub struct TerrainGeometry {
     pub polygon: MultiPolygon<f32>,
+    pub playable_area: MultiPolygon<f32>,
     pub rooms: Vec<Rect<f32>>,
 }
 
@@ -43,6 +46,9 @@ impl TerrainGeometry {
 
         let offset_x = -width / 2.0;
         let offset_y = -height / 2.0;
+
+        let playable_area = playable_area.translate(offset_x, offset_y);
+
         let rooms = rooms
             .into_iter()
             .map(|r| r.translate(offset_x, offset_y))
@@ -50,6 +56,7 @@ impl TerrainGeometry {
 
         TerrainGeometry {
             polygon: geometry,
+            playable_area,
             rooms,
         }
     }
@@ -402,6 +409,67 @@ pub fn geometry_to_collider(geometry: &MultiPolygon<f32>) -> Collider {
     }
 
     Collider::polyline(vertices, Some(indices))
+}
+
+/// Convert the playable area into a landmass NavigationMesh2d.
+/// Triangulates each polygon and collects vertices/polygons for pathfinding.
+pub fn playable_area_to_nav_mesh(
+    playable_area: &MultiPolygon<f32>,
+) -> Arc<ValidNavigationMesh2d> {
+    let mut vertices: Vec<Vec2> = Vec::new();
+    let mut polygons: Vec<Vec<usize>> = Vec::new();
+
+    // Map from quantized vertex position to index, for deduplication.
+    // This ensures shared edges between triangles are recognized as connected.
+    let mut vertex_map: std::collections::HashMap<(i64, i64), usize> =
+        std::collections::HashMap::new();
+
+    let quantize = |x: f32, y: f32| -> (i64, i64) {
+        // Quantize to ~0.001 precision to merge near-identical vertices
+        ((x * 1000.0).round() as i64, (y * 1000.0).round() as i64)
+    };
+
+    let mut get_or_insert_vertex = |x: f32, y: f32| -> usize {
+        let key = quantize(x, y);
+        if let Some(&idx) = vertex_map.get(&key) {
+            idx
+        } else {
+            let idx = vertices.len();
+            vertices.push(Vec2::new(x, y));
+            vertex_map.insert(key, idx);
+            idx
+        }
+    };
+
+    for polygon in playable_area.iter() {
+        let triangulation = polygon
+            .constrained_triangulation(DelaunayTriangulationConfig::default())
+            .unwrap();
+        for triangle in &triangulation {
+            let v1 = triangle.v1();
+            let v2 = triangle.v2();
+            let v3 = triangle.v3();
+
+            let i0 = get_or_insert_vertex(v1.x, v1.y);
+            let i1 = get_or_insert_vertex(v2.x, v2.y);
+            let i2 = get_or_insert_vertex(v3.x, v3.y);
+
+            // landmass expects counter-clockwise polygons.
+            // geo's constrained_triangulation produces CCW triangles already.
+            polygons.push(vec![i0, i1, i2]);
+        }
+    }
+
+    let polygon_type_indices = vec![0; polygons.len()];
+
+    let nav_mesh = NavigationMesh2d {
+        vertices,
+        polygons,
+        polygon_type_indices,
+        height_mesh: None,
+    };
+
+    Arc::new(nav_mesh.validate().expect("playable area nav mesh should be valid"))
 }
 
 #[cfg(test)]

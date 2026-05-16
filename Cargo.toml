@@ -9,10 +9,7 @@ avian2d = "0.5"
 bevy_mesh = "0.18"
 geo = "0.32"
 rand = "0.8"
-vleue_navigator = { version = "0.15", features = [
-    "avian2d",
-    "debug-with-gizmos",
-] } # needs avian2d to be 0.5
+bevy_landmass = "0.11.1"
 
 [profile.dev]
 opt-level = 1 # Suggested by the Bevy docs
