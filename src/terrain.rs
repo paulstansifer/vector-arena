@@ -3,8 +3,7 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
 use geo::algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay};
-use geo::geometry::MultiPolygon;
-use geo::{BooleanOps, Rect, Translate};
+use geo::{BooleanOps, LineString, MultiPolygon, Polygon, Rect, Translate};
 use rand::prelude::*;
 
 pub const MARGIN: f32 = 10.0;
@@ -132,18 +131,12 @@ fn render(
             }
             PartitionRole::Corridor => {
                 let connections = partition_connections(partition);
-                if connections.len() == 2 {
-                    let corridor = connect_two_points(connections[0], connections[1]);
+                let center = partition_center(partition);
+                region = region.union(&bevel_at_point(center, CORRIDOR_WIDTH));
+                for connection in connections {
+                    let corridor = connect_point_to_center(connection, center);
                     for poly in corridor {
                         region = region.union(&poly);
-                    }
-                } else {
-                    let center = partition_center(partition);
-                    for connection in connections {
-                        let corridor = connect_point_to_center(connection, center);
-                        for poly in corridor {
-                            region = region.union(&poly);
-                        }
                     }
                 }
             }
@@ -249,6 +242,10 @@ fn connect_room_to_connection(
                 corridor_width,
             ));
             if (room_entry.1 - connection.y).abs() > 0.0 {
+                polygons.push(bevel_at_point(
+                    (room_entry.0, connection.y),
+                    corridor_width,
+                ));
                 polygons.push(rect_for_segment(
                     (room_entry.0, connection.y),
                     room_entry,
@@ -263,6 +260,10 @@ fn connect_room_to_connection(
                 corridor_width,
             ));
             if (room_entry.0 - connection.x).abs() > 0.0 {
+                polygons.push(bevel_at_point(
+                    (connection.x, room_entry.1),
+                    corridor_width,
+                ));
                 polygons.push(rect_for_segment(
                     (connection.x, room_entry.1),
                     room_entry,
@@ -273,28 +274,6 @@ fn connect_room_to_connection(
     }
 
     polygons
-}
-
-fn connect_two_points(a: ConnectionPoint, b: ConnectionPoint) -> Vec<geo::Polygon<f32>> {
-    if (a.x - b.x).abs() < f32::EPSILON {
-        return vec![rect_for_segment((a.x, a.y), (b.x, b.y), CORRIDOR_WIDTH)];
-    }
-    if (a.y - b.y).abs() < f32::EPSILON {
-        return vec![rect_for_segment((a.x, a.y), (b.x, b.y), CORRIDOR_WIDTH)];
-    }
-
-    let horizontal_first = (a.x - b.x).abs() >= (a.y - b.y).abs();
-    if horizontal_first {
-        vec![
-            rect_for_segment((a.x, a.y), (b.x, a.y), CORRIDOR_WIDTH),
-            rect_for_segment((b.x, a.y), (b.x, b.y), CORRIDOR_WIDTH),
-        ]
-    } else {
-        vec![
-            rect_for_segment((a.x, a.y), (a.x, b.y), CORRIDOR_WIDTH),
-            rect_for_segment((a.x, b.y), (b.x, b.y), CORRIDOR_WIDTH),
-        ]
-    }
 }
 
 fn connect_point_to_center(
@@ -316,7 +295,10 @@ fn connect_point_to_center(
         )];
     }
 
-    let horizontal_first = (connection.x - center.0).abs() >= (connection.y - center.1).abs();
+    let horizontal_first = match connection.side {
+        ConnectionSide::Left | ConnectionSide::Right => true,
+        ConnectionSide::Bottom | ConnectionSide::Top => false,
+    };
     if horizontal_first {
         vec![
             rect_for_segment(
@@ -324,6 +306,7 @@ fn connect_point_to_center(
                 (center.0, connection.y),
                 CORRIDOR_WIDTH,
             ),
+            bevel_at_point((center.0, connection.y), CORRIDOR_WIDTH),
             rect_for_segment((center.0, connection.y), center, CORRIDOR_WIDTH),
         ]
     } else {
@@ -333,9 +316,29 @@ fn connect_point_to_center(
                 (connection.x, center.1),
                 CORRIDOR_WIDTH,
             ),
+            bevel_at_point((connection.x, center.1), CORRIDOR_WIDTH),
             rect_for_segment((connection.x, center.1), center, CORRIDOR_WIDTH),
         ]
     }
+}
+
+fn bevel_at_point(p: (f32, f32), width: f32) -> Polygon<f32> {
+    let h = width / 2.0;
+    let q = width / 4.0;
+    Polygon::new(
+        LineString::from(vec![
+            (p.0 - h, p.1 - q),
+            (p.0 - q, p.1 - h),
+            (p.0 + q, p.1 - h),
+            (p.0 + h, p.1 - q),
+            (p.0 + h, p.1 + q),
+            (p.0 + q, p.1 + h),
+            (p.0 - q, p.1 + h),
+            (p.0 - h, p.1 + q),
+            (p.0 - h, p.1 - q),
+        ]),
+        vec![],
+    )
 }
 
 fn rect_for_segment(a: (f32, f32), b: (f32, f32), width: f32) -> geo::Polygon<f32> {

@@ -21,7 +21,7 @@ pub enum Target {
 }
 
 pub fn refresh_path(
-    mut navigator: Query<(Entity, &Transform, &mut Navigator)>,
+    mut navigator: Query<(&Transform, &mut Navigator)>,
     targets: Query<&Transform>,
     mut navmeshes: ResMut<Assets<NavMesh>>,
     navmesh: Single<(&ManagedNavMesh, Ref<NavMeshStatus>)>,
@@ -35,7 +35,7 @@ pub fn refresh_path(
         panic!("Need a navmesh!")
     };
 
-    for (entity, transform, mut navigator) in &mut navigator {
+    for (transform, mut navigator) in &mut navigator {
         let dest_loc = match navigator.target {
             Target::ILikeItHere => continue,
             Target::Follow(entity) => {
@@ -75,11 +75,8 @@ pub fn refresh_path(
     }
 }
 
-pub fn move_navigator(
-    mut navigator: Query<(&mut Transform, &mut Navigator, Entity)>,
-    time: Res<Time>,
-) {
-    for (mut transform, mut nav, entity) in navigator.iter_mut() {
+pub fn move_navigator(mut navigator: Query<(&mut Transform, &mut Navigator)>, time: Res<Time>) {
+    for (mut transform, mut nav) in navigator.iter_mut() {
         let move_direction = nav.current - transform.translation.xy();
         transform.translation +=
             (move_direction.normalize() * time.delta_secs() * nav.speed).extend(0.0);
