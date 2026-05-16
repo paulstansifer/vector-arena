@@ -72,18 +72,7 @@ fn setup(
         )))
         .id();
 
-    let terrain_geometry = if true {
-        // Create terrain geometry
-        TerrainGeometry::new(window_width, window_height)
-    } else {
-        let room = geo::geometry::Rect::new((0.0, 0.0), (window_width, window_width));
-        TerrainGeometry {
-            polygon: MultiPolygon::empty(),
-            playable_area: MultiPolygon::new(vec![room.to_polygon()]),
-            rooms: vec![room],
-            doors: vec![],
-        }
-    };
+    let terrain_geometry = TerrainGeometry::new(window_width, window_height);
 
     // Spawn terrain entity with mesh and collider
     let terrain_mesh = geometry_to_mesh(&terrain_geometry.polygon);

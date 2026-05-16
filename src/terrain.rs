@@ -37,7 +37,28 @@ impl TerrainGeometry {
         };
 
         let partitions = partition_space(bounds, &mut rng);
-        let allocated_partitions = allocate_roles(partitions, &mut rng);
+        let mut allocated_partitions = allocate_roles(partitions, &mut rng);
+
+        // Propagate double_width between adjacent corridors
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for i in 0..allocated_partitions.len() {
+                if let PartitionRole::Corridor { double_width: true } = allocated_partitions[i].1 {
+                    for j in 0..allocated_partitions.len() {
+                        if i == j {
+                            continue;
+                        }
+                        if let PartitionRole::Corridor { double_width: false } = allocated_partitions[j].1 {
+                            if partitions_share_connection(&allocated_partitions[i].0, &allocated_partitions[j].0) {
+                                allocated_partitions[j].1 = PartitionRole::Corridor { double_width: true };
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         let (rooms, playable_area, doors) = render(&allocated_partitions, &mut rng);
 
@@ -85,7 +106,7 @@ const CORRIDOR_PROB: f32 = 0.45; // otherwise, the probability it will be a corr
 
 enum PartitionRole {
     Room,
-    Corridor,
+    Corridor { double_width: bool },
     Empty,
 }
 
@@ -106,7 +127,8 @@ fn allocate_roles(p: Vec<Partition>, rng: &mut ThreadRng) -> Vec<(Partition, Par
                 }
                 2 => {
                     if rng.gen_bool(CORRIDOR_PROB.into()) {
-                        PartitionRole::Corridor
+                        let double_width = rng.gen_bool(0.15);
+                        PartitionRole::Corridor { double_width }
                     } else {
                         PartitionRole::Room
                     }
@@ -126,6 +148,35 @@ fn union_all(base: &mut MultiPolygon<f32>, polys: Vec<Polygon<f32>>) {
     for poly in polys {
         *base = base.union(&poly);
     }
+}
+
+fn partitions_share_connection(p1: &Partition, p2: &Partition) -> bool {
+    let conns1 = partition_connections(p1);
+    let conns2 = partition_connections(p2);
+    for c1 in &conns1 {
+        for c2 in &conns2 {
+            if (c1.x - c2.x).abs() < 0.1 && (c1.y - c2.y).abs() < 0.1 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn is_double_width_corridor_connection(
+    connection: &ConnectionPoint,
+    bsp: &[(Partition, PartitionRole)],
+) -> bool {
+    for (partition, role) in bsp {
+        if let PartitionRole::Corridor { double_width: true } = role {
+            for conn in partition_connections(partition) {
+                if (conn.x - connection.x).abs() < 0.1 && (conn.y - connection.y).abs() < 0.1 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 // For rooms, shrink at least PADDING away from the edges (respecting MIN_ROOM_SIZE), adding hallways out to the edge.
@@ -167,9 +218,19 @@ fn render(
                 rooms.push(room);
 
                 for connection in partition_connections(partition).into_iter().filter(is_live) {
-                    union_all(&mut region, connect_room_to_connection(&room, connection));
+                    let is_double = is_double_width_corridor_connection(&connection, bsp);
+                    let width = if is_double {
+                        CORRIDOR_WIDTH * 2.0
+                    } else {
+                        CORRIDOR_WIDTH
+                    };
+                    union_all(
+                        &mut region,
+                        connect_room_to_connection(&room, connection, width),
+                    );
 
-                    if rng.gen_bool(0.25) {
+                    let door_prob = if is_double { 0.75 } else { 0.25 };
+                    if rng.gen_bool(door_prob) {
                         let room_entry = match connection.side {
                             ConnectionSide::Left => {
                                 (room.min().x, connection.y.clamp(room.min().y, room.max().y))
@@ -185,11 +246,22 @@ fn render(
                             }
                         };
 
-                        doors.push(create_door(connection.side, room_entry));
+                        if is_double {
+                            let (d1, d2) = create_double_door(connection.side, room_entry);
+                            doors.push(d1);
+                            doors.push(d2);
+                        } else {
+                            doors.push(create_door(connection.side, room_entry));
+                        }
                     }
                 }
             }
-            PartitionRole::Corridor => {
+            PartitionRole::Corridor { double_width } => {
+                let width = if *double_width {
+                    CORRIDOR_WIDTH * 2.0
+                } else {
+                    CORRIDOR_WIDTH
+                };
                 let connections: Vec<_> = partition_connections(partition)
                     .into_iter()
                     .filter(is_live)
@@ -201,12 +273,15 @@ fn render(
                 {
                     union_all(
                         &mut region,
-                        connect_adjacent(connections[0], connections[1]),
+                        connect_adjacent(connections[0], connections[1], width),
                     );
                 } else if !connections.is_empty() {
-                    region = region.union(&bevel_at_point(center, CORRIDOR_WIDTH));
+                    region = region.union(&bevel_at_point(center, width));
                     for connection in connections {
-                        union_all(&mut region, connect_point_to_center(connection, center));
+                        union_all(
+                            &mut region,
+                            connect_point_to_center(connection, center, width),
+                        );
                     }
                 }
             }
@@ -271,6 +346,114 @@ fn create_door(side: ConnectionSide, room_entry: (f32, f32)) -> DoorGeometry {
     DoorGeometry {
         rect: Rect::new((min_x, min_y), (max_x, max_y)),
         hinge,
+    }
+}
+
+fn create_double_door(
+    side: ConnectionSide,
+    room_entry: (f32, f32),
+) -> (DoorGeometry, DoorGeometry) {
+    let thickness = 5.0;
+    let w = CORRIDOR_WIDTH * 2.0;
+    let panel_length = (w - 8.0) / 2.0; // 31.0
+
+    match side {
+        ConnectionSide::Left => {
+            let x0 = room_entry.0 - thickness;
+            let x1 = room_entry.0;
+            // Panel 1: bottom panel
+            let y0_1 = room_entry.1 - (w / 2.0 - 2.0); // room_entry.1 - 33.0
+            let y1_1 = y0_1 + panel_length; // room_entry.1 - 2.0
+            let hinge_1 = (x0 + thickness / 2.0, y0_1); // hinged at the bottom end of panel 1
+
+            // Panel 2: top panel
+            let y0_2 = room_entry.1 + 2.0;
+            let y1_2 = y0_2 + panel_length;
+            let hinge_2 = (x0 + thickness / 2.0, y1_2); // hinged at the top end of panel 2
+
+            (
+                DoorGeometry {
+                    rect: Rect::new((x0, y0_1), (x1, y1_1)),
+                    hinge: hinge_1,
+                },
+                DoorGeometry {
+                    rect: Rect::new((x0, y0_2), (x1, y1_2)),
+                    hinge: hinge_2,
+                },
+            )
+        }
+        ConnectionSide::Right => {
+            let x0 = room_entry.0;
+            let x1 = room_entry.0 + thickness;
+            // Panel 1: bottom panel
+            let y0_1 = room_entry.1 - (w / 2.0 - 2.0);
+            let y1_1 = y0_1 + panel_length;
+            let hinge_1 = (x0 + thickness / 2.0, y0_1);
+
+            // Panel 2: top panel
+            let y0_2 = room_entry.1 + 2.0;
+            let y1_2 = y0_2 + panel_length;
+            let hinge_2 = (x0 + thickness / 2.0, y1_2);
+
+            (
+                DoorGeometry {
+                    rect: Rect::new((x0, y0_1), (x1, y1_1)),
+                    hinge: hinge_1,
+                },
+                DoorGeometry {
+                    rect: Rect::new((x0, y0_2), (x1, y1_2)),
+                    hinge: hinge_2,
+                },
+            )
+        }
+        ConnectionSide::Bottom => {
+            let y0 = room_entry.1 - thickness;
+            let y1 = room_entry.1;
+            // Panel 1: left panel
+            let x0_1 = room_entry.0 - (w / 2.0 - 2.0);
+            let x1_1 = x0_1 + panel_length;
+            let hinge_1 = (x0_1, y0 + thickness / 2.0);
+
+            // Panel 2: right panel
+            let x0_2 = room_entry.0 + 2.0;
+            let x1_2 = x0_2 + panel_length;
+            let hinge_2 = (x1_2, y0 + thickness / 2.0);
+
+            (
+                DoorGeometry {
+                    rect: Rect::new((x0_1, y0), (x1_1, y1)),
+                    hinge: hinge_1,
+                },
+                DoorGeometry {
+                    rect: Rect::new((x0_2, y0), (x1_2, y1)),
+                    hinge: hinge_2,
+                },
+            )
+        }
+        ConnectionSide::Top => {
+            let y0 = room_entry.1;
+            let y1 = room_entry.1 + thickness;
+            // Panel 1: left panel
+            let x0_1 = room_entry.0 - (w / 2.0 - 2.0);
+            let x1_1 = x0_1 + panel_length;
+            let hinge_1 = (x0_1, y0 + thickness / 2.0);
+
+            // Panel 2: right panel
+            let x0_2 = room_entry.0 + 2.0;
+            let x1_2 = x0_2 + panel_length;
+            let hinge_2 = (x1_2, y0 + thickness / 2.0);
+
+            (
+                DoorGeometry {
+                    rect: Rect::new((x0_1, y0), (x1_1, y1)),
+                    hinge: hinge_1,
+                },
+                DoorGeometry {
+                    rect: Rect::new((x0_2, y0), (x1_2, y1)),
+                    hinge: hinge_2,
+                },
+            )
+        }
     }
 }
 
@@ -347,6 +530,7 @@ fn partition_center(partition: &Partition) -> (f32, f32) {
 fn connect_room_to_connection(
     room: &Rect<f32>,
     connection: ConnectionPoint,
+    width: f32,
 ) -> Vec<geo::Polygon<f32>> {
     let room_entry = match connection.side {
         ConnectionSide::Left => (room.min().x, connection.y.clamp(room.min().y, room.max().y)),
@@ -362,7 +546,7 @@ fn connect_room_to_connection(
         (connection.x, room_entry.1)
     };
 
-    let mut polygons = vec![rect_for_segment(conn_pt, elbow, CORRIDOR_WIDTH)];
+    let mut polygons = vec![rect_for_segment(conn_pt, elbow, width)];
 
     let needs_bend = if connection.side.is_vertical() {
         (room_entry.1 - connection.y).abs() > f32::EPSILON
@@ -370,33 +554,34 @@ fn connect_room_to_connection(
         (room_entry.0 - connection.x).abs() > f32::EPSILON
     };
     if needs_bend {
-        polygons.push(bevel_at_point(elbow, CORRIDOR_WIDTH));
-        polygons.push(rect_for_segment(elbow, room_entry, CORRIDOR_WIDTH));
+        polygons.push(bevel_at_point(elbow, width));
+        polygons.push(rect_for_segment(elbow, room_entry, width));
     }
 
     polygons
 }
 
-fn connect_adjacent(a: ConnectionPoint, b: ConnectionPoint) -> Vec<Polygon<f32>> {
+fn connect_adjacent(a: ConnectionPoint, b: ConnectionPoint, width: f32) -> Vec<Polygon<f32>> {
     let (h_conn, v_conn) = if a.side.is_vertical() { (a, b) } else { (b, a) };
     let elbow = (v_conn.x, h_conn.y);
     vec![
-        rect_for_segment((h_conn.x, h_conn.y), elbow, CORRIDOR_WIDTH),
-        bevel_at_point(elbow, CORRIDOR_WIDTH),
-        rect_for_segment(elbow, (v_conn.x, v_conn.y), CORRIDOR_WIDTH),
+        rect_for_segment((h_conn.x, h_conn.y), elbow, width),
+        bevel_at_point(elbow, width),
+        rect_for_segment(elbow, (v_conn.x, v_conn.y), width),
     ]
 }
 
 fn connect_point_to_center(
     connection: ConnectionPoint,
     center: (f32, f32),
+    width: f32,
 ) -> Vec<geo::Polygon<f32>> {
     let conn_pt = (connection.x, connection.y);
 
     if (connection.x - center.0).abs() < f32::EPSILON
         || (connection.y - center.1).abs() < f32::EPSILON
     {
-        return vec![rect_for_segment(conn_pt, center, CORRIDOR_WIDTH)];
+        return vec![rect_for_segment(conn_pt, center, width)];
     }
 
     let elbow = if connection.side.is_vertical() {
@@ -406,9 +591,9 @@ fn connect_point_to_center(
     };
 
     vec![
-        rect_for_segment(conn_pt, elbow, CORRIDOR_WIDTH),
-        bevel_at_point(elbow, CORRIDOR_WIDTH),
-        rect_for_segment(elbow, center, CORRIDOR_WIDTH),
+        rect_for_segment(conn_pt, elbow, width),
+        bevel_at_point(elbow, width),
+        rect_for_segment(elbow, center, width),
     ]
 }
 

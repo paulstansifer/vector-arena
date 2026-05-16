@@ -97,7 +97,7 @@ pub fn move_player(
         let direction = if let Some(dv) = desired_velocity {
             dv.velocity()
         } else {
-            move_target.destination - current
+            panic!("no desired velocity")
         };
 
         // speed up after starting to move:
