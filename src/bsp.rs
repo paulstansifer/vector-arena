@@ -15,6 +15,13 @@ pub struct Partition {
 }
 
 impl Partition {
+    pub fn connection_count(&self) -> usize {
+        self.horz_conn.0.len()
+            + self.horz_conn.1.len()
+            + self.vert_conn.0.len()
+            + self.vert_conn.1.len()
+    }
+
     fn transpose(&self) -> Self {
         Partition {
             x: self.y,
@@ -52,18 +59,10 @@ fn split_partition(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition
         return None;
     }
 
-    let axis = if width >= height {
-        if can_split_vertical {
-            SplitAxis::Vertical
-        } else {
-            SplitAxis::Horizontal
-        }
-    } else {
-        if can_split_horizontal {
-            SplitAxis::Horizontal
-        } else {
-            SplitAxis::Vertical
-        }
+    let axis = match (can_split_vertical, can_split_horizontal, width >= height) {
+        (true, _, true) | (true, false, _) => SplitAxis::Vertical,
+        (_, true, _) => SplitAxis::Horizontal,
+        _ => unreachable!(), // both false already returned None above
     };
 
     match axis {
@@ -78,7 +77,6 @@ enum SplitAxis {
     Horizontal,
 }
 
-// TODO: Maybe we should write `fn transpose` and use that to simplify this:
 
 fn split_vertical(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition, Partition)> {
     split_horizontal(&bounds.transpose(), rng).map(|(a, b)| (a.transpose(), b.transpose()))

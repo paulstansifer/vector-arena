@@ -30,9 +30,9 @@ impl TerrainGeometry {
         };
 
         let partitions = partition_space(bounds, &mut rng);
-        let allocated_patitions = allocate_roles(partitions, &mut rng);
+        let allocated_partitions = allocate_roles(partitions, &mut rng);
 
-        let (rooms, playable_area) = render(&allocated_patitions, &mut rng);
+        let (rooms, playable_area) = render(&allocated_partitions);
 
         // The terrain is the bounds minus the playable area
         let earth = Rect::<f32>::new((0.0, 0.0), (width, height));
@@ -68,9 +68,7 @@ enum PartitionRole {
 fn allocate_roles(p: Vec<Partition>, rng: &mut ThreadRng) -> Vec<(Partition, PartitionRole)> {
     p.into_iter()
         .map(|partition| {
-            let horz_count = partition.horz_conn.0.len() + partition.horz_conn.1.len();
-            let vert_count = partition.vert_conn.0.len() + partition.vert_conn.1.len();
-            let connection_count = horz_count + vert_count;
+            let connection_count = partition.connection_count();
 
             let role = match connection_count {
                 0 => panic!("Shouldn't be possible to generate an unconnected partition"),
@@ -99,12 +97,17 @@ fn allocate_roles(p: Vec<Partition>, rng: &mut ThreadRng) -> Vec<(Partition, Par
 const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
 pub const CORRIDOR_WIDTH: f32 = 35.0;
 
+fn union_all(base: &mut MultiPolygon<f32>, polys: Vec<Polygon<f32>>) {
+    for poly in polys {
+        *base = base.union(&poly);
+    }
+}
+
 // For rooms, shrink at least PADDING away from the edges (respecting MIN_ROOM_SIZE), adding hallways out to the edge.
 // For corridors, if there are two connections, draw a straight hallway between them; otherwise, draw hallways from all connections to the center point.
 // Returns rooms and a multipolygon representing passable space.
 fn render(
     bsp: &[(Partition, PartitionRole)],
-    _rng: &mut ThreadRng,
 ) -> (Vec<Rect<f32>>, MultiPolygon<f32>) {
     let mut rooms = Vec::new();
     let mut playables = MultiPolygon::new(vec![]);
@@ -113,20 +116,14 @@ fn render(
         let mut region = MultiPolygon::new(vec![]);
 
         match role {
-            PartitionRole::Empty => {
-                continue;
-            }
+            PartitionRole::Empty => continue,
             PartitionRole::Room => {
                 let room = shrink_room(partition);
-                let room_poly = room.to_polygon();
-                region = region.union(&room_poly);
+                region = region.union(&room.to_polygon());
                 rooms.push(room);
 
                 for connection in partition_connections(partition) {
-                    let hallway = connect_room_to_connection(&room, connection);
-                    for poly in hallway {
-                        region = region.union(&poly);
-                    }
+                    union_all(&mut region, connect_room_to_connection(&room, connection));
                 }
             }
             PartitionRole::Corridor => {
@@ -136,17 +133,11 @@ fn render(
                 if connections.len() == 2
                     && connections[0].side.is_vertical() != connections[1].side.is_vertical()
                 {
-                    let corridor = connect_adjacent(connections[0], connections[1]);
-                    for poly in corridor {
-                        region = region.union(&poly);
-                    }
+                    union_all(&mut region, connect_adjacent(connections[0], connections[1]));
                 } else {
                     region = region.union(&bevel_at_point(center, CORRIDOR_WIDTH));
                     for connection in connections {
-                        let corridor = connect_point_to_center(connection, center);
-                        for poly in corridor {
-                            region = region.union(&poly);
-                        }
+                        union_all(&mut region, connect_point_to_center(connection, center));
                     }
                 }
             }
@@ -247,46 +238,23 @@ fn connect_room_to_connection(
         ConnectionSide::Top => (connection.x.clamp(room.min().x, room.max().x), room.max().y),
     };
 
-    let corridor_width = CORRIDOR_WIDTH;
-    let mut polygons = Vec::new();
+    let conn_pt = (connection.x, connection.y);
+    let elbow = if connection.side.is_vertical() {
+        (room_entry.0, connection.y)
+    } else {
+        (connection.x, room_entry.1)
+    };
 
-    match connection.side {
-        ConnectionSide::Left | ConnectionSide::Right => {
-            polygons.push(rect_for_segment(
-                (connection.x, connection.y),
-                (room_entry.0, connection.y),
-                corridor_width,
-            ));
-            if (room_entry.1 - connection.y).abs() > 0.0 {
-                polygons.push(bevel_at_point(
-                    (room_entry.0, connection.y),
-                    corridor_width,
-                ));
-                polygons.push(rect_for_segment(
-                    (room_entry.0, connection.y),
-                    room_entry,
-                    corridor_width,
-                ));
-            }
-        }
-        ConnectionSide::Bottom | ConnectionSide::Top => {
-            polygons.push(rect_for_segment(
-                (connection.x, connection.y),
-                (connection.x, room_entry.1),
-                corridor_width,
-            ));
-            if (room_entry.0 - connection.x).abs() > 0.0 {
-                polygons.push(bevel_at_point(
-                    (connection.x, room_entry.1),
-                    corridor_width,
-                ));
-                polygons.push(rect_for_segment(
-                    (connection.x, room_entry.1),
-                    room_entry,
-                    corridor_width,
-                ));
-            }
-        }
+    let mut polygons = vec![rect_for_segment(conn_pt, elbow, CORRIDOR_WIDTH)];
+
+    let needs_bend = if connection.side.is_vertical() {
+        (room_entry.1 - connection.y).abs() > f32::EPSILON
+    } else {
+        (room_entry.0 - connection.x).abs() > f32::EPSILON
+    };
+    if needs_bend {
+        polygons.push(bevel_at_point(elbow, CORRIDOR_WIDTH));
+        polygons.push(rect_for_segment(elbow, room_entry, CORRIDOR_WIDTH));
     }
 
     polygons
@@ -306,46 +274,25 @@ fn connect_point_to_center(
     connection: ConnectionPoint,
     center: (f32, f32),
 ) -> Vec<geo::Polygon<f32>> {
-    if (connection.x - center.0).abs() < f32::EPSILON {
-        return vec![rect_for_segment(
-            (connection.x, connection.y),
-            center,
-            CORRIDOR_WIDTH,
-        )];
-    }
-    if (connection.y - center.1).abs() < f32::EPSILON {
-        return vec![rect_for_segment(
-            (connection.x, connection.y),
-            center,
-            CORRIDOR_WIDTH,
-        )];
+    let conn_pt = (connection.x, connection.y);
+
+    if (connection.x - center.0).abs() < f32::EPSILON
+        || (connection.y - center.1).abs() < f32::EPSILON
+    {
+        return vec![rect_for_segment(conn_pt, center, CORRIDOR_WIDTH)];
     }
 
-    let horizontal_first = match connection.side {
-        ConnectionSide::Left | ConnectionSide::Right => true,
-        ConnectionSide::Bottom | ConnectionSide::Top => false,
-    };
-    if horizontal_first {
-        vec![
-            rect_for_segment(
-                (connection.x, connection.y),
-                (center.0, connection.y),
-                CORRIDOR_WIDTH,
-            ),
-            bevel_at_point((center.0, connection.y), CORRIDOR_WIDTH),
-            rect_for_segment((center.0, connection.y), center, CORRIDOR_WIDTH),
-        ]
+    let elbow = if connection.side.is_vertical() {
+        (center.0, connection.y)
     } else {
-        vec![
-            rect_for_segment(
-                (connection.x, connection.y),
-                (connection.x, center.1),
-                CORRIDOR_WIDTH,
-            ),
-            bevel_at_point((connection.x, center.1), CORRIDOR_WIDTH),
-            rect_for_segment((connection.x, center.1), center, CORRIDOR_WIDTH),
-        ]
-    }
+        (connection.x, center.1)
+    };
+
+    vec![
+        rect_for_segment(conn_pt, elbow, CORRIDOR_WIDTH),
+        bevel_at_point(elbow, CORRIDOR_WIDTH),
+        rect_for_segment(elbow, center, CORRIDOR_WIDTH),
+    ]
 }
 
 fn bevel_at_point(p: (f32, f32), width: f32) -> Polygon<f32> {
@@ -462,12 +409,7 @@ mod tests {
 
         let connection_total: usize = partitions
             .iter()
-            .map(|p| {
-                p.horz_conn.0.len()
-                    + p.horz_conn.1.len()
-                    + p.vert_conn.0.len()
-                    + p.vert_conn.1.len()
-            })
+            .map(|p| p.connection_count())
             .sum();
 
         assert!(
