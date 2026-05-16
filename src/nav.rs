@@ -1,3 +1,4 @@
+use avian2d::prelude::LinearVelocity;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use crate::player;
@@ -6,12 +7,10 @@ use crate::player;
 pub fn apply_agent_velocity(
     mut agents: Query<(
         &AgentDesiredVelocity2d,
-        &mut Transform,
+        &mut LinearVelocity,
     ), Without<player::Player>>,
-    time: Res<Time>,
 ) {
-    for (desired_velocity, mut transform) in agents.iter_mut() {
-        let vel = desired_velocity.velocity();
-        transform.translation += vel.extend(0.0) * time.delta_secs();
+    for (desired_velocity, mut velocity) in agents.iter_mut() {
+        velocity.0 = desired_velocity.velocity();
     }
 }

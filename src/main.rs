@@ -210,6 +210,7 @@ fn setup(
             Transform::from_translation(position.extend(0.0)),
             RigidBody::Dynamic,
             Collider::circle(MONSTER_RADIUS),
+            LockedAxes::ROTATION_LOCKED,
             Agent2dBundle {
                 agent: Default::default(),
                 settings: AgentSettings {
