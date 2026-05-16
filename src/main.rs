@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use avian2d::prelude::*;
-use bevy::{math::VectorSpace, prelude::*};
+use bevy::{prelude::*};
 use geo::MultiPolygon;
 use rand::prelude::*;
 
