@@ -3,10 +3,11 @@ use bevy::prelude::*;
 use bevy_landmass::NavMeshHandle;
 use bevy_landmass::debug::Landmass2dDebugPlugin;
 use bevy_landmass::prelude::*;
-use geo::MultiPolygon;
+use geo::{BooleanOps, MultiPolygon};
 use rand::prelude::*;
 
 mod bsp;
+mod fov;
 mod monster;
 mod nav;
 mod player;
@@ -14,9 +15,19 @@ mod terrain;
 
 use monster::{MONSTER_RADIUS, Monster};
 use player::{MoveTarget, PLAYER_RADIUS, PLAYER_SPEED, Player, move_player, set_target_on_click};
-use terrain::{
-    Terrain, TerrainGeometry, geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh,
-};
+use terrain::{TerrainGeometry, geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh};
+
+#[derive(Resource)]
+struct WorldBounds {
+    width: f32,
+    height: f32,
+}
+
+#[derive(Resource)]
+struct WorldObstacles(geo::MultiPolygon<f32>);
+
+#[derive(Component)]
+struct FovMeshMarker;
 
 fn main() {
     App::new()
@@ -36,6 +47,7 @@ fn main() {
         .add_systems(Update, set_target_on_click)
         .add_systems(Update, move_player)
         .add_systems(Update, nav::apply_agent_velocity)
+        .add_systems(Update, update_fov)
         .insert_resource(Gravity::ZERO)
         .run();
 }
@@ -77,14 +89,15 @@ fn setup(
     let terrain_mesh = geometry_to_mesh(&terrain_geometry.polygon);
     let terrain_collider = geometry_to_collider(&terrain_geometry.polygon);
 
-    let terrain_entity = commands.spawn((
-        Mesh2d(meshes.add(terrain_mesh)),
-        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.4, 0.4, 0.4)))),
-        Transform::default(),
-        terrain_collider,
-        RigidBody::Static,
-        Terrain,
-    )).id();
+    let terrain_entity = commands
+        .spawn((
+            Mesh2d(meshes.add(terrain_mesh)),
+            MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.4, 0.4, 0.4)))),
+            Transform::default(),
+            terrain_collider,
+            RigidBody::Static,
+        ))
+        .id();
 
     let door_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.25, 0.1)));
     for door in &terrain_geometry.doors {
@@ -92,13 +105,15 @@ fn setup(
         let height = door.rect.height();
         let center = door.rect.center();
 
-        let door_entity = commands.spawn((
-            Mesh2d(meshes.add(Rectangle::new(width, height))),
-            MeshMaterial2d(door_material.clone()),
-            Transform::from_translation(Vec3::new(center.x, center.y, 1.0)),
-            RigidBody::Dynamic,
-            Collider::rectangle(width, height),
-        )).id();
+        let door_entity = commands
+            .spawn((
+                Mesh2d(meshes.add(Rectangle::new(width, height))),
+                MeshMaterial2d(door_material.clone()),
+                Transform::from_translation(Vec3::new(center.x, center.y, 1.0)),
+                RigidBody::Dynamic,
+                Collider::rectangle(width, height),
+            ))
+            .id();
 
         let hinge_world = Vec2::new(door.hinge.0, door.hinge.1);
         let door_center = Vec2::new(center.x, center.y);
@@ -109,6 +124,23 @@ fn setup(
                 .with_local_anchor2(hinge_world), // Terrain is at origin
         );
     }
+
+    commands.insert_resource(WorldBounds {
+        width: window_width,
+        height: window_height,
+    });
+    commands.insert_resource(WorldObstacles(terrain_geometry.polygon.clone()));
+
+    let fov_material = materials.add(ColorMaterial::from(Color::srgba(0.0, 0.0, 0.0, 0.7)));
+    commands.spawn((
+        FovMeshMarker,
+        Mesh2d(meshes.add(Mesh::new(
+            bevy_mesh::PrimitiveTopology::TriangleList,
+            Default::default(),
+        ))),
+        MeshMaterial2d(fov_material),
+        Transform::from_translation(Vec3::new(0.0, 0.0, 50.0)),
+    ));
 
     // Build the navigation mesh from the playable area
     let valid_nav_mesh = playable_area_to_nav_mesh(&terrain_geometry.playable_area);
@@ -189,5 +221,41 @@ fn setup(
             },
             AgentTarget2d::Entity(player),
         ));
+    }
+}
+
+fn update_fov(
+    player_query: Query<&Transform, (With<Player>, Changed<Transform>)>,
+    fov_mesh_query: Query<&Mesh2d, With<FovMeshMarker>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    obstacles: Res<WorldObstacles>,
+    bounds: Res<WorldBounds>,
+) {
+    let Ok(player_transform) = player_query.single() else {
+        return;
+    };
+    let Ok(mesh_handle) = fov_mesh_query.single() else {
+        return;
+    };
+
+    let origin = player_transform.translation.truncate();
+    let radius = 600.0;
+
+    let fov_poly = fov::fov_arc(origin, radius, None, &obstacles.0);
+    let fov_multi = MultiPolygon::new(vec![fov_poly]);
+
+    let w = bounds.width;
+    let h = bounds.height;
+    // To be safe, make it larger than bounds
+    let bg_rect = geo::Rect::new(
+        (-w / 2.0 - 200.0, -h / 2.0 - 200.0),
+        (w / 2.0 + 200.0, h / 2.0 + 200.0),
+    );
+    let bg_poly = MultiPolygon::new(vec![bg_rect.to_polygon()]);
+
+    let dark_area = bg_poly.difference(&fov_multi);
+
+    if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
+        *mesh = terrain::geometry_to_mesh(&dark_area);
     }
 }

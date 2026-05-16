@@ -11,9 +11,6 @@ use std::sync::Arc;
 pub const MARGIN: f32 = 10.0;
 pub const PADDING: f32 = 20.0;
 
-#[derive(Component)]
-pub struct Terrain;
-
 pub struct TerrainGeometry {
     pub polygon: MultiPolygon<f32>,
     pub playable_area: MultiPolygon<f32>,
@@ -174,10 +171,18 @@ fn render(
 
                     if rng.gen_bool(0.25) {
                         let room_entry = match connection.side {
-                            ConnectionSide::Left => (room.min().x, connection.y.clamp(room.min().y, room.max().y)),
-                            ConnectionSide::Right => (room.max().x, connection.y.clamp(room.min().y, room.max().y)),
-                            ConnectionSide::Bottom => (connection.x.clamp(room.min().x, room.max().x), room.min().y),
-                            ConnectionSide::Top => (connection.x.clamp(room.min().x, room.max().x), room.max().y),
+                            ConnectionSide::Left => {
+                                (room.min().x, connection.y.clamp(room.min().y, room.max().y))
+                            }
+                            ConnectionSide::Right => {
+                                (room.max().x, connection.y.clamp(room.min().y, room.max().y))
+                            }
+                            ConnectionSide::Bottom => {
+                                (connection.x.clamp(room.min().x, room.max().x), room.min().y)
+                            }
+                            ConnectionSide::Top => {
+                                (connection.x.clamp(room.min().x, room.max().x), room.max().y)
+                            }
                         };
 
                         doors.push(create_door(connection.side, room_entry));
@@ -185,14 +190,19 @@ fn render(
                 }
             }
             PartitionRole::Corridor => {
-                let connections: Vec<_> =
-                    partition_connections(partition).into_iter().filter(is_live).collect();
+                let connections: Vec<_> = partition_connections(partition)
+                    .into_iter()
+                    .filter(is_live)
+                    .collect();
                 let center = partition_center(partition);
 
                 if connections.len() == 2
                     && connections[0].side.is_vertical() != connections[1].side.is_vertical()
                 {
-                    union_all(&mut region, connect_adjacent(connections[0], connections[1]));
+                    union_all(
+                        &mut region,
+                        connect_adjacent(connections[0], connections[1]),
+                    );
                 } else if !connections.is_empty() {
                     region = region.union(&bevel_at_point(center, CORRIDOR_WIDTH));
                     for connection in connections {
@@ -495,9 +505,7 @@ pub fn geometry_to_collider(geometry: &MultiPolygon<f32>) -> Collider {
 
 /// Convert the playable area into a landmass NavigationMesh2d.
 /// Triangulates each polygon and collects vertices/polygons for pathfinding.
-pub fn playable_area_to_nav_mesh(
-    playable_area: &MultiPolygon<f32>,
-) -> Arc<ValidNavigationMesh2d> {
+pub fn playable_area_to_nav_mesh(playable_area: &MultiPolygon<f32>) -> Arc<ValidNavigationMesh2d> {
     let mut vertices: Vec<Vec2> = Vec::new();
     let mut polygons: Vec<Vec<usize>> = Vec::new();
 
@@ -551,7 +559,11 @@ pub fn playable_area_to_nav_mesh(
         height_mesh: None,
     };
 
-    Arc::new(nav_mesh.validate().expect("playable area nav mesh should be valid"))
+    Arc::new(
+        nav_mesh
+            .validate()
+            .expect("playable area nav mesh should be valid"),
+    )
 }
 
 #[cfg(test)]
@@ -575,10 +587,7 @@ mod tests {
             partitions.len()
         );
 
-        let connection_total: usize = partitions
-            .iter()
-            .map(|p| p.connection_count())
-            .sum();
+        let connection_total: usize = partitions.iter().map(|p| p.connection_count()).sum();
 
         assert!(
             connection_total >= partitions.len() * 2,
