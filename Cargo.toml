@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.18.1", features = ["dev"] }
+bevy = { version = "0.18.1", default-features = false, features = ["2d", "debug", "bevy_dev_tools", "default_platform"] }
 avian2d = "0.5"
 bevy_mesh = "0.18"
 geo = "0.32"
@@ -19,3 +19,11 @@ opt-level = 1 # Suggested by the Bevy docs
 
 [profile.dev.package."*"]
 opt-level = 3 # Suggested by the Bevy docs
+
+#[patch.crates-io]
+#getrandom = { version = "0.2", features = ["js"] }
+
+# web:
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom_0_2 = { package = "getrandom", version = "0.2", features = ["js"] }
