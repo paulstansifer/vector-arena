@@ -1,5 +1,6 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
+use bevy_landmass::prelude::*;
 
 pub const PLAYER_RADIUS: f32 = 10.0;
 pub const PLAYER_SPEED: f32 = 480.0;
@@ -24,7 +25,7 @@ pub fn set_target_on_click(
     camera_query: Single<(&Camera, &GlobalTransform)>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     mut time: ResMut<Time<Virtual>>,
-    mut player_query: Query<(&Transform, &mut MoveTarget), With<Player>>,
+    mut player_query: Query<(&Transform, &mut MoveTarget, &mut AgentTarget2d), With<Player>>,
 ) {
     if !mouse_button_input.just_pressed(MouseButton::Left) {
         return;
@@ -43,26 +44,39 @@ pub fn set_target_on_click(
         Err(_) => return,
     };
 
-    for (transform, mut move_target) in player_query.iter_mut() {
+    for (transform, mut move_target, mut agent_target) in player_query.iter_mut() {
         let current_position = transform.translation.truncate();
         let distance = current_position.distance(world_position);
 
         if distance <= STOP_THRESHOLD {
             move_target.active = false;
+            *agent_target = AgentTarget2d::None;
             continue;
         }
 
         move_target.destination = world_position;
         move_target.origin = transform.translation.truncate();
         move_target.active = true;
+        *agent_target = AgentTarget2d::Point(world_position);
     }
 }
 
 pub fn move_player(
     mut time: ResMut<Time<Virtual>>,
-    mut query: Query<(&Transform, &mut LinearVelocity, &mut MoveTarget), With<Player>>,
+    mut query: Query<
+        (
+            &Transform,
+            &mut LinearVelocity,
+            &mut MoveTarget,
+            Option<&AgentDesiredVelocity2d>,
+            &mut AgentTarget2d,
+        ),
+        With<Player>,
+    >,
 ) {
-    for (transform, mut velocity, mut move_target) in query.iter_mut() {
+    for (transform, mut velocity, mut move_target, desired_velocity, mut agent_target) in
+        query.iter_mut()
+    {
         if !move_target.active {
             time.set_relative_speed(0.0);
             *velocity = LinearVelocity::ZERO;
@@ -71,8 +85,20 @@ pub fn move_player(
         time.set_relative_speed(1.0);
 
         let current = transform.translation.truncate();
-        let direction = move_target.destination - current;
-        let distance = direction.length();
+        let distance = (move_target.destination - current).length();
+
+        if distance <= STOP_THRESHOLD {
+            *velocity = LinearVelocity::ZERO;
+            move_target.active = false;
+            *agent_target = AgentTarget2d::None;
+            continue;
+        }
+
+        let direction = if let Some(dv) = desired_velocity {
+            dv.velocity()
+        } else {
+            move_target.destination - current
+        };
 
         // speed up after starting to move:
         let away_from_origin = (current.distance(move_target.origin) / 60.0).clamp(0.0, 1.0);
@@ -82,14 +108,7 @@ pub fn move_player(
         let adj_speed = lerp(0.25, 1.0, (distance / 60.0).clamp(0.0, 1.0)) * PLAYER_SPEED;
         let new_speed = f32::min(adj_speed, new_speed);
 
-        let desired_speed = new_speed;
-        velocity.0 = direction.normalize_or_zero() * desired_speed;
-
-        let step = desired_speed * time.delta_secs();
-        if step >= distance {
-            *velocity = LinearVelocity::ZERO;
-            move_target.active = false;
-        }
+        velocity.0 = direction.normalize_or_zero() * new_speed;
     }
 }
 
@@ -108,18 +127,28 @@ mod tests {
     fn player_eventually_reaches_target() {
         let mut app = App::new();
         app.insert_resource(Time::<Virtual>::default());
-        app.add_systems(Update, move_player);
+        fn mock_physics_system(
+            mut query: Query<(&mut Transform, &LinearVelocity)>,
+            time: Res<Time<Virtual>>,
+        ) {
+            for (mut transform, velocity) in query.iter_mut() {
+                transform.translation += velocity.0.extend(0.0) * time.delta_secs();
+            }
+        }
+        app.add_systems(Update, (move_player, mock_physics_system).chain());
 
         let destination = Vec2::new(160.0, 120.0);
 
         app.world_mut().spawn((
             Transform::from_translation(Vec3::ZERO),
+            LinearVelocity::ZERO,
             MoveTarget {
                 destination,
                 origin: Vec2::ZERO,
                 active: true,
             },
             Player,
+            AgentTarget2d::Point(destination),
         ));
 
         for _ in 0..600 {

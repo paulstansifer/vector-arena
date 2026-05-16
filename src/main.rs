@@ -1,8 +1,8 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
-use bevy_landmass::prelude::*;
-use bevy_landmass::debug::Landmass2dDebugPlugin;
 use bevy_landmass::NavMeshHandle;
+use bevy_landmass::debug::Landmass2dDebugPlugin;
+use bevy_landmass::prelude::*;
 use geo::MultiPolygon;
 use rand::prelude::*;
 
@@ -13,8 +13,10 @@ mod player;
 mod terrain;
 
 use monster::{MONSTER_RADIUS, Monster};
-use player::{MoveTarget, PLAYER_RADIUS, Player, move_player, set_target_on_click};
-use terrain::{Terrain, TerrainGeometry, geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh};
+use player::{MoveTarget, PLAYER_RADIUS, PLAYER_SPEED, Player, move_player, set_target_on_click};
+use terrain::{
+    Terrain, TerrainGeometry, geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh,
+};
 
 fn main() {
     App::new()
@@ -53,19 +55,16 @@ fn setup(
 
     // Create the archipelago (the "world" for landmass pathfinding)
     let archipelago_id = commands
-        .spawn(Archipelago2d::new(
-            ArchipelagoOptions::from_agent_radius(MONSTER_RADIUS),
-        ))
+        .spawn(Archipelago2d::new(ArchipelagoOptions::from_agent_radius(
+            MONSTER_RADIUS * 2.0,
+        )))
         .id();
 
     let terrain_geometry = if true {
         // Create terrain geometry
         TerrainGeometry::new(window_width, window_height)
     } else {
-        let room = geo::geometry::Rect::new(
-            (0.0, 0.0),
-            (window_width, window_width),
-        );
+        let room = geo::geometry::Rect::new((0.0, 0.0), (window_width, window_width));
         TerrainGeometry {
             polygon: MultiPolygon::empty(),
             playable_area: MultiPolygon::new(vec![room.to_polygon()]),
@@ -93,13 +92,11 @@ fn setup(
     });
 
     // Spawn the island (navigation surface) for landmass
-    commands.spawn((
-        Island2dBundle {
-            island: Island,
-            archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
-            nav_mesh: NavMeshHandle(nav_mesh_handle.clone()),
-        },
-    ));
+    commands.spawn((Island2dBundle {
+        island: Island,
+        archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
+        nav_mesh: NavMeshHandle(nav_mesh_handle.clone()),
+    },));
 
     let mut rng = rand::thread_rng();
 
@@ -121,6 +118,16 @@ fn setup(
             Collider::circle(PLAYER_RADIUS),
             LockedAxes::ROTATION_LOCKED,
             MoveTarget::default(),
+            Agent2dBundle {
+                agent: Default::default(),
+                settings: AgentSettings {
+                    radius: PLAYER_RADIUS,
+                    desired_speed: PLAYER_SPEED,
+                    max_speed: PLAYER_SPEED * 1.2,
+                },
+                archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
+            },
+            AgentTarget2d::None,
         ))
         .id();
     //        .insert(Ccd::enabled());
