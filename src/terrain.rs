@@ -132,11 +132,21 @@ fn render(
             PartitionRole::Corridor => {
                 let connections = partition_connections(partition);
                 let center = partition_center(partition);
-                region = region.union(&bevel_at_point(center, CORRIDOR_WIDTH));
-                for connection in connections {
-                    let corridor = connect_point_to_center(connection, center);
+
+                if connections.len() == 2
+                    && connections[0].side.is_vertical() != connections[1].side.is_vertical()
+                {
+                    let corridor = connect_adjacent(connections[0], connections[1]);
                     for poly in corridor {
                         region = region.union(&poly);
+                    }
+                } else {
+                    region = region.union(&bevel_at_point(center, CORRIDOR_WIDTH));
+                    for connection in connections {
+                        let corridor = connect_point_to_center(connection, center);
+                        for poly in corridor {
+                            region = region.union(&poly);
+                        }
                     }
                 }
             }
@@ -154,6 +164,12 @@ enum ConnectionSide {
     Right,
     Bottom,
     Top,
+}
+
+impl ConnectionSide {
+    fn is_vertical(&self) -> bool {
+        matches!(self, ConnectionSide::Left | ConnectionSide::Right)
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -274,6 +290,16 @@ fn connect_room_to_connection(
     }
 
     polygons
+}
+
+fn connect_adjacent(a: ConnectionPoint, b: ConnectionPoint) -> Vec<Polygon<f32>> {
+    let (h_conn, v_conn) = if a.side.is_vertical() { (a, b) } else { (b, a) };
+    let elbow = (v_conn.x, h_conn.y);
+    vec![
+        rect_for_segment((h_conn.x, h_conn.y), elbow, CORRIDOR_WIDTH),
+        bevel_at_point(elbow, CORRIDOR_WIDTH),
+        rect_for_segment(elbow, (v_conn.x, v_conn.y), CORRIDOR_WIDTH),
+    ]
 }
 
 fn connect_point_to_center(
