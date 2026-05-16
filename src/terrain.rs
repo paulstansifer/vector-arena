@@ -112,6 +112,23 @@ fn render(
     let mut rooms = Vec::new();
     let mut playables = MultiPolygon::new(vec![]);
 
+    // Avoid hallway stubs leading to nothing.
+    let empty_connections: Vec<(f32, f32)> = bsp
+        .iter()
+        .filter(|(_, role)| matches!(role, PartitionRole::Empty))
+        .flat_map(|(partition, _)| {
+            partition_connections(partition)
+                .into_iter()
+                .map(|c| (c.x, c.y))
+        })
+        .collect();
+
+    let is_live = |c: &ConnectionPoint| {
+        !empty_connections
+            .iter()
+            .any(|&(ex, ey)| (c.x - ex).abs() < f32::EPSILON && (c.y - ey).abs() < f32::EPSILON)
+    };
+
     for (partition, role) in bsp {
         let mut region = MultiPolygon::new(vec![]);
 
@@ -122,19 +139,20 @@ fn render(
                 region = region.union(&room.to_polygon());
                 rooms.push(room);
 
-                for connection in partition_connections(partition) {
+                for connection in partition_connections(partition).into_iter().filter(is_live) {
                     union_all(&mut region, connect_room_to_connection(&room, connection));
                 }
             }
             PartitionRole::Corridor => {
-                let connections = partition_connections(partition);
+                let connections: Vec<_> =
+                    partition_connections(partition).into_iter().filter(is_live).collect();
                 let center = partition_center(partition);
 
                 if connections.len() == 2
                     && connections[0].side.is_vertical() != connections[1].side.is_vertical()
                 {
                     union_all(&mut region, connect_adjacent(connections[0], connections[1]));
-                } else {
+                } else if !connections.is_empty() {
                     region = region.union(&bevel_at_point(center, CORRIDOR_WIDTH));
                     for connection in connections {
                         union_all(&mut region, connect_point_to_center(connection, center));
