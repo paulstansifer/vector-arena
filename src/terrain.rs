@@ -18,6 +18,13 @@ pub struct TerrainGeometry {
     pub polygon: MultiPolygon<f32>,
     pub playable_area: MultiPolygon<f32>,
     pub rooms: Vec<Rect<f32>>,
+    pub doors: Vec<DoorGeometry>,
+}
+
+#[derive(Clone, Copy)]
+pub struct DoorGeometry {
+    pub rect: Rect<f32>,
+    pub hinge: (f32, f32),
 }
 
 impl TerrainGeometry {
@@ -35,7 +42,7 @@ impl TerrainGeometry {
         let partitions = partition_space(bounds, &mut rng);
         let allocated_partitions = allocate_roles(partitions, &mut rng);
 
-        let (rooms, playable_area) = render(&allocated_partitions);
+        let (rooms, playable_area, doors) = render(&allocated_partitions, &mut rng);
 
         // The terrain is the bounds minus the playable area
         let earth = Rect::<f32>::new((0.0, 0.0), (width, height));
@@ -54,10 +61,24 @@ impl TerrainGeometry {
             .map(|r| r.translate(offset_x, offset_y))
             .collect();
 
+        let doors = doors
+            .into_iter()
+            .map(|mut d| {
+                d.rect = Rect::new(
+                    (d.rect.min().x + offset_x, d.rect.min().y + offset_y),
+                    (d.rect.max().x + offset_x, d.rect.max().y + offset_y),
+                );
+                d.hinge.0 += offset_x;
+                d.hinge.1 += offset_y;
+                d
+            })
+            .collect();
+
         TerrainGeometry {
             polygon: geometry,
             playable_area,
             rooms,
+            doors,
         }
     }
 }
@@ -115,9 +136,11 @@ fn union_all(base: &mut MultiPolygon<f32>, polys: Vec<Polygon<f32>>) {
 // Returns rooms and a multipolygon representing passable space.
 fn render(
     bsp: &[(Partition, PartitionRole)],
-) -> (Vec<Rect<f32>>, MultiPolygon<f32>) {
+    rng: &mut ThreadRng,
+) -> (Vec<Rect<f32>>, MultiPolygon<f32>, Vec<DoorGeometry>) {
     let mut rooms = Vec::new();
     let mut playables = MultiPolygon::new(vec![]);
+    let mut doors = Vec::new();
 
     // Avoid hallway stubs leading to nothing.
     let empty_connections: Vec<(f32, f32)> = bsp
@@ -148,6 +171,17 @@ fn render(
 
                 for connection in partition_connections(partition).into_iter().filter(is_live) {
                     union_all(&mut region, connect_room_to_connection(&room, connection));
+
+                    if rng.gen_bool(0.25) {
+                        let room_entry = match connection.side {
+                            ConnectionSide::Left => (room.min().x, connection.y.clamp(room.min().y, room.max().y)),
+                            ConnectionSide::Right => (room.max().x, connection.y.clamp(room.min().y, room.max().y)),
+                            ConnectionSide::Bottom => (connection.x.clamp(room.min().x, room.max().x), room.min().y),
+                            ConnectionSide::Top => (connection.x.clamp(room.min().x, room.max().x), room.max().y),
+                        };
+
+                        doors.push(create_door(connection.side, room_entry));
+                    }
                 }
             }
             PartitionRole::Corridor => {
@@ -171,7 +205,14 @@ fn render(
         playables = playables.union(&region);
     }
 
-    (rooms, playables)
+    for door in &doors {
+        let h_x = door.hinge.0;
+        let h_y = door.hinge.1;
+        let hinge_rect = Rect::new((h_x - 2.5, h_y - 2.5), (h_x + 2.5, h_y + 2.5));
+        playables = playables.difference(&MultiPolygon::new(vec![hinge_rect.to_polygon()]));
+    }
+
+    (rooms, playables, doors)
 }
 
 #[derive(Copy, Clone)]
@@ -180,6 +221,47 @@ enum ConnectionSide {
     Right,
     Bottom,
     Top,
+}
+
+fn create_door(side: ConnectionSide, room_entry: (f32, f32)) -> DoorGeometry {
+    let door_length = CORRIDOR_WIDTH - 4.0;
+    let thickness = 5.0;
+
+    let (min_x, max_x, min_y, max_y, hinge) = match side {
+        ConnectionSide::Left => {
+            let x0 = room_entry.0 - thickness;
+            let x1 = room_entry.0;
+            let y0 = room_entry.1 - door_length / 2.0;
+            let y1 = room_entry.1 + door_length / 2.0;
+            (x0, x1, y0, y1, (x0 + thickness / 2.0, y0))
+        }
+        ConnectionSide::Right => {
+            let x0 = room_entry.0;
+            let x1 = room_entry.0 + thickness;
+            let y0 = room_entry.1 - door_length / 2.0;
+            let y1 = room_entry.1 + door_length / 2.0;
+            (x0, x1, y0, y1, (x0 + thickness / 2.0, y0))
+        }
+        ConnectionSide::Bottom => {
+            let x0 = room_entry.0 - door_length / 2.0;
+            let x1 = room_entry.0 + door_length / 2.0;
+            let y0 = room_entry.1 - thickness;
+            let y1 = room_entry.1;
+            (x0, x1, y0, y1, (x0, y0 + thickness / 2.0))
+        }
+        ConnectionSide::Top => {
+            let x0 = room_entry.0 - door_length / 2.0;
+            let x1 = room_entry.0 + door_length / 2.0;
+            let y0 = room_entry.1;
+            let y1 = room_entry.1 + thickness;
+            (x0, x1, y0, y1, (x0, y0 + thickness / 2.0))
+        }
+    };
+
+    DoorGeometry {
+        rect: Rect::new((min_x, min_y), (max_x, max_y)),
+        hinge,
+    }
 }
 
 impl ConnectionSide {

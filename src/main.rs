@@ -69,6 +69,7 @@ fn setup(
             polygon: MultiPolygon::empty(),
             playable_area: MultiPolygon::new(vec![room.to_polygon()]),
             rooms: vec![room],
+            doors: vec![],
         }
     };
 
@@ -76,14 +77,38 @@ fn setup(
     let terrain_mesh = geometry_to_mesh(&terrain_geometry.polygon);
     let terrain_collider = geometry_to_collider(&terrain_geometry.polygon);
 
-    commands.spawn((
+    let terrain_entity = commands.spawn((
         Mesh2d(meshes.add(terrain_mesh)),
         MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.4, 0.4, 0.4)))),
         Transform::default(),
         terrain_collider,
         RigidBody::Static,
         Terrain,
-    ));
+    )).id();
+
+    let door_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.25, 0.1)));
+    for door in &terrain_geometry.doors {
+        let width = door.rect.width();
+        let height = door.rect.height();
+        let center = door.rect.center();
+
+        let door_entity = commands.spawn((
+            Mesh2d(meshes.add(Rectangle::new(width, height))),
+            MeshMaterial2d(door_material.clone()),
+            Transform::from_translation(Vec3::new(center.x, center.y, 1.0)),
+            RigidBody::Dynamic,
+            Collider::rectangle(width, height),
+        )).id();
+
+        let hinge_world = Vec2::new(door.hinge.0, door.hinge.1);
+        let door_center = Vec2::new(center.x, center.y);
+
+        commands.spawn(
+            RevoluteJoint::new(door_entity, terrain_entity)
+                .with_local_anchor1(hinge_world - door_center)
+                .with_local_anchor2(hinge_world), // Terrain is at origin
+        );
+    }
 
     // Build the navigation mesh from the playable area
     let valid_nav_mesh = playable_area_to_nav_mesh(&terrain_geometry.playable_area);
