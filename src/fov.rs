@@ -11,43 +11,32 @@ pub fn fov_arc(
     angle_range: Option<Range<f32>>,
     obstacles: &geo::MultiPolygon<f32>,
 ) -> Polygon<f32> {
-    let mut segments = Vec::new();
+    let segments: Vec<_> = obstacles
+        .iter()
+        .flat_map(|poly| std::iter::once(poly.exterior()).chain(poly.interiors()))
+        .flat_map(|line_string| line_string.lines())
+        .map(|line| (Vec2::new(line.start.x, line.start.y), Vec2::new(line.end.x, line.end.y)))
+        .collect();
 
-    // Extract line segments from the multipolygon
-    for poly in obstacles {
-        for line_string in std::iter::once(poly.exterior()).chain(poly.interiors()) {
-            let coords: Vec<_> = line_string.coords().collect();
-            for i in 0..coords.len() {
-                let p1 = coords[i];
-                let p2 = coords[(i + 1) % coords.len()];
-                segments.push((Vec2::new(p1.x, p1.y), Vec2::new(p2.x, p2.y)));
-            }
-        }
-    }
-
-    let mut angles_to_cast = Vec::new();
     let deg_0_01 = 0.01_f32.to_radians();
 
     // Collect angles to all points from segments
-    for &(a, b) in &segments {
-        for pt in [a, b] {
+    let mut angles_to_cast: Vec<f32> = segments
+        .iter()
+        .flat_map(|&(a, b)| [a, b])
+        .filter(|&pt| (pt - origin).length_squared() <= (radius + 0.1).powi(2))
+        .flat_map(|pt| {
             let diff = pt - origin;
-            let dist = diff.length();
-            if dist <= radius + 0.1 {
-                let angle = diff.y.atan2(diff.x);
-                angles_to_cast.push(angle);
-                angles_to_cast.push(angle - deg_0_01);
-                angles_to_cast.push(angle + deg_0_01);
-            }
-        }
-    }
+            let angle = diff.y.atan2(diff.x);
+            [angle, angle - deg_0_01, angle + deg_0_01]
+        })
+        .collect();
 
     // Add fixed angles to make the circle smooth where it hits the radius
     let steps = 64;
-    for i in 0..steps {
-        let angle = (i as f32 / steps as f32) * std::f32::consts::TAU - std::f32::consts::PI;
-        angles_to_cast.push(angle);
-    }
+    angles_to_cast.extend(
+        (0..steps).map(|i| (i as f32 / steps as f32) * std::f32::consts::TAU - std::f32::consts::PI),
+    );
 
     // If angle_range is Some, also push the boundary angles
     if let Some(range) = &angle_range {
@@ -55,48 +44,19 @@ pub fn fov_arc(
         angles_to_cast.push(range.end);
     }
 
-    // Filter angles based on angle_range
-    let angles: Vec<f32> = angles_to_cast
-        .into_iter()
-        .filter(|&a| {
-            if let Some(range) = &angle_range {
-                let mut norm_a = a;
-                while norm_a < range.start {
-                    norm_a += std::f32::consts::TAU;
-                }
-                while norm_a >= range.start + std::f32::consts::TAU {
-                    norm_a -= std::f32::consts::TAU;
-                }
-
-                norm_a <= range.end
-            } else {
-                true
-            }
-        })
-        .collect();
-
-    // Sort angles and deduplicate to avoid casting duplicate rays
-    let mut sorted_angles = angles;
-    if angle_range.is_none() {
-        for a in &mut sorted_angles {
-            while *a <= -std::f32::consts::PI {
-                *a += std::f32::consts::TAU;
-            }
-            while *a > std::f32::consts::PI {
-                *a -= std::f32::consts::TAU;
-            }
-        }
+    // Filter angles based on angle_range and normalize
+    let mut sorted_angles: Vec<f32> = if let Some(range) = &angle_range {
+        angles_to_cast
+            .into_iter()
+            .map(|a| (a - range.start).rem_euclid(std::f32::consts::TAU) + range.start)
+            .filter(|&a| a <= range.end)
+            .collect()
     } else {
-        let start = angle_range.as_ref().unwrap().start;
-        for a in &mut sorted_angles {
-            while *a < start {
-                *a += std::f32::consts::TAU;
-            }
-            while *a >= start + std::f32::consts::TAU {
-                *a -= std::f32::consts::TAU;
-            }
-        }
-    }
+        angles_to_cast
+            .into_iter()
+            .map(|a| (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI)
+            .collect()
+    };
 
     sorted_angles.sort_by(|a, b| a.partial_cmp(b).unwrap());
     sorted_angles.dedup_by(|a, b| (*a - *b).abs() < 1e-5);
@@ -110,29 +70,29 @@ pub fn fov_arc(
 
     for angle in sorted_angles {
         let dir = Vec2::new(angle.cos(), angle.sin());
-        let mut min_t = radius;
+        
+        let min_t = segments
+            .iter()
+            .filter_map(|&(p1, p2)| {
+                let s = p2 - p1;
+                let r_cross_s = dir.x * s.y - dir.y * s.x;
 
-        for &(p1, p2) in &segments {
-            let p = origin;
-            let r = dir;
-            let q = p1;
-            let s = p2 - p1;
+                if r_cross_s.abs() <= 1e-6 {
+                    return None;
+                }
 
-            let r_cross_s = r.x * s.y - r.y * s.x;
-            let q_minus_p = q - p;
-
-            if r_cross_s.abs() > 1e-6 {
+                let q_minus_p = p1 - origin;
                 let t = (q_minus_p.x * s.y - q_minus_p.y * s.x) / r_cross_s;
-                let u = (q_minus_p.x * r.y - q_minus_p.y * r.x) / r_cross_s;
+                let u = (q_minus_p.x * dir.y - q_minus_p.y * dir.x) / r_cross_s;
 
                 // Use a small epsilon to avoid self-intersection on edges
-                if t > 1e-4 && u >= 0.0 && u <= 1.0 {
-                    if t < min_t {
-                        min_t = t;
-                    }
+                if t > 1e-4 && (0.0..=1.0).contains(&u) {
+                    Some(t)
+                } else {
+                    None
                 }
-            }
-        }
+            })
+            .fold(radius, f32::min);
 
         let hit_point = origin + dir * min_t;
         polygon_points.push((hit_point.x, hit_point.y));
