@@ -1,7 +1,6 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::NavMeshHandle;
-use bevy_landmass::debug::Landmass2dDebugPlugin;
 use bevy_landmass::prelude::*;
 use geo::{BooleanOps, MultiPolygon};
 use rand::prelude::*;
@@ -43,7 +42,7 @@ fn main() {
             }),
             avian2d::PhysicsPlugins::default(),
             Landmass2dPlugin::default(),
-            Landmass2dDebugPlugin::default(),
+            // bevy_landmass::debug::Landmass2dDebugPlugin::default(),
         ))
         .add_systems(Startup, setup)
         .add_systems(Update, set_target_on_click)

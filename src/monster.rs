@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 
-pub const MONSTER_RADIUS: f32 = 10.0;
 pub const MONSTER_SPEED: f32 = 80.0;
 // pub const MONSTER_STOP_DIST: f32 = 50.0;
 

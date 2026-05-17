@@ -2,5 +2,6 @@
     "chat.tools.terminal.autoApprove": {
         "cargo test": true,
         "cargo build": true
-    }
+    },
+    "editor.acceptSuggestionOnEnter": "smart"
 }
