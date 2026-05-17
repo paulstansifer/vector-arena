@@ -1,9 +1,12 @@
+use avian2d::math::PI;
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
 use geo::algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay};
-use geo::{BooleanOps, MultiPolygon};
+use geo::{
+    BooleanOps, BoundingRect, Buffer, Centroid, LineString, MultiPolygon, Polygon, Translate,
+};
 use std::sync::Arc;
 
 #[path = "level-generation.rs"]
@@ -136,3 +139,11 @@ pub fn playable_area_to_nav_mesh(playable_area: &MultiPolygon<f32>) -> Arc<Valid
             .expect("playable area nav mesh should be valid"),
     )
 }
+
+#[path = "crumble-terrain.rs"]
+pub mod crumble_terrain;
+
+pub use crumble_terrain::{
+    handle_right_click_excavation, NavMeshIslandMarker, PlayableArea, Rubble, RubbleMaterial,
+    TerrainMarker,
+};

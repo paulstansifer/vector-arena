@@ -14,7 +14,10 @@ mod terrain;
 
 use monster::Monster;
 use player::{MoveTarget, PLAYER_SPEED, Player, move_player, set_target_on_click};
-use terrain::{TerrainGeometry, geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh};
+use terrain::{
+    TerrainGeometry, geometry_to_collider, geometry_to_mesh, handle_right_click_excavation,
+    playable_area_to_nav_mesh,
+};
 
 pub const AGENT_RADIUS: f32 = 10.0;
 
@@ -25,7 +28,7 @@ struct WorldBounds {
 }
 
 #[derive(Resource)]
-struct WorldObstacles(geo::MultiPolygon<f32>);
+pub struct WorldObstacles(pub geo::MultiPolygon<f32>);
 
 #[derive(Component)]
 struct FovMeshMarker;
@@ -49,6 +52,7 @@ fn main() {
         .add_systems(Update, move_player)
         .add_systems(Update, nav::apply_agent_velocity)
         .add_systems(Update, update_fov)
+        .add_systems(Update, handle_right_click_excavation)
         .insert_resource(Gravity::ZERO)
         .run();
 }
@@ -81,6 +85,7 @@ fn setup(
 
     let terrain_entity = commands
         .spawn((
+            terrain::TerrainMarker,
             Mesh2d(meshes.add(terrain_mesh)),
             MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.4, 0.4, 0.4)))),
             Transform::default(),
@@ -120,6 +125,11 @@ fn setup(
         height: window_height,
     });
     commands.insert_resource(WorldObstacles(terrain_geometry.polygon.clone()));
+    commands.insert_resource(terrain::PlayableArea(
+        terrain_geometry.playable_area.clone(),
+    ));
+    let rubble_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.45, 0.42)));
+    commands.insert_resource(terrain::RubbleMaterial(rubble_material));
 
     let fov_material = materials.add(ColorMaterial::from(Color::srgba(0.0, 0.0, 0.0, 0.7)));
     commands.spawn((
@@ -139,11 +149,14 @@ fn setup(
     });
 
     // Spawn the island (navigation surface) for landmass
-    commands.spawn((Island2dBundle {
-        island: Island,
-        archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
-        nav_mesh: NavMeshHandle(nav_mesh_handle.clone()),
-    },));
+    commands.spawn((
+        terrain::NavMeshIslandMarker,
+        Island2dBundle {
+            island: Island,
+            archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
+            nav_mesh: NavMeshHandle(nav_mesh_handle.clone()),
+        },
+    ));
 
     let mut rng = rand::thread_rng();
 
