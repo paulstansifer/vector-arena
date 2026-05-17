@@ -49,9 +49,16 @@ impl TerrainGeometry {
                         if i == j {
                             continue;
                         }
-                        if let PartitionRole::Corridor { double_width: false } = allocated_partitions[j].1 {
-                            if partitions_share_connection(&allocated_partitions[i].0, &allocated_partitions[j].0) {
-                                allocated_partitions[j].1 = PartitionRole::Corridor { double_width: true };
+                        if let PartitionRole::Corridor {
+                            double_width: false,
+                        } = allocated_partitions[j].1
+                        {
+                            if partitions_share_connection(
+                                &allocated_partitions[i].0,
+                                &allocated_partitions[j].0,
+                            ) {
+                                allocated_partitions[j].1 =
+                                    PartitionRole::Corridor { double_width: true };
                                 changed = true;
                             }
                         }
@@ -691,6 +698,17 @@ pub fn geometry_to_collider(geometry: &MultiPolygon<f32>) -> Collider {
 /// Convert the playable area into a landmass NavigationMesh2d.
 /// Triangulates each polygon and collects vertices/polygons for pathfinding.
 pub fn playable_area_to_nav_mesh(playable_area: &MultiPolygon<f32>) -> Arc<ValidNavigationMesh2d> {
+    // bevy_landmass::nav_mesh::bevy_mesh_to_landmass_nav_mesh might simplify this somewhat, but it doesn't seem respect agent radius, so I guess we still need to handle that ourselves.
+    use geo::Buffer;
+    use geo::algorithm::buffer::BufferStyle;
+    use geo::buffer::{LineCap, LineJoin};
+
+    let style = BufferStyle::new(-crate::AGENT_RADIUS)
+        .line_cap(LineCap::Square)
+        .line_join(LineJoin::Bevel);
+
+    let eroded_playable_area = playable_area.buffer_with_style(style);
+
     let mut vertices: Vec<Vec2> = Vec::new();
     let mut polygons: Vec<Vec<usize>> = Vec::new();
 
@@ -716,7 +734,7 @@ pub fn playable_area_to_nav_mesh(playable_area: &MultiPolygon<f32>) -> Arc<Valid
         }
     };
 
-    for polygon in playable_area.iter() {
+    for polygon in eroded_playable_area.iter() {
         let triangulation = polygon
             .constrained_triangulation(DelaunayTriangulationConfig::default())
             .unwrap();

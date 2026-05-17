@@ -15,7 +15,12 @@ pub fn fov_arc(
         .iter()
         .flat_map(|poly| std::iter::once(poly.exterior()).chain(poly.interiors()))
         .flat_map(|line_string| line_string.lines())
-        .map(|line| (Vec2::new(line.start.x, line.start.y), Vec2::new(line.end.x, line.end.y)))
+        .map(|line| {
+            (
+                Vec2::new(line.start.x, line.start.y),
+                Vec2::new(line.end.x, line.end.y),
+            )
+        })
         .collect();
 
     let deg_0_01 = 0.01_f32.to_radians();
@@ -35,7 +40,8 @@ pub fn fov_arc(
     // Add fixed angles to make the circle smooth where it hits the radius
     let steps = 64;
     angles_to_cast.extend(
-        (0..steps).map(|i| (i as f32 / steps as f32) * std::f32::consts::TAU - std::f32::consts::PI),
+        (0..steps)
+            .map(|i| (i as f32 / steps as f32) * std::f32::consts::TAU - std::f32::consts::PI),
     );
 
     // If angle_range is Some, also push the boundary angles
@@ -54,7 +60,9 @@ pub fn fov_arc(
     } else {
         angles_to_cast
             .into_iter()
-            .map(|a| (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI)
+            .map(|a| {
+                (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+            })
             .collect()
     };
 
@@ -70,7 +78,7 @@ pub fn fov_arc(
 
     for angle in sorted_angles {
         let dir = Vec2::new(angle.cos(), angle.sin());
-        
+
         let min_t = segments
             .iter()
             .filter_map(|&(p1, p2)| {

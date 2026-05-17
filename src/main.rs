@@ -13,9 +13,11 @@ mod nav;
 mod player;
 mod terrain;
 
-use monster::{MONSTER_RADIUS, Monster};
-use player::{MoveTarget, PLAYER_RADIUS, PLAYER_SPEED, Player, move_player, set_target_on_click};
+use monster::Monster;
+use player::{MoveTarget, PLAYER_SPEED, Player, move_player, set_target_on_click};
 use terrain::{TerrainGeometry, geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh};
+
+pub const AGENT_RADIUS: f32 = 10.0;
 
 #[derive(Resource)]
 struct WorldBounds {
@@ -68,7 +70,7 @@ fn setup(
     // Create the archipelago (the "world" for landmass pathfinding)
     let archipelago_id = commands
         .spawn(Archipelago2d::new(ArchipelagoOptions::from_agent_radius(
-            MONSTER_RADIUS * 2.0,
+            AGENT_RADIUS,
         )))
         .id();
 
@@ -157,17 +159,17 @@ fn setup(
     let player = commands
         .spawn((
             Player,
-            Mesh2d(meshes.add(Circle::new(PLAYER_RADIUS))),
+            Mesh2d(meshes.add(Circle::new(AGENT_RADIUS))),
             MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
             Transform::from_translation(player_position.extend(0.0)),
             RigidBody::Dynamic,
-            Collider::circle(PLAYER_RADIUS),
+            Collider::circle(AGENT_RADIUS),
             LockedAxes::ROTATION_LOCKED,
             MoveTarget::default(),
             Agent2dBundle {
                 agent: Default::default(),
                 settings: AgentSettings {
-                    radius: PLAYER_RADIUS,
+                    radius: AGENT_RADIUS,
                     desired_speed: PLAYER_SPEED,
                     max_speed: PLAYER_SPEED * 1.2,
                 },
@@ -179,7 +181,7 @@ fn setup(
     //        .insert(Ccd::enabled());
 
     let monster_material = materials.add(ColorMaterial::from(Color::srgb(0.85, 0.12, 0.12)));
-    let monster_mesh = meshes.add(Circle::new(MONSTER_RADIUS));
+    let monster_mesh = meshes.add(Circle::new(AGENT_RADIUS));
 
     // Spawn monsters in other rooms
     let mut monster_positions = Vec::new();
@@ -198,12 +200,12 @@ fn setup(
             MeshMaterial2d(monster_material.clone()),
             Transform::from_translation(position.extend(0.0)),
             RigidBody::Dynamic,
-            Collider::circle(MONSTER_RADIUS),
+            Collider::circle(AGENT_RADIUS),
             LockedAxes::ROTATION_LOCKED,
             Agent2dBundle {
                 agent: Default::default(),
                 settings: AgentSettings {
-                    radius: MONSTER_RADIUS,
+                    radius: AGENT_RADIUS,
                     desired_speed: monster::MONSTER_SPEED,
                     max_speed: monster::MONSTER_SPEED * 1.2,
                 },

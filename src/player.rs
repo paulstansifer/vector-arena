@@ -2,7 +2,6 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 
-pub const PLAYER_RADIUS: f32 = 10.0;
 pub const PLAYER_SPEED: f32 = 480.0;
 pub const STOP_THRESHOLD: f32 = 8.0;
 

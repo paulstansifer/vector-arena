@@ -77,7 +77,6 @@ enum SplitAxis {
     Horizontal,
 }
 
-
 fn split_vertical(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition, Partition)> {
     split_horizontal(&bounds.transpose(), rng).map(|(a, b)| (a.transpose(), b.transpose()))
 }
