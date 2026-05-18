@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vector Arena</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0d0e12;
+            --container-bg: rgba(20, 22, 30, 0.6);
+            --primary-glow: #00d2ff;
+            --accent-glow: #ff2e93;
+            --text-color: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: var(--text-color);
+        }
+
+        /* The canvas that Bevy mounts to */
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Loading Screen Overlay */
+        #loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, #161925 0%, #0d0e12 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            transition: opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.8s;
+        }
+
+        #loader.fade-out {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        /* Glassmorphic Card */
+        .loader-card {
+            background: var(--container-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 24px;
+            padding: 48px;
+            width: 90%;
+            max-width: 480px;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Glowing vector shapes behind the card */
+        .loader-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(0, 210, 255, 0.08) 0%, transparent 60%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .loader-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Vector Arena Game Title */
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #ffffff 0%, #a5b4fc 50%, var(--primary-glow) 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 30px rgba(0, 210, 255, 0.2);
+        }
+
+        .subtitle {
+            font-size: 0.95rem;
+            font-weight: 400;
+            color: var(--text-muted);
+            letter-spacing: 0.05em;
+            margin-bottom: 32px;
+            text-transform: uppercase;
+        }
+
+        /* Glowing Spinner Animation */
+        .spinner-container {
+            position: relative;
+            width: 100px;
+            height: 100px;
+            margin: 0 auto 36px;
+        }
+
+        .spinner-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 4px solid transparent;
+            border-top-color: var(--primary-glow);
+            animation: spin 1.5s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+            filter: drop-shadow(0 0 8px var(--primary-glow));
+        }
+
+        .spinner-ring-inner {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            bottom: 10px;
+            border-radius: 50%;
+            border: 3px solid transparent;
+            border-bottom-color: var(--accent-glow);
+            animation: spin-reverse 2s linear infinite;
+            filter: drop-shadow(0 0 6px var(--accent-glow));
+        }
+
+        .spinner-dot {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 12px;
+            height: 12px;
+            background-color: #ffffff;
+            border-radius: 50%;
+            box-shadow: 0 0 15px #ffffff, 0 0 30px var(--primary-glow);
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes spin-reverse {
+            0% {
+                transform: rotate(360deg);
+            }
+
+            100% {
+                transform: rotate(0deg);
+            }
+        }
+
+        /* Game Instructions */
+        .instructions {
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 24px;
+            text-align: left;
+        }
+
+        .instructions h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #ffffff;
+            letter-spacing: 0.1em;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .instructions h3::before {
+            content: '';
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            background-color: var(--accent-glow);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--accent-glow);
+        }
+
+        .control-item {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .control-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .key {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-family: monospace;
+            font-size: 0.75rem;
+            color: #ffffff;
+        }
+
+        /* Loading Text */
+        .loading-text {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #ffffff;
+            letter-spacing: 0.05em;
+            animation: pulse 1.8s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 0.6;
+            }
+
+            50% {
+                opacity: 1;
+                filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.5));
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Bevy will automatically find this canvas or append one if not present, but having it styled explicitly makes it robust -->
+    <canvas id="bevy-canvas"></canvas>
+
+    <div id="loader">
+        <div class="loader-card">
+            <div class="loader-content">
+                <h1>Vector Arena</h1>
+                <div class="subtitle">Tactical Navigation & Excavation</div>
+
+                <div class="spinner-container">
+                    <div class="spinner-ring"></div>
+                    <div class="spinner-ring-inner"></div>
+                    <div class="spinner-dot"></div>
+                </div>
+
+                <div class="instructions">
+                    <h3>Controls</h3>
+                    <div class="control-item">
+                        <span>Move Player</span>
+                        <span class="key">Left Click</span>
+                    </div>
+                    <div class="control-item">
+                        <span>Excavate (Crumble Wall)</span>
+                        <span class="key">Right Click</span>
+                    </div>
+                </div>
+
+                <div class="loading-text">Spawning Arena Map...</div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import init from './vector_arena.js';
+
+        // Wait for WASM to initialize and Bevy to start
+        async function start() {
+            try {
+                // Initialize the WASM module
+                await init();
+                console.log("Vector Arena: WASM Initialized successfully");
+
+                // Keep the loader visible for a tiny fraction of a second to ensure Bevy has rendered the first frame,
+                // then fade it out.
+                setTimeout(() => {
+                    const loader = document.getElementById('loader');
+                    loader.classList.add('fade-out');
+                }, 500);
+            } catch (error) {
+                console.error("Failed to load Vector Arena:", error);
+                document.querySelector('.loading-text').textContent = "Initialization Failed. Please refresh.";
+                document.querySelector('.loading-text').style.color = "#ff3f3f";
+            }
+        }
+
+        // Prevent right-click context menu so Right Click excavation feels native
+        window.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+
+        start();
+    </script>
+</body>
+
+</html>

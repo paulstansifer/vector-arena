@@ -1,0 +1,68 @@
+name: Build and Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+# Ensure only one concurrent deployment runs at a time
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+# Grant write permissions to update the gh-pages branch
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    name: Build WASM & Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # Cache Cargo registry and target to speed up Bevy build times dramatically
+      - name: Cache Cargo registry and build target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # Install wasm-bindgen-cli using the official prebuilt binary runner (very fast!)
+      - name: Install wasm-bindgen-cli
+        uses: jetli/wasm-bindgen-action@v0.4.0
+        with:
+          version: '0.2.121'
+
+      # Compile the workspace for the WASM target in release mode
+      - name: Build Rust WebAssembly Target
+        run: cargo build --release --target wasm32-unknown-unknown
+
+      # Generate WebAssembly bindings and copy files to the dist directory
+      - name: Bundle Web Application
+        run: |
+          mkdir -p dist
+          cp index.html dist/
+          wasm-bindgen --target web --out-dir dist --out-name vector_arena ./target/wasm32-unknown-unknown/release/vector-arena.wasm
+
+      # Deploy the contents of the dist folder to the gh-pages branch
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          force_orphan: true
+          commit_message: "Deploying Vector Arena to GitHub Pages [skip ci]"
