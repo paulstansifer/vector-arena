@@ -66,8 +66,8 @@ fn split_partition(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition
     };
 
     match axis {
-        SplitAxis::Vertical => split_vertical(&bounds, rng),
-        SplitAxis::Horizontal => split_horizontal(&bounds, rng),
+        SplitAxis::Vertical => split_vertical(bounds, rng),
+        SplitAxis::Horizontal => split_horizontal(bounds, rng),
     }
 }
 

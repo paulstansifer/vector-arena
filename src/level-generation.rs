@@ -48,8 +48,7 @@ impl TerrainGeometry {
                         if let PartitionRole::Corridor {
                             double_width: false,
                         } = allocated_partitions[j].1
-                        {
-                            if partitions_share_connection(
+                            && partitions_share_connection(
                                 &allocated_partitions[i].0,
                                 &allocated_partitions[j].0,
                             ) {
@@ -57,7 +56,6 @@ impl TerrainGeometry {
                                     PartitionRole::Corridor { double_width: true };
                                 changed = true;
                             }
-                        }
                     }
                 }
             }
