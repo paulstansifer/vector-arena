@@ -96,17 +96,20 @@ fn setup(
 
     let door_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.25, 0.1)));
     for door in &terrain_geometry.doors {
-        let width = door.rect.width();
-        let height = door.rect.height();
-        let center = door.rect.center();
+        let phys_width = door.phys_rect.width();
+        let phys_height = door.phys_rect.height();
+        let center = door.phys_rect.center();
+
+        let disp_width = door.disp_rect.width();
+        let disp_height = door.disp_rect.height();
 
         let door_entity = commands
             .spawn((
-                Mesh2d(meshes.add(Rectangle::new(width, height))),
+                Mesh2d(meshes.add(Rectangle::new(disp_width, disp_height))),
                 MeshMaterial2d(door_material.clone()),
                 Transform::from_translation(Vec3::new(center.x, center.y, 1.0)),
                 RigidBody::Dynamic,
-                Collider::rectangle(width, height),
+                Collider::rectangle(phys_width, phys_height),
             ))
             .id();
 

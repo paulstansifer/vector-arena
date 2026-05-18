@@ -2,7 +2,9 @@ use crate::bsp::{Partition, partition_space};
 use geo::{BooleanOps, LineString, MultiPolygon, Polygon, Rect, Translate};
 use rand::prelude::*;
 
+/// Space around the edge of the map
 pub const MARGIN: f32 = 10.0;
+/// Minimum thickness around a room
 pub const PADDING: f32 = 20.0;
 pub const CORRIDOR_WIDTH: f32 = 35.0;
 const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
@@ -16,7 +18,8 @@ pub struct TerrainGeometry {
 
 #[derive(Clone, Copy)]
 pub struct DoorGeometry {
-    pub rect: Rect<f32>,
+    pub phys_rect: Rect<f32>,
+    pub disp_rect: Rect<f32>,
     pub hinge: (f32, f32),
 }
 
@@ -51,11 +54,12 @@ impl TerrainGeometry {
                             && partitions_share_connection(
                                 &allocated_partitions[i].0,
                                 &allocated_partitions[j].0,
-                            ) {
-                                allocated_partitions[j].1 =
-                                    PartitionRole::Corridor { double_width: true };
-                                changed = true;
-                            }
+                            )
+                        {
+                            allocated_partitions[j].1 =
+                                PartitionRole::Corridor { double_width: true };
+                            changed = true;
+                        }
                     }
                 }
             }
@@ -83,10 +87,8 @@ impl TerrainGeometry {
         let doors = doors
             .into_iter()
             .map(|mut d| {
-                d.rect = Rect::new(
-                    (d.rect.min().x + offset_x, d.rect.min().y + offset_y),
-                    (d.rect.max().x + offset_x, d.rect.max().y + offset_y),
-                );
+                d.phys_rect = d.phys_rect.translate(offset_x, offset_y);
+                d.disp_rect = d.disp_rect.translate(offset_x, offset_y);
                 d.hinge.0 += offset_x;
                 d.hinge.1 += offset_y;
                 d
@@ -306,45 +308,73 @@ enum ConnectionSide {
     Top,
 }
 
-fn create_door(side: ConnectionSide, room_entry: (f32, f32)) -> DoorGeometry {
-    let door_length = CORRIDOR_WIDTH - 4.0;
-    let thickness = 5.0;
+fn make_door(
+    side: ConnectionSide,
+    room_entry: (f32, f32),
+    thickness: f32,
+    phys_span: (f32, f32),
+    disp_span: (f32, f32),
+    hinge_at_start: bool,
+) -> DoorGeometry {
+    if side.is_vertical() {
+        let x0 = if let ConnectionSide::Left = side {
+            room_entry.0 - thickness
+        } else {
+            room_entry.0
+        };
+        let x1 = x0 + thickness;
+        let hinge = (
+            x0 + thickness / 2.0,
+            if hinge_at_start {
+                phys_span.0
+            } else {
+                phys_span.1
+            },
+        );
+        DoorGeometry {
+            phys_rect: Rect::new((x0, phys_span.0), (x1, phys_span.1)),
+            disp_rect: Rect::new((x0, disp_span.0), (x1, disp_span.1)),
+            hinge,
+        }
+    } else {
+        let y0 = if let ConnectionSide::Bottom = side {
+            room_entry.1 - thickness
+        } else {
+            room_entry.1
+        };
+        let y1 = y0 + thickness;
+        let hinge = (
+            if hinge_at_start {
+                phys_span.0
+            } else {
+                phys_span.1
+            },
+            y0 + thickness / 2.0,
+        );
+        DoorGeometry {
+            phys_rect: Rect::new((phys_span.0, y0), (phys_span.1, y1)),
+            disp_rect: Rect::new((disp_span.0, y0), (disp_span.1, y1)),
+            hinge,
+        }
+    }
+}
 
-    let (min_x, max_x, min_y, max_y, hinge) = match side {
-        ConnectionSide::Left => {
-            let x0 = room_entry.0 - thickness;
-            let x1 = room_entry.0;
-            let y0 = room_entry.1 - door_length / 2.0;
-            let y1 = room_entry.1 + door_length / 2.0;
-            (x0, x1, y0, y1, (x0 + thickness / 2.0, y0))
-        }
-        ConnectionSide::Right => {
-            let x0 = room_entry.0;
-            let x1 = room_entry.0 + thickness;
-            let y0 = room_entry.1 - door_length / 2.0;
-            let y1 = room_entry.1 + door_length / 2.0;
-            (x0, x1, y0, y1, (x0 + thickness / 2.0, y0))
-        }
-        ConnectionSide::Bottom => {
-            let x0 = room_entry.0 - door_length / 2.0;
-            let x1 = room_entry.0 + door_length / 2.0;
-            let y0 = room_entry.1 - thickness;
-            let y1 = room_entry.1;
-            (x0, x1, y0, y1, (x0, y0 + thickness / 2.0))
-        }
-        ConnectionSide::Top => {
-            let x0 = room_entry.0 - door_length / 2.0;
-            let x1 = room_entry.0 + door_length / 2.0;
-            let y0 = room_entry.1;
-            let y1 = room_entry.1 + thickness;
-            (x0, x1, y0, y1, (x0, y0 + thickness / 2.0))
-        }
+fn create_door(side: ConnectionSide, room_entry: (f32, f32)) -> DoorGeometry {
+    let thickness = 5.0;
+    let phys_len = CORRIDOR_WIDTH - 4.0;
+    let entry_mid = if side.is_vertical() {
+        room_entry.1
+    } else {
+        room_entry.0
     };
 
-    DoorGeometry {
-        rect: Rect::new((min_x, min_y), (max_x, max_y)),
-        hinge,
-    }
+    let phys_span = (entry_mid - phys_len / 2.0, entry_mid + phys_len / 2.0);
+    let disp_span = (
+        entry_mid - CORRIDOR_WIDTH / 2.0,
+        entry_mid + CORRIDOR_WIDTH / 2.0,
+    );
+
+    make_door(side, room_entry, thickness, phys_span, disp_span, true)
 }
 
 fn create_double_door(
@@ -353,106 +383,23 @@ fn create_double_door(
 ) -> (DoorGeometry, DoorGeometry) {
     let thickness = 5.0;
     let w = CORRIDOR_WIDTH * 2.0;
-    let panel_length = (w - 8.0) / 2.0; // 31.0
+    let entry_mid = if side.is_vertical() {
+        room_entry.1
+    } else {
+        room_entry.0
+    };
 
-    match side {
-        ConnectionSide::Left => {
-            let x0 = room_entry.0 - thickness;
-            let x1 = room_entry.0;
-            // Panel 1: bottom panel
-            let y0_1 = room_entry.1 - (w / 2.0 - 2.0); // room_entry.1 - 33.0
-            let y1_1 = y0_1 + panel_length; // room_entry.1 - 2.0
-            let hinge_1 = (x0 + thickness / 2.0, y0_1); // hinged at the bottom end of panel 1
+    // Panel 1: bottom/left panel
+    let phys_span_1 = (entry_mid - (w / 2.0 - 2.0), entry_mid - 2.0);
+    let disp_span_1 = (entry_mid - w / 2.0, entry_mid);
+    let panel_1 = make_door(side, room_entry, thickness, phys_span_1, disp_span_1, true);
 
-            // Panel 2: top panel
-            let y0_2 = room_entry.1 + 2.0;
-            let y1_2 = y0_2 + panel_length;
-            let hinge_2 = (x0 + thickness / 2.0, y1_2); // hinged at the top end of panel 2
+    // Panel 2: top/right panel
+    let phys_span_2 = (entry_mid + 2.0, entry_mid + (w / 2.0 - 2.0));
+    let disp_span_2 = (entry_mid, entry_mid + w / 2.0);
+    let panel_2 = make_door(side, room_entry, thickness, phys_span_2, disp_span_2, false);
 
-            (
-                DoorGeometry {
-                    rect: Rect::new((x0, y0_1), (x1, y1_1)),
-                    hinge: hinge_1,
-                },
-                DoorGeometry {
-                    rect: Rect::new((x0, y0_2), (x1, y1_2)),
-                    hinge: hinge_2,
-                },
-            )
-        }
-        ConnectionSide::Right => {
-            let x0 = room_entry.0;
-            let x1 = room_entry.0 + thickness;
-            // Panel 1: bottom panel
-            let y0_1 = room_entry.1 - (w / 2.0 - 2.0);
-            let y1_1 = y0_1 + panel_length;
-            let hinge_1 = (x0 + thickness / 2.0, y0_1);
-
-            // Panel 2: top panel
-            let y0_2 = room_entry.1 + 2.0;
-            let y1_2 = y0_2 + panel_length;
-            let hinge_2 = (x0 + thickness / 2.0, y1_2);
-
-            (
-                DoorGeometry {
-                    rect: Rect::new((x0, y0_1), (x1, y1_1)),
-                    hinge: hinge_1,
-                },
-                DoorGeometry {
-                    rect: Rect::new((x0, y0_2), (x1, y1_2)),
-                    hinge: hinge_2,
-                },
-            )
-        }
-        ConnectionSide::Bottom => {
-            let y0 = room_entry.1 - thickness;
-            let y1 = room_entry.1;
-            // Panel 1: left panel
-            let x0_1 = room_entry.0 - (w / 2.0 - 2.0);
-            let x1_1 = x0_1 + panel_length;
-            let hinge_1 = (x0_1, y0 + thickness / 2.0);
-
-            // Panel 2: right panel
-            let x0_2 = room_entry.0 + 2.0;
-            let x1_2 = x0_2 + panel_length;
-            let hinge_2 = (x1_2, y0 + thickness / 2.0);
-
-            (
-                DoorGeometry {
-                    rect: Rect::new((x0_1, y0), (x1_1, y1)),
-                    hinge: hinge_1,
-                },
-                DoorGeometry {
-                    rect: Rect::new((x0_2, y0), (x1_2, y1)),
-                    hinge: hinge_2,
-                },
-            )
-        }
-        ConnectionSide::Top => {
-            let y0 = room_entry.1;
-            let y1 = room_entry.1 + thickness;
-            // Panel 1: left panel
-            let x0_1 = room_entry.0 - (w / 2.0 - 2.0);
-            let x1_1 = x0_1 + panel_length;
-            let hinge_1 = (x0_1, y0 + thickness / 2.0);
-
-            // Panel 2: right panel
-            let x0_2 = room_entry.0 + 2.0;
-            let x1_2 = x0_2 + panel_length;
-            let hinge_2 = (x1_2, y0 + thickness / 2.0);
-
-            (
-                DoorGeometry {
-                    rect: Rect::new((x0_1, y0), (x1_1, y1)),
-                    hinge: hinge_1,
-                },
-                DoorGeometry {
-                    rect: Rect::new((x0_2, y0), (x1_2, y1)),
-                    hinge: hinge_2,
-                },
-            )
-        }
-    }
+    (panel_1, panel_2)
 }
 
 impl ConnectionSide {
