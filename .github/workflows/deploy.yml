@@ -43,7 +43,7 @@ jobs:
 
       # Install wasm-bindgen-cli using the official prebuilt binary runner (very fast!)
       - name: Install wasm-bindgen-cli
-        uses: jetli/wasm-bindgen-action@v0.4.0
+        uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           version: '0.2.121'
 
