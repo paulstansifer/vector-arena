@@ -10,7 +10,7 @@ pub const CORRIDOR_WIDTH: f32 = 35.0;
 const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
 
 pub struct TerrainGeometry {
-    pub polygon: MultiPolygon<f32>,
+    pub solid_rock: MultiPolygon<f32>,
     pub playable_area: MultiPolygon<f32>,
     pub rooms: Vec<Rect<f32>>,
     pub doors: Vec<DoorGeometry>,
@@ -26,7 +26,10 @@ pub struct DoorGeometry {
 impl TerrainGeometry {
     pub fn new(width: f32, height: f32) -> Self {
         let mut rng = rand::thread_rng();
+        Self::new_seeded(width, height, &mut rng)
+    }
 
+    pub fn new_seeded(width: f32, height: f32, rng: &mut impl Rng) -> Self {
         // The playable area bounds
         let bounds = Partition {
             x: (MARGIN, width - MARGIN),
@@ -35,8 +38,8 @@ impl TerrainGeometry {
             vert_conn: (vec![], vec![]),
         };
 
-        let partitions = partition_space(bounds, &mut rng);
-        let mut allocated_partitions = allocate_roles(partitions, &mut rng);
+        let partitions = partition_space(bounds, rng);
+        let mut allocated_partitions = allocate_roles(partitions, rng);
 
         // Propagate double_width between adjacent corridors
         let mut changed = true;
@@ -65,7 +68,16 @@ impl TerrainGeometry {
             }
         }
 
-        let (rooms, playable_area, doors) = render(&allocated_partitions, &mut rng);
+        Self::from_partitions_and_roles(width, height, allocated_partitions, rng)
+    }
+
+    pub fn from_partitions_and_roles(
+        width: f32,
+        height: f32,
+        allocated_partitions: Vec<(Partition, PartitionRole)>,
+        rng: &mut impl Rng,
+    ) -> Self {
+        let (rooms, playable_area, doors) = render(&allocated_partitions, rng);
 
         // The terrain is the bounds minus the playable area
         let earth = Rect::<f32>::new((0.0, 0.0), (width, height));
@@ -96,7 +108,7 @@ impl TerrainGeometry {
             .collect();
 
         TerrainGeometry {
-            polygon: geometry,
+            solid_rock: geometry,
             playable_area,
             rooms,
             doors,
@@ -107,14 +119,15 @@ impl TerrainGeometry {
 const EMPTY_PROB: f32 = 0.3; // if a partition is a dead end, the probability it will be empty
 const CORRIDOR_PROB: f32 = 0.45; // otherwise, the probability it will be a corridor
 
-enum PartitionRole {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PartitionRole {
     Room,
     Corridor { double_width: bool },
     Empty,
 }
 
 // Dead ends may be empty or rooms. Other partitions may be corridors or rooms.
-fn allocate_roles(p: Vec<Partition>, rng: &mut ThreadRng) -> Vec<(Partition, PartitionRole)> {
+fn allocate_roles(p: Vec<Partition>, rng: &mut impl Rng) -> Vec<(Partition, PartitionRole)> {
     p.into_iter()
         .map(|partition| {
             let connection_count = partition.connection_count();
@@ -184,7 +197,7 @@ fn is_double_width_corridor_connection(
 // Returns rooms and a multipolygon representing passable space.
 fn render(
     bsp: &[(Partition, PartitionRole)],
-    rng: &mut ThreadRng,
+    rng: &mut impl Rng,
 ) -> (Vec<Rect<f32>>, MultiPolygon<f32>, Vec<DoorGeometry>) {
     let mut rooms = Vec::new();
     let mut playables = MultiPolygon::new(vec![]);

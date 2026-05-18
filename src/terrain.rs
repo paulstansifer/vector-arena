@@ -9,7 +9,7 @@ use std::sync::Arc;
 #[path = "level-generation.rs"]
 pub mod level_generation;
 
-pub use level_generation::{CORRIDOR_WIDTH, PADDING, TerrainGeometry};
+pub use level_generation::{CORRIDOR_WIDTH, PADDING, TerrainGeometry, PartitionRole};
 
 /// Convert the terrain geometry to a Bevy mesh for rendering.
 pub fn geometry_to_mesh(geometry: &MultiPolygon<f32>) -> Mesh {

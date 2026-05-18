@@ -5,12 +5,9 @@ use bevy_landmass::prelude::*;
 use geo::{BooleanOps, MultiPolygon};
 use rand::prelude::*;
 
-mod bsp;
-mod fov;
-mod monster;
-mod nav;
-mod player;
-mod terrain;
+use vector_arena::AGENT_RADIUS;
+use vector_arena::{fov, monster, nav, player, terrain};
+use vector_arena::{WorldBounds, WorldObstacles};
 
 use monster::Monster;
 use player::{MoveTarget, PLAYER_SPEED, Player, move_player, set_target_on_click};
@@ -18,17 +15,6 @@ use terrain::{
     TerrainGeometry, geometry_to_collider, geometry_to_mesh, handle_right_click_excavation,
     playable_area_to_nav_mesh,
 };
-
-pub const AGENT_RADIUS: f32 = 10.0;
-
-#[derive(Resource)]
-struct WorldBounds {
-    width: f32,
-    height: f32,
-}
-
-#[derive(Resource)]
-pub struct WorldObstacles(pub geo::MultiPolygon<f32>);
 
 #[derive(Component)]
 struct FovMeshMarker;
@@ -80,8 +66,8 @@ fn setup(
     let terrain_geometry = TerrainGeometry::new(window_width, window_height);
 
     // Spawn terrain entity with mesh and collider
-    let terrain_mesh = geometry_to_mesh(&terrain_geometry.polygon);
-    let terrain_collider = geometry_to_collider(&terrain_geometry.polygon);
+    let terrain_mesh = geometry_to_mesh(&terrain_geometry.solid_rock);
+    let terrain_collider = geometry_to_collider(&terrain_geometry.solid_rock);
 
     let terrain_entity = commands
         .spawn((
@@ -127,7 +113,7 @@ fn setup(
         width: window_width,
         height: window_height,
     });
-    commands.insert_resource(WorldObstacles(terrain_geometry.polygon.clone()));
+    commands.insert_resource(WorldObstacles(terrain_geometry.solid_rock.clone()));
     commands.insert_resource(terrain::PlayableArea(
         terrain_geometry.playable_area.clone(),
     ));

@@ -32,7 +32,7 @@ impl Partition {
     }
 }
 
-pub fn partition_space(bounds: Partition, rng: &mut ThreadRng) -> Vec<Partition> {
+pub fn partition_space(bounds: Partition, rng: &mut impl Rng) -> Vec<Partition> {
     let mut stack = vec![bounds];
     let mut output = Vec::new();
 
@@ -48,7 +48,7 @@ pub fn partition_space(bounds: Partition, rng: &mut ThreadRng) -> Vec<Partition>
     output
 }
 
-fn split_partition(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition, Partition)> {
+fn split_partition(bounds: &Partition, rng: &mut impl Rng) -> Option<(Partition, Partition)> {
     let width = bounds.x.1 - bounds.x.0;
     let height = bounds.y.1 - bounds.y.0;
 
@@ -77,11 +77,11 @@ enum SplitAxis {
     Horizontal,
 }
 
-fn split_vertical(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition, Partition)> {
+fn split_vertical(bounds: &Partition, rng: &mut impl Rng) -> Option<(Partition, Partition)> {
     split_horizontal(&bounds.transpose(), rng).map(|(a, b)| (a.transpose(), b.transpose()))
 }
 
-fn split_horizontal(bounds: &Partition, rng: &mut ThreadRng) -> Option<(Partition, Partition)> {
+fn split_horizontal(bounds: &Partition, rng: &mut impl Rng) -> Option<(Partition, Partition)> {
     let SplitRange { start, end } = SplitRange::new(bounds.y, &bounds.horz_conn);
     let split_y = choose_split_coordinate(
         start,
@@ -160,7 +160,7 @@ fn choose_split_coordinate(
     existing0: &[f32],
     existing1: &[f32],
     connection_margin: f32,
-    rng: &mut ThreadRng,
+    rng: &mut impl Rng,
 ) -> Option<f32> {
     if end <= start {
         return None;
@@ -224,7 +224,7 @@ fn allocate_coords(coords: &[f32], range: (f32, f32)) -> Vec<f32> {
         .collect()
 }
 
-fn internal_connection_count(length: f32, rng: &mut ThreadRng) -> usize {
+fn internal_connection_count(length: f32, rng: &mut impl Rng) -> usize {
     if length >= DOUBLE_CONNECTION_UNCERTAIN.end {
         2
     } else if DOUBLE_CONNECTION_UNCERTAIN.contains(&length) {

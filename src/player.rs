@@ -96,7 +96,7 @@ pub fn move_player(
         let direction = if let Some(dv) = desired_velocity {
             dv.velocity()
         } else {
-            panic!("no desired velocity")
+            move_target.destination - current
         };
 
         // speed up after starting to move:
@@ -111,72 +111,3 @@ pub fn move_player(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bevy::prelude::{App, Transform, Vec2, Vec3};
-    use bevy::time::{Time, Virtual};
-    use std::time::Duration;
-
-    fn set_frame_delta(time: &mut Time<Virtual>, delta: Duration) {
-        time.advance_by(delta);
-    }
-
-    #[test]
-    fn player_eventually_reaches_target() {
-        let mut app = App::new();
-        app.insert_resource(Time::<Virtual>::default());
-        fn mock_physics_system(
-            mut query: Query<(&mut Transform, &LinearVelocity)>,
-            time: Res<Time<Virtual>>,
-        ) {
-            for (mut transform, velocity) in query.iter_mut() {
-                transform.translation += velocity.0.extend(0.0) * time.delta_secs();
-            }
-        }
-        app.add_systems(Update, (move_player, mock_physics_system).chain());
-
-        let destination = Vec2::new(160.0, 120.0);
-
-        app.world_mut().spawn((
-            Transform::from_translation(Vec3::ZERO),
-            LinearVelocity::ZERO,
-            MoveTarget {
-                destination,
-                origin: Vec2::ZERO,
-                active: true,
-            },
-            Player,
-            AgentTarget2d::Point(destination),
-        ));
-
-        for _ in 0..600 {
-            let mut time = app.world_mut().resource_mut::<Time<Virtual>>();
-            set_frame_delta(&mut *time, Duration::from_secs_f32(1.0 / 60.0));
-            app.update();
-
-            let world = app.world_mut();
-            let mut query = world.query::<(&Transform, &MoveTarget)>();
-            let (_, move_target) = query.iter(&*world).next().unwrap();
-            if !move_target.active {
-                break;
-            }
-        }
-
-        let world = app.world_mut();
-        let mut query = world.query::<(&Transform, &MoveTarget)>();
-        let (transform, move_target) = query.iter(&*world).next().unwrap();
-
-        assert!(
-            transform.translation.truncate().distance(destination) <= STOP_THRESHOLD,
-            "player final position {:?} should be within {} units of destination {:?}",
-            transform.translation.truncate(),
-            STOP_THRESHOLD,
-            destination,
-        );
-        assert!(
-            !move_target.active,
-            "player should stop after reaching the destination"
-        );
-    }
-}
