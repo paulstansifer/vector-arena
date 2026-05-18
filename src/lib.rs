@@ -12,6 +12,3 @@ pub struct WorldBounds {
     pub width: f32,
     pub height: f32,
 }
-
-#[derive(bevy::prelude::Resource)]
-pub struct WorldObstacles(pub geo::MultiPolygon<f32>);

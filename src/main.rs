@@ -7,13 +7,14 @@ use rand::prelude::*;
 
 use vector_arena::AGENT_RADIUS;
 use vector_arena::{fov, monster, nav, player, terrain};
-use vector_arena::{WorldBounds, WorldObstacles};
+use vector_arena::WorldBounds;
 
 use monster::Monster;
 use player::{MoveTarget, PLAYER_SPEED, Player, move_player, set_target_on_click};
 use terrain::{
     TerrainGeometry, geometry_to_collider, geometry_to_mesh, handle_right_click_excavation,
-    playable_area_to_nav_mesh,
+    playable_area_to_nav_mesh, DungeonState, DungeonVisuals, DungeonCollider, DungeonNavMesh,
+    TerrainMarker, NavMeshIslandMarker, sync_dungeon_to_entities,
 };
 
 #[derive(Component)]
@@ -39,6 +40,7 @@ fn main() {
         .add_systems(Update, nav::apply_agent_velocity)
         .add_systems(Update, update_fov)
         .add_systems(Update, handle_right_click_excavation)
+        .add_systems(Update, sync_dungeon_to_entities)
         .insert_resource(Gravity::ZERO)
         .run();
 }
@@ -65,14 +67,34 @@ fn setup(
 
     let terrain_geometry = TerrainGeometry::new(window_width, window_height);
 
-    // Spawn terrain entity with mesh and collider
+    // Build the underlying canonical state, visuals, collider, and navmesh
     let terrain_mesh = geometry_to_mesh(&terrain_geometry.solid_rock);
     let terrain_collider = geometry_to_collider(&terrain_geometry.solid_rock);
+    let valid_nav_mesh = playable_area_to_nav_mesh(&terrain_geometry.playable_area);
 
+    let terrain_mesh_handle = meshes.add(terrain_mesh);
+    let nav_mesh_handle = nav_meshes.add(NavMesh2d {
+        nav_mesh: valid_nav_mesh,
+    });
+
+    let dungeon_state = DungeonState {
+        solid_rock: terrain_geometry.solid_rock.clone(),
+        playable_area: terrain_geometry.playable_area.clone(),
+    };
+    let dungeon_visuals = DungeonVisuals(terrain_mesh_handle.clone());
+    let dungeon_collider = DungeonCollider(terrain_collider.clone());
+    let dungeon_nav_mesh = DungeonNavMesh(nav_mesh_handle.clone());
+
+    commands.insert_resource(dungeon_state);
+    commands.insert_resource(dungeon_visuals);
+    commands.insert_resource(dungeon_collider);
+    commands.insert_resource(dungeon_nav_mesh);
+
+    // Spawn terrain entity with mesh and collider from the resources
     let terrain_entity = commands
         .spawn((
-            terrain::TerrainMarker,
-            Mesh2d(meshes.add(terrain_mesh)),
+            TerrainMarker,
+            Mesh2d(terrain_mesh_handle),
             MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.4, 0.4, 0.4)))),
             Transform::default(),
             terrain_collider,
@@ -113,10 +135,6 @@ fn setup(
         width: window_width,
         height: window_height,
     });
-    commands.insert_resource(WorldObstacles(terrain_geometry.solid_rock.clone()));
-    commands.insert_resource(terrain::PlayableArea(
-        terrain_geometry.playable_area.clone(),
-    ));
     let rubble_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.45, 0.42)));
     commands.insert_resource(terrain::RubbleMaterial(rubble_material));
 
@@ -131,19 +149,13 @@ fn setup(
         Transform::from_translation(Vec3::new(0.0, 0.0, 50.0)),
     ));
 
-    // Build the navigation mesh from the playable area
-    let valid_nav_mesh = playable_area_to_nav_mesh(&terrain_geometry.playable_area);
-    let nav_mesh_handle = nav_meshes.add(NavMesh2d {
-        nav_mesh: valid_nav_mesh,
-    });
-
     // Spawn the island (navigation surface) for landmass
     commands.spawn((
-        terrain::NavMeshIslandMarker,
+        NavMeshIslandMarker,
         Island2dBundle {
             island: Island,
             archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
-            nav_mesh: NavMeshHandle(nav_mesh_handle.clone()),
+            nav_mesh: NavMeshHandle(nav_mesh_handle),
         },
     ));
 
@@ -221,7 +233,7 @@ fn update_fov(
     player_query: Query<&Transform, (With<Player>, Changed<Transform>)>,
     fov_mesh_query: Query<&Mesh2d, With<FovMeshMarker>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    obstacles: Res<WorldObstacles>,
+    dungeon_state: Res<DungeonState>,
     bounds: Res<WorldBounds>,
 ) {
     let Ok(player_transform) = player_query.single() else {
@@ -234,7 +246,7 @@ fn update_fov(
     let origin = player_transform.translation.truncate();
     let radius = 600.0;
 
-    let fov_poly = fov::fov_arc(origin, radius, None, &obstacles.0);
+    let fov_poly = fov::fov_arc(origin, radius, None, &dungeon_state.solid_rock);
     let fov_multi = MultiPolygon::new(vec![fov_poly]);
 
     let w = bounds.width;

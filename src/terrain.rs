@@ -141,5 +141,51 @@ pub fn playable_area_to_nav_mesh(playable_area: &MultiPolygon<f32>) -> Arc<Valid
 pub mod crumble_terrain;
 
 pub use crumble_terrain::{
-    NavMeshIslandMarker, PlayableArea, RubbleMaterial, TerrainMarker, handle_right_click_excavation,
+    RubbleMaterial, handle_right_click_excavation, subtract_polygon_from_terrain,
 };
+
+#[derive(Component)]
+pub struct TerrainMarker;
+
+#[derive(Component)]
+pub struct NavMeshIslandMarker;
+
+#[derive(Resource)]
+pub struct DungeonState {
+    pub solid_rock: MultiPolygon<f32>,
+    pub playable_area: MultiPolygon<f32>,
+}
+
+#[derive(Resource)]
+pub struct DungeonNavMesh(pub Handle<NavMesh2d>);
+
+#[derive(Resource)]
+pub struct DungeonCollider(pub Collider);
+
+#[derive(Resource)]
+pub struct DungeonVisuals(pub Handle<Mesh>);
+
+/// Bevy system to sync dungeon state changes from resources to entity components.
+pub fn sync_dungeon_to_entities(
+    dungeon_visuals: Res<DungeonVisuals>,
+    dungeon_collider: Res<DungeonCollider>,
+    dungeon_nav_mesh: Res<DungeonNavMesh>,
+    mut terrain_query: Query<(&mut Mesh2d, &mut Collider), With<TerrainMarker>>,
+    mut island_query: Query<&mut bevy_landmass::NavMeshHandle<TwoD>, With<NavMeshIslandMarker>>,
+) {
+    if dungeon_visuals.is_changed() {
+        if let Ok((mut mesh, _)) = terrain_query.single_mut() {
+            mesh.0 = dungeon_visuals.0.clone();
+        }
+    }
+    if dungeon_collider.is_changed() {
+        if let Ok((_, mut collider)) = terrain_query.single_mut() {
+            *collider = dungeon_collider.0.clone();
+        }
+    }
+    if dungeon_nav_mesh.is_changed() {
+        if let Ok(mut nav_mesh_handle) = island_query.single_mut() {
+            nav_mesh_handle.0 = dungeon_nav_mesh.0.clone();
+        }
+    }
+}

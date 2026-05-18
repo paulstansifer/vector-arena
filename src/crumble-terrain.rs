@@ -1,4 +1,7 @@
-use crate::terrain::{geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh};
+use crate::terrain::{
+    geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh,
+    DungeonState, DungeonNavMesh, DungeonCollider, DungeonVisuals,
+};
 use avian2d::math::PI;
 use avian2d::prelude::*;
 use bevy::prelude::*;
@@ -8,16 +11,7 @@ use geo::{
 };
 
 #[derive(Component)]
-pub struct TerrainMarker;
-
-#[derive(Component)]
-pub struct NavMeshIslandMarker;
-
-#[derive(Component)]
 pub struct Rubble;
-
-#[derive(Resource)]
-pub struct PlayableArea(pub MultiPolygon<f32>);
 
 #[derive(Resource)]
 pub struct RubbleMaterial(pub Handle<ColorMaterial>);
@@ -44,45 +38,39 @@ pub fn create_circle_polygon(center: Vec2, radius: f32, points: usize) -> Polygo
 pub fn subtract_polygon_from_terrain(
     commands: &mut Commands,
     input_polygon: &MultiPolygon<f32>,
-    terrain_query: &mut Query<(Entity, &mut Mesh2d, &mut Collider), With<TerrainMarker>>,
-    island_query: &mut Query<&mut bevy_landmass::NavMeshHandle<TwoD>, With<NavMeshIslandMarker>>,
-    mut world_obstacles: ResMut<crate::WorldObstacles>,
-    mut playable_area: ResMut<PlayableArea>,
+    mut dungeon_state: ResMut<DungeonState>,
+    mut dungeon_visuals: ResMut<DungeonVisuals>,
+    mut dungeon_collider: ResMut<DungeonCollider>,
+    mut dungeon_nav_mesh: ResMut<DungeonNavMesh>,
     meshes: &mut Assets<Mesh>,
     nav_meshes: &mut Assets<NavMesh2d>,
     rubble_material: &Handle<ColorMaterial>,
 ) {
     // 1. Calculate the intersection of the input polygon and the current terrain walls
-    let intersection = world_obstacles.0.intersection(input_polygon);
+    let intersection = dungeon_state.solid_rock.intersection(input_polygon);
 
     // 2. Subtract the input polygon from the terrain walls
-    let new_terrain = world_obstacles.0.difference(input_polygon);
-    world_obstacles.0 = new_terrain.clone();
+    let new_terrain = dungeon_state.solid_rock.difference(input_polygon);
+    dungeon_state.solid_rock = new_terrain.clone();
 
     // 3. Expand the playable area by the intersection
-    let new_playable_area = playable_area.0.union(&intersection);
-    playable_area.0 = new_playable_area.clone();
+    let new_playable_area = dungeon_state.playable_area.union(&intersection);
+    dungeon_state.playable_area = new_playable_area.clone();
 
-    // 4. Update the terrain entity's collider and visual mesh
-    if let Ok((_entity, mut mesh_handle, mut collider)) = terrain_query.single_mut() {
-        // Regenerate visual mesh
-        let new_mesh = geometry_to_mesh(&new_terrain);
-        // Replace mesh handle
-        *mesh_handle = Mesh2d(meshes.add(new_mesh));
+    // 4. Update the terrain visual mesh Resource
+    let new_mesh = geometry_to_mesh(&new_terrain);
+    dungeon_visuals.0 = meshes.add(new_mesh);
 
-        // Regenerate collider
-        *collider = geometry_to_collider(&new_terrain);
-    }
+    // 5. Update the terrain collider Resource
+    dungeon_collider.0 = geometry_to_collider(&new_terrain);
 
-    // 5. Regenerate navigation mesh
-    if let Ok(mut nav_mesh_handle) = island_query.single_mut() {
-        let valid_nav_mesh = playable_area_to_nav_mesh(&new_playable_area);
-        *nav_mesh_handle = bevy_landmass::NavMeshHandle(nav_meshes.add(NavMesh2d {
-            nav_mesh: valid_nav_mesh,
-        }));
-    }
+    // 6. Update the navmesh Resource
+    let valid_nav_mesh = playable_area_to_nav_mesh(&new_playable_area);
+    dungeon_nav_mesh.0 = nav_meshes.add(NavMesh2d {
+        nav_mesh: valid_nav_mesh,
+    });
 
-    // 6. Break up the rubble before shrinking
+    // 7. Break up the rubble before shrinking
     let mut rubble_polygons: Vec<Polygon<f32>> = intersection.iter().cloned().collect();
 
     loop {
@@ -221,10 +209,10 @@ pub fn handle_right_click_excavation(
     window: Single<&Window>,
     camera_query: Single<(&Camera, &GlobalTransform)>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
-    mut terrain_query: Query<(Entity, &mut Mesh2d, &mut Collider), With<TerrainMarker>>,
-    mut island_query: Query<&mut bevy_landmass::NavMeshHandle<TwoD>, With<NavMeshIslandMarker>>,
-    world_obstacles: Option<ResMut<crate::WorldObstacles>>,
-    playable_area: Option<ResMut<PlayableArea>>,
+    dungeon_state: Option<ResMut<DungeonState>>,
+    dungeon_visuals: Option<ResMut<DungeonVisuals>>,
+    dungeon_collider: Option<ResMut<DungeonCollider>>,
+    dungeon_nav_mesh: Option<ResMut<DungeonNavMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut nav_meshes: ResMut<Assets<NavMesh2d>>,
     rubble_material: Option<Res<RubbleMaterial>>,
@@ -244,9 +232,9 @@ pub fn handle_right_click_excavation(
         Err(_) => return,
     };
 
-    let (world_obstacles, playable_area, rubble_material) =
-        match (world_obstacles, playable_area, rubble_material) {
-            (Some(wo), Some(pa), Some(rm)) => (wo, pa, rm),
+    let (dungeon_state, dungeon_visuals, dungeon_collider, dungeon_nav_mesh, rubble_material) =
+        match (dungeon_state, dungeon_visuals, dungeon_collider, dungeon_nav_mesh, rubble_material) {
+            (Some(ds), Some(dv), Some(dc), Some(dn), Some(rm)) => (ds, dv, dc, dn, rm),
             _ => return,
         };
 
@@ -257,10 +245,10 @@ pub fn handle_right_click_excavation(
     subtract_polygon_from_terrain(
         &mut commands,
         &input_multipolygon,
-        &mut terrain_query,
-        &mut island_query,
-        world_obstacles,
-        playable_area,
+        dungeon_state,
+        dungeon_visuals,
+        dungeon_collider,
+        dungeon_nav_mesh,
         &mut meshes,
         &mut nav_meshes,
         &rubble_material.0,
