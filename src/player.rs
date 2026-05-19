@@ -15,9 +15,7 @@ pub struct MoveTarget {
     pub active: bool,
 }
 
-fn lerp(start: f32, end: f32, t: f32) -> f32 {
-    start + (end - start) * t
-}
+fn lerp(start: f32, end: f32, t: f32) -> f32 { start + (end - start) * t }
 
 pub fn set_target_on_click(
     window: Single<&Window>,
@@ -110,4 +108,3 @@ pub fn move_player(
         velocity.0 = direction.normalize_or_zero() * new_speed;
     }
 }
-

@@ -51,9 +51,8 @@ impl TerrainGeometry {
                         if i == j {
                             continue;
                         }
-                        if let PartitionRole::Corridor {
-                            double_width: false,
-                        } = allocated_partitions[j].1
+                        if let PartitionRole::Corridor { double_width: false } =
+                            allocated_partitions[j].1
                             && partitions_share_connection(
                                 &allocated_partitions[i].0,
                                 &allocated_partitions[j].0,
@@ -81,20 +80,15 @@ impl TerrainGeometry {
 
         // The terrain is the bounds minus the playable area
         let earth = Rect::<f32>::new((0.0, 0.0), (width, height));
-        let geometry = earth
-            .to_polygon()
-            .difference(&playable_area)
-            .translate(-width / 2.0, -height / 2.0);
+        let geometry =
+            earth.to_polygon().difference(&playable_area).translate(-width / 2.0, -height / 2.0);
 
         let offset_x = -width / 2.0;
         let offset_y = -height / 2.0;
 
         let playable_area = playable_area.translate(offset_x, offset_y);
 
-        let rooms = rooms
-            .into_iter()
-            .map(|r| r.translate(offset_x, offset_y))
-            .collect();
+        let rooms = rooms.into_iter().map(|r| r.translate(offset_x, offset_y)).collect();
 
         let doors = doors
             .into_iter()
@@ -107,12 +101,7 @@ impl TerrainGeometry {
             })
             .collect();
 
-        TerrainGeometry {
-            solid_rock: geometry,
-            playable_area,
-            rooms,
-            doors,
-        }
+        TerrainGeometry { solid_rock: geometry, playable_area, rooms, doors }
     }
 }
 
@@ -207,11 +196,7 @@ fn render(
     let empty_connections: Vec<(f32, f32)> = bsp
         .iter()
         .filter(|(_, role)| matches!(role, PartitionRole::Empty))
-        .flat_map(|(partition, _)| {
-            partition_connections(partition)
-                .into_iter()
-                .map(|c| (c.x, c.y))
-        })
+        .flat_map(|(partition, _)| partition_connections(partition).into_iter().map(|c| (c.x, c.y)))
         .collect();
 
     let is_live = |c: &ConnectionPoint| {
@@ -232,15 +217,8 @@ fn render(
 
                 for connection in partition_connections(partition).into_iter().filter(is_live) {
                     let is_double = is_double_width_corridor_connection(&connection, bsp);
-                    let width = if is_double {
-                        CORRIDOR_WIDTH * 2.0
-                    } else {
-                        CORRIDOR_WIDTH
-                    };
-                    union_all(
-                        &mut region,
-                        connect_room_to_connection(&room, connection, width),
-                    );
+                    let width = if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                    union_all(&mut region, connect_room_to_connection(&room, connection, width));
 
                     let door_prob = if is_double { 0.75 } else { 0.25 };
                     if rng.gen_bool(door_prob) {
@@ -270,31 +248,19 @@ fn render(
                 }
             }
             PartitionRole::Corridor { double_width } => {
-                let width = if *double_width {
-                    CORRIDOR_WIDTH * 2.0
-                } else {
-                    CORRIDOR_WIDTH
-                };
-                let connections: Vec<_> = partition_connections(partition)
-                    .into_iter()
-                    .filter(is_live)
-                    .collect();
+                let width = if *double_width { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                let connections: Vec<_> =
+                    partition_connections(partition).into_iter().filter(is_live).collect();
                 let center = partition_center(partition);
 
                 if connections.len() == 2
                     && connections[0].side.is_vertical() != connections[1].side.is_vertical()
                 {
-                    union_all(
-                        &mut region,
-                        connect_adjacent(connections[0], connections[1], width),
-                    );
+                    union_all(&mut region, connect_adjacent(connections[0], connections[1], width));
                 } else if !connections.is_empty() {
                     region = region.union(&bevel_at_point(center, width));
                     for connection in connections {
-                        union_all(
-                            &mut region,
-                            connect_point_to_center(connection, center, width),
-                        );
+                        union_all(&mut region, connect_point_to_center(connection, center, width));
                     }
                 }
             }
@@ -330,40 +296,20 @@ fn make_door(
     hinge_at_start: bool,
 ) -> DoorGeometry {
     if side.is_vertical() {
-        let x0 = if let ConnectionSide::Left = side {
-            room_entry.0 - thickness
-        } else {
-            room_entry.0
-        };
+        let x0 =
+            if let ConnectionSide::Left = side { room_entry.0 - thickness } else { room_entry.0 };
         let x1 = x0 + thickness;
-        let hinge = (
-            x0 + thickness / 2.0,
-            if hinge_at_start {
-                phys_span.0
-            } else {
-                phys_span.1
-            },
-        );
+        let hinge = (x0 + thickness / 2.0, if hinge_at_start { phys_span.0 } else { phys_span.1 });
         DoorGeometry {
             phys_rect: Rect::new((x0, phys_span.0), (x1, phys_span.1)),
             disp_rect: Rect::new((x0, disp_span.0), (x1, disp_span.1)),
             hinge,
         }
     } else {
-        let y0 = if let ConnectionSide::Bottom = side {
-            room_entry.1 - thickness
-        } else {
-            room_entry.1
-        };
+        let y0 =
+            if let ConnectionSide::Bottom = side { room_entry.1 - thickness } else { room_entry.1 };
         let y1 = y0 + thickness;
-        let hinge = (
-            if hinge_at_start {
-                phys_span.0
-            } else {
-                phys_span.1
-            },
-            y0 + thickness / 2.0,
-        );
+        let hinge = (if hinge_at_start { phys_span.0 } else { phys_span.1 }, y0 + thickness / 2.0);
         DoorGeometry {
             phys_rect: Rect::new((phys_span.0, y0), (phys_span.1, y1)),
             disp_rect: Rect::new((disp_span.0, y0), (disp_span.1, y1)),
@@ -375,17 +321,10 @@ fn make_door(
 fn create_door(side: ConnectionSide, room_entry: (f32, f32)) -> DoorGeometry {
     let thickness = 5.0;
     let phys_len = CORRIDOR_WIDTH - 4.0;
-    let entry_mid = if side.is_vertical() {
-        room_entry.1
-    } else {
-        room_entry.0
-    };
+    let entry_mid = if side.is_vertical() { room_entry.1 } else { room_entry.0 };
 
     let phys_span = (entry_mid - phys_len / 2.0, entry_mid + phys_len / 2.0);
-    let disp_span = (
-        entry_mid - CORRIDOR_WIDTH / 2.0,
-        entry_mid + CORRIDOR_WIDTH / 2.0,
-    );
+    let disp_span = (entry_mid - CORRIDOR_WIDTH / 2.0, entry_mid + CORRIDOR_WIDTH / 2.0);
 
     make_door(side, room_entry, thickness, phys_span, disp_span, true)
 }
@@ -396,11 +335,7 @@ fn create_double_door(
 ) -> (DoorGeometry, DoorGeometry) {
     let thickness = 5.0;
     let w = CORRIDOR_WIDTH * 2.0;
-    let entry_mid = if side.is_vertical() {
-        room_entry.1
-    } else {
-        room_entry.0
-    };
+    let entry_mid = if side.is_vertical() { room_entry.1 } else { room_entry.0 };
 
     // Panel 1: bottom/left panel
     let phys_span_1 = (entry_mid - (w / 2.0 - 2.0), entry_mid - 2.0);
@@ -416,9 +351,7 @@ fn create_double_door(
 }
 
 impl ConnectionSide {
-    fn is_vertical(&self) -> bool {
-        matches!(self, ConnectionSide::Left | ConnectionSide::Right)
-    }
+    fn is_vertical(&self) -> bool { matches!(self, ConnectionSide::Left | ConnectionSide::Right) }
 }
 
 #[derive(Copy, Clone)]
@@ -432,32 +365,16 @@ fn partition_connections(partition: &Partition) -> Vec<ConnectionPoint> {
     let mut connections = Vec::new();
 
     for &y in &partition.horz_conn.0 {
-        connections.push(ConnectionPoint {
-            x: partition.x.0,
-            y,
-            side: ConnectionSide::Left,
-        });
+        connections.push(ConnectionPoint { x: partition.x.0, y, side: ConnectionSide::Left });
     }
     for &y in &partition.horz_conn.1 {
-        connections.push(ConnectionPoint {
-            x: partition.x.1,
-            y,
-            side: ConnectionSide::Right,
-        });
+        connections.push(ConnectionPoint { x: partition.x.1, y, side: ConnectionSide::Right });
     }
     for &x in &partition.vert_conn.0 {
-        connections.push(ConnectionPoint {
-            x,
-            y: partition.y.0,
-            side: ConnectionSide::Bottom,
-        });
+        connections.push(ConnectionPoint { x, y: partition.y.0, side: ConnectionSide::Bottom });
     }
     for &x in &partition.vert_conn.1 {
-        connections.push(ConnectionPoint {
-            x,
-            y: partition.y.1,
-            side: ConnectionSide::Top,
-        });
+        connections.push(ConnectionPoint { x, y: partition.y.1, side: ConnectionSide::Top });
     }
 
     connections
@@ -479,10 +396,7 @@ fn shrink_room(partition: &Partition) -> Rect<f32> {
 }
 
 fn partition_center(partition: &Partition) -> (f32, f32) {
-    (
-        (partition.x.0 + partition.x.1) / 2.0,
-        (partition.y.0 + partition.y.1) / 2.0,
-    )
+    ((partition.x.0 + partition.x.1) / 2.0, (partition.y.0 + partition.y.1) / 2.0)
 }
 
 fn connect_room_to_connection(
@@ -609,17 +523,14 @@ mod tests {
         };
 
         let partitions = partition_space(bounds, &mut rng);
-        assert!(
-            partitions.len() >= 5,
-            "expected at least 5 partitions, got {}",
-            partitions.len()
-        );
+        assert!(partitions.len() >= 5, "expected at least 5 partitions, got {}", partitions.len());
 
         let connection_total: usize = partitions.iter().map(|p| p.connection_count()).sum();
 
         assert!(
             connection_total >= partitions.len() * 2,
-            "expected at least twice as many connections as partitions, got {} connections for {} partitions",
+            "expected at least twice as many connections as partitions, got {} connections for {} \
+             partitions",
             connection_total,
             partitions.len(),
         );

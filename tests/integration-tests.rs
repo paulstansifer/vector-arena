@@ -1,14 +1,14 @@
-use bevy::prelude::*;
-use bevy_landmass::prelude::*;
-use bevy_landmass::NavMeshHandle;
-use rand::prelude::*;
-use rand::rngs::StdRng;
-use std::time::Duration;
-use vector_arena::player::{Player, MoveTarget, move_player, PLAYER_SPEED};
-use vector_arena::terrain::{TerrainGeometry, playable_area_to_nav_mesh, PartitionRole};
-use vector_arena::bsp::Partition;
-use vector_arena::AGENT_RADIUS;
 use avian2d::prelude::LinearVelocity;
+use bevy::prelude::*;
+use bevy_landmass::{NavMeshHandle, prelude::*};
+use rand::{prelude::*, rngs::StdRng};
+use std::time::Duration;
+use vector_arena::{
+    AGENT_RADIUS,
+    bsp::Partition,
+    player::{MoveTarget, PLAYER_SPEED, Player, move_player},
+    terrain::{PartitionRole, TerrainGeometry, playable_area_to_nav_mesh},
+};
 
 fn mock_physics_system(
     mut query: Query<(&mut Transform, &LinearVelocity)>,
@@ -58,12 +58,8 @@ fn test_player_can_path_within_room_and_to_other_room() {
         (top_right, PartitionRole::Corridor { double_width: false }),
     ];
 
-    let terrain_geometry = TerrainGeometry::from_partitions_and_roles(
-        1200.0,
-        800.0,
-        allocated_partitions,
-        &mut rng,
-    );
+    let terrain_geometry =
+        TerrainGeometry::from_partitions_and_roles(1200.0, 800.0, allocated_partitions, &mut rng);
 
     assert_eq!(terrain_geometry.rooms.len(), 2);
 
@@ -73,20 +69,19 @@ fn test_player_can_path_within_room_and_to_other_room() {
     app.add_plugins(AssetPlugin::default());
     app.add_plugins(Landmass2dPlugin::default());
 
-    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(1.0 / 60.0)));
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+        1.0 / 60.0,
+    )));
     app.insert_resource(Time::<Virtual>::default());
     app.add_systems(Update, (move_player, mock_physics_system).chain());
 
     let mut nav_meshes = app.world_mut().resource_mut::<Assets<NavMesh2d>>();
     let valid_nav_mesh = playable_area_to_nav_mesh(&terrain_geometry.playable_area);
-    let nav_mesh_handle = nav_meshes.add(NavMesh2d {
-        nav_mesh: valid_nav_mesh,
-    });
+    let nav_mesh_handle = nav_meshes.add(NavMesh2d { nav_mesh: valid_nav_mesh });
 
-    let archipelago_id = app.world_mut()
-        .spawn(Archipelago2d::new(ArchipelagoOptions::from_agent_radius(
-            AGENT_RADIUS,
-        )))
+    let archipelago_id = app
+        .world_mut()
+        .spawn(Archipelago2d::new(ArchipelagoOptions::from_agent_radius(AGENT_RADIUS)))
         .id();
 
     app.world_mut().spawn(Island2dBundle {
@@ -99,16 +94,13 @@ fn test_player_can_path_within_room_and_to_other_room() {
     let r0 = terrain_geometry.rooms[0];
     let start_pos = Vec2::new(r0.center().x, r0.center().y);
 
-    let player_id = app.world_mut()
+    let player_id = app
+        .world_mut()
         .spawn((
             Player,
             Transform::from_translation(start_pos.extend(0.0)),
             LinearVelocity::ZERO,
-            MoveTarget {
-                destination: start_pos,
-                origin: start_pos,
-                active: false,
-            },
+            MoveTarget { destination: start_pos, origin: start_pos, active: false },
             Agent2dBundle {
                 agent: Default::default(),
                 settings: AgentSettings {
@@ -152,8 +144,14 @@ fn test_player_can_path_within_room_and_to_other_room() {
         let target = player_entity.get::<AgentTarget2d>().unwrap();
         let desired = player_entity.get::<AgentDesiredVelocity2d>();
         if step < 20 || step % 100 == 0 {
-            println!("step {}: pos={:?}, vel={:?}, target={:?}, desired_velocity={:?}", 
-                step, current_pos, vel.0, target, desired.map(|d| d.velocity()));
+            println!(
+                "step {}: pos={:?}, vel={:?}, target={:?}, desired_velocity={:?}",
+                step,
+                current_pos,
+                vel.0,
+                target,
+                desired.map(|d| d.velocity())
+            );
         }
         if current_pos.distance(intra_destination) <= AGENT_RADIUS + 2.0 {
             reached = true;
@@ -195,8 +193,14 @@ fn test_player_can_path_within_room_and_to_other_room() {
         let target = player_entity.get::<AgentTarget2d>().unwrap();
         let desired = player_entity.get::<AgentDesiredVelocity2d>();
         if step < 20 || step % 200 == 0 {
-            println!("TEST2 step {}: pos={:?}, vel={:?}, target={:?}, desired_velocity={:?}", 
-                step, current_pos, vel.0, target, desired.map(|d| d.velocity()));
+            println!(
+                "TEST2 step {}: pos={:?}, vel={:?}, target={:?}, desired_velocity={:?}",
+                step,
+                current_pos,
+                vel.0,
+                target,
+                desired.map(|d| d.velocity())
+            );
         }
         if current_pos.distance(inter_destination) <= AGENT_RADIUS + 2.0 {
             reached = true;

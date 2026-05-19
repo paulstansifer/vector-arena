@@ -1,9 +1,8 @@
 use crate::terrain::{
-    geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh,
-    DungeonState, DungeonNavMesh, DungeonCollider, DungeonVisuals,
+    DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, geometry_to_collider,
+    geometry_to_mesh, playable_area_to_nav_mesh,
 };
-use avian2d::math::PI;
-use avian2d::prelude::*;
+use avian2d::{math::PI, prelude::*};
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use geo::{
@@ -66,9 +65,7 @@ pub fn subtract_polygon_from_terrain(
 
     // 6. Update the navmesh Resource
     let valid_nav_mesh = playable_area_to_nav_mesh(&new_playable_area);
-    dungeon_nav_mesh.0 = nav_meshes.add(NavMesh2d {
-        nav_mesh: valid_nav_mesh,
-    });
+    dungeon_nav_mesh.0 = nav_meshes.add(NavMesh2d { nav_mesh: valid_nav_mesh });
 
     // 7. Break up the rubble before shrinking
     let mut rubble_polygons: Vec<Polygon<f32>> = intersection.iter().cloned().collect();
@@ -160,8 +157,10 @@ pub fn subtract_polygon_from_terrain(
     });
 
     // 8. Shrink the rubble pieces by 4.0 and round off sharp corners
-    use geo::algorithm::buffer::BufferStyle;
-    use geo::buffer::{LineCap, LineJoin};
+    use geo::{
+        algorithm::buffer::BufferStyle,
+        buffer::{LineCap, LineJoin},
+    };
 
     let style = BufferStyle::new(-4.0)
         .line_cap(LineCap::Round(PI / 4.0))
@@ -177,11 +176,8 @@ pub fn subtract_polygon_from_terrain(
             if let Some(centroid) = shrunk_poly.centroid() {
                 let center = Vec2::new(centroid.x(), centroid.y());
                 let local_poly = shrunk_poly.translate(-center.x, -center.y);
-                let vertices: Vec<Vec2> = local_poly
-                    .exterior()
-                    .coords()
-                    .map(|c| Vec2::new(c.x, c.y))
-                    .collect();
+                let vertices: Vec<Vec2> =
+                    local_poly.exterior().coords().map(|c| Vec2::new(c.x, c.y)).collect();
                 if let Some(rubble_collider) = Collider::convex_hull(vertices) {
                     let local_multipoly = MultiPolygon::new(vec![local_poly]);
                     let rubble_mesh = geometry_to_mesh(&local_multipoly);
@@ -190,7 +186,7 @@ pub fn subtract_polygon_from_terrain(
                         Rubble,
                         Mesh2d(meshes.add(rubble_mesh)),
                         MeshMaterial2d(rubble_material.clone()),
-                        Transform::from_translation(center.extend(1.0)), // Set Z to 1.0 to render on top
+                        Transform::from_translation(center.extend(10.0)), // Set Z to 10.0 to render on top
                         RigidBody::Dynamic,
                         rubble_collider,
                         LinearDamping(1.5),
@@ -233,7 +229,8 @@ pub fn handle_right_click_excavation(
     };
 
     let (dungeon_state, dungeon_visuals, dungeon_collider, dungeon_nav_mesh, rubble_material) =
-        match (dungeon_state, dungeon_visuals, dungeon_collider, dungeon_nav_mesh, rubble_material) {
+        match (dungeon_state, dungeon_visuals, dungeon_collider, dungeon_nav_mesh, rubble_material)
+        {
             (Some(ds), Some(dv), Some(dc), Some(dn), Some(rm)) => (ds, dv, dc, dn, rm),
             _ => return,
         };

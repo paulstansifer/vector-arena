@@ -129,12 +129,7 @@ impl SplitRange {
         let mut start = min;
         let mut end = max;
 
-        let mut reserved = existing
-            .0
-            .iter()
-            .chain(existing.1.iter())
-            .copied()
-            .collect::<Vec<_>>();
+        let mut reserved = existing.0.iter().chain(existing.1.iter()).copied().collect::<Vec<_>>();
         reserved.sort_by(|a, b| a.partial_cmp(b).unwrap());
         reserved.dedup();
 
@@ -166,11 +161,7 @@ fn choose_split_coordinate(
         return None;
     }
 
-    let reserved = existing0
-        .iter()
-        .chain(existing1.iter())
-        .copied()
-        .collect::<Vec<_>>();
+    let reserved = existing0.iter().chain(existing1.iter()).copied().collect::<Vec<_>>();
     let mut intervals = vec![(start, end)];
 
     for conn in reserved {
@@ -217,11 +208,7 @@ fn choose_split_coordinate(
 }
 
 fn allocate_coords(coords: &[f32], range: (f32, f32)) -> Vec<f32> {
-    coords
-        .iter()
-        .copied()
-        .filter(|&coord| coord >= range.0 && coord <= range.1)
-        .collect()
+    coords.iter().copied().filter(|&coord| coord >= range.0 && coord <= range.1).collect()
 }
 
 fn internal_connection_count(length: f32, rng: &mut impl Rng) -> usize {

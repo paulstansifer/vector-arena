@@ -1,8 +1,14 @@
 // Field of view calculation
 
 use bevy::prelude::*;
-use geo::{LineString, Polygon};
+use geo::{BooleanOps, Buffer, LineString, MultiPolygon, Polygon, Simplify};
 use std::ops::Range;
+
+use crate::{
+    WorldBounds,
+    player::Player,
+    terrain::{self, DungeonState},
+};
 
 /// Calculate a field of view polygon from a start point, optionally restricted to an arc.
 pub fn fov_arc(
@@ -15,12 +21,7 @@ pub fn fov_arc(
         .iter()
         .flat_map(|poly| std::iter::once(poly.exterior()).chain(poly.interiors()))
         .flat_map(|line_string| line_string.lines())
-        .map(|line| {
-            (
-                Vec2::new(line.start.x, line.start.y),
-                Vec2::new(line.end.x, line.end.y),
-            )
-        })
+        .map(|line| (Vec2::new(line.start.x, line.start.y), Vec2::new(line.end.x, line.end.y)))
         .collect();
 
     let deg_0_01 = 0.01_f32.to_radians();
@@ -94,11 +95,7 @@ pub fn fov_arc(
                 let u = (q_minus_p.x * dir.y - q_minus_p.y * dir.x) / r_cross_s;
 
                 // Use a small epsilon to avoid self-intersection on edges
-                if t > 1e-4 && (0.0..=1.0).contains(&u) {
-                    Some(t)
-                } else {
-                    None
-                }
+                if t > 1e-4 && (0.0..=1.0).contains(&u) { Some(t) } else { None }
             })
             .fold(radius, f32::min);
 
@@ -114,4 +111,214 @@ pub fn fov_arc(
     }
 
     Polygon::new(LineString::from(polygon_points), vec![])
+}
+
+const NEVER_EXPLORED_Z: f32 = 40.0;
+pub const TERRAIN_Z: f32 = 30.0;
+const NOT_IN_FOV_Z: f32 = 20.0;
+pub const MOVABLE_Z: f32 = 10.0;
+
+#[derive(Component)]
+pub struct FovMeshMarker;
+
+#[derive(Component)]
+pub struct NeverExploredMeshMarker;
+
+#[derive(Resource)]
+pub struct ExplorationState(pub geo::MultiPolygon<f32>);
+
+pub fn spawn_fov_meshes(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
+    window_width: f32,
+    window_height: f32,
+) {
+    let fov_material = materials.add(ColorMaterial::from(Color::srgb(0.7, 0.7, 0.7)));
+    commands.spawn((
+        FovMeshMarker,
+        Mesh2d(
+            meshes.add(Mesh::new(bevy_mesh::PrimitiveTopology::TriangleList, Default::default())),
+        ),
+        MeshMaterial2d(fov_material),
+        Transform::from_translation(Vec3::new(0.0, 0.0, NOT_IN_FOV_Z)),
+    ));
+
+    let never_explored_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.5, 0.5)));
+    let w = window_width;
+    let h = window_height;
+    let bg_rect =
+        geo::Rect::new((-w / 2.0 - 200.0, -h / 2.0 - 200.0), (w / 2.0 + 200.0, h / 2.0 + 200.0));
+    let bg_poly = MultiPolygon::new(vec![bg_rect.to_polygon()]);
+    commands.insert_resource(ExplorationState(bg_poly.clone()));
+
+    commands.spawn((
+        NeverExploredMeshMarker,
+        Mesh2d(meshes.add(terrain::geometry_to_mesh(&bg_poly))),
+        MeshMaterial2d(never_explored_material),
+        Transform::from_translation(Vec3::new(0.0, 0.0, NEVER_EXPLORED_Z)),
+    ));
+}
+
+pub fn update_fov(
+    player_query: Query<Ref<Transform>, (With<Player>, With<Transform>)>,
+    fov_mesh_query: Query<&Mesh2d, With<FovMeshMarker>>,
+    never_explored_query: Query<&Mesh2d, (With<NeverExploredMeshMarker>, Without<FovMeshMarker>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    dungeon_state: Res<DungeonState>,
+    bounds: Res<WorldBounds>,
+    mut exploration_state: ResMut<ExplorationState>,
+) {
+    let Ok(player_transform) = player_query.single() else { return };
+    let fov_mesh_handle = fov_mesh_query.single().unwrap();
+    let never_explored_mesh_handle = never_explored_query.single().unwrap();
+
+    // TODO: Why doesn't
+    // `player_query: Query<Transform, (With<Player>, Changed<Transform>)>`
+    // fire on the first frame? Then we'd be able to avoid this `if`.
+    // TODO: `is_changed()` always seems to be true, even when time isn't passing and physics should be quiescent
+    // TODO: ...but we should recalculate this if terrain changes, too.
+
+    if !player_transform.is_changed() && fov_mesh_handle.0.path().is_some() {
+        return;
+    }
+
+    let origin = player_transform.translation.truncate();
+    let radius = 600.0;
+
+    let (new_exp, new_fov, new_ne) = update_fov_from_pov(
+        origin,
+        radius,
+        &dungeon_state.solid_rock,
+        &bounds,
+        &exploration_state.0,
+    );
+
+    exploration_state.0 = new_exp;
+    *meshes.get_mut(&fov_mesh_handle.0).unwrap() = new_fov;
+    *meshes.get_mut(&never_explored_mesh_handle.0).unwrap() = new_ne;
+}
+
+fn update_fov_from_pov(
+    origin: Vec2,
+    radius: f32,
+    solid_rock: &MultiPolygon<f32>,
+    bounds: &WorldBounds,
+    exploration: &MultiPolygon<f32>,
+) -> (MultiPolygon<f32>, Mesh, Mesh) {
+    let fov_poly = fov_arc(origin, radius, None, solid_rock);
+    let fov_multi = MultiPolygon::new(vec![fov_poly]);
+
+    let w = bounds.width;
+    let h = bounds.height;
+    // To be safe, make it larger than bounds
+    let bg_rect =
+        geo::Rect::new((-w / 2.0 - 200.0, -h / 2.0 - 200.0), (w / 2.0 + 200.0, h / 2.0 + 200.0));
+    let bg_poly = MultiPolygon::new(vec![bg_rect.to_polygon()]);
+
+    // The negative buffer is a bit of a hack to remove little erroneous rays that sometimes sneak through the terrain.
+    // The positive buffer allows looking at the walls.
+    let dark_area = bg_poly.difference(&fov_multi.buffer(-1.0).buffer(5.0));
+
+    (
+        exploration.intersection(&dark_area).simplify(1e-1),
+        terrain::geometry_to_mesh(&dark_area),
+        terrain::geometry_to_mesh(&exploration),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        bsp::Partition,
+        terrain::{PartitionRole, TerrainGeometry},
+    };
+    use geo::CoordsIter;
+    use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn test_fov_point_explosion() {
+        let mut rng = StdRng::seed_from_u64(1234);
+
+        let left = Partition {
+            x: (10.0, 300.0),
+            y: (10.0, 300.0),
+            horz_conn: (vec![300.0], vec![]),
+            vert_conn: (vec![], vec![]),
+        };
+        let mid = Partition {
+            x: (300.0, 500.0),
+            y: (10.0, 300.0),
+            horz_conn: (vec![500.0], vec![300.0]),
+            vert_conn: (vec![], vec![]),
+        };
+        let right = Partition {
+            x: (500.0, 790.0),
+            y: (10.0, 300.0),
+            horz_conn: (vec![], vec![500.0]),
+            vert_conn: (vec![], vec![]),
+        };
+
+        let allocated_partitions = vec![
+            (left, PartitionRole::Room),
+            (mid, PartitionRole::Corridor { double_width: false }),
+            (right, PartitionRole::Room),
+        ];
+
+        let terrain_geometry = TerrainGeometry::from_partitions_and_roles(
+            800.0,
+            310.0,
+            allocated_partitions,
+            &mut rng,
+        );
+
+        let world_bounds = WorldBounds { width: 1200.0, height: 800.0 };
+        let w = world_bounds.width;
+        let h = world_bounds.height;
+        let bg_rect = geo::Rect::new(
+            (-w / 2.0 - 200.0, -h / 2.0 - 200.0),
+            (w / 2.0 + 200.0, h / 2.0 + 200.0),
+        );
+        let mut exploration_state = ExplorationState(MultiPolygon::new(vec![bg_rect.to_polygon()]));
+
+        let mut points = vec![];
+        for i in 0..=20 {
+            let t = i as f32 / 20.0;
+            let x = 150.0 * (1.0 - t) + 650.0 * t;
+            let y = 150.0;
+            points.push(Vec2::new(x, y));
+        }
+
+        for pt in &points {
+            let (new_exp, _, _) = update_fov_from_pov(
+                *pt,
+                600.0,
+                &terrain_geometry.solid_rock,
+                &world_bounds,
+                &exploration_state.0,
+            );
+            exploration_state.0 = new_exp;
+        }
+
+        let pass_1_points: usize = exploration_state.0.coords_count();
+
+        for extra_pass in 0..100 {
+            for pt in &points {
+                let (new_exp, _, _) = update_fov_from_pov(
+                    Vec2::new(pt.x + 0.01 * (extra_pass as f32), pt.y + 0.01 * (extra_pass as f32)),
+                    600.0,
+                    &terrain_geometry.solid_rock,
+                    &world_bounds,
+                    &exploration_state.0,
+                );
+                exploration_state.0 = new_exp;
+            }
+        }
+
+        let pass_2_points: usize = exploration_state.0.coords_count();
+        assert!(pass_1_points < 500, "{}", pass_1_points);
+        let extra_points = pass_2_points - pass_1_points;
+        assert!(extra_points < 5, "{}", extra_points);
+    }
 }

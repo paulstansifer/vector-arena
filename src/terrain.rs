@@ -2,14 +2,16 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
-use geo::algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay};
-use geo::{BooleanOps, MultiPolygon};
+use geo::{
+    BooleanOps, MultiPolygon,
+    algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay},
+};
 use std::sync::Arc;
 
 #[path = "level-generation.rs"]
 pub mod level_generation;
 
-pub use level_generation::{CORRIDOR_WIDTH, PADDING, TerrainGeometry, PartitionRole};
+pub use level_generation::{CORRIDOR_WIDTH, PADDING, PartitionRole, TerrainGeometry};
 
 /// Convert the terrain geometry to a Bevy mesh for rendering.
 pub fn geometry_to_mesh(geometry: &MultiPolygon<f32>) -> Mesh {
@@ -18,9 +20,8 @@ pub fn geometry_to_mesh(geometry: &MultiPolygon<f32>) -> Mesh {
     let mut normals = Vec::new();
 
     for polygon in geometry.iter() {
-        let triangulation = polygon
-            .constrained_triangulation(DelaunayTriangulationConfig::default())
-            .unwrap();
+        let triangulation =
+            polygon.constrained_triangulation(DelaunayTriangulationConfig::default()).unwrap();
         for triangle in &triangulation {
             for coord in &[triangle.v1(), triangle.v2(), triangle.v3()] {
                 indices.push(positions.len() as u32);
@@ -67,13 +68,14 @@ pub fn geometry_to_collider(geometry: &MultiPolygon<f32>) -> Collider {
 /// Triangulates each polygon and collects vertices/polygons for pathfinding.
 pub fn playable_area_to_nav_mesh(playable_area: &MultiPolygon<f32>) -> Arc<ValidNavigationMesh2d> {
     // bevy_landmass::nav_mesh::bevy_mesh_to_landmass_nav_mesh might simplify this somewhat, but it doesn't seem respect agent radius, so I guess we still need to handle that ourselves.
-    use geo::Buffer;
-    use geo::algorithm::buffer::BufferStyle;
-    use geo::buffer::{LineCap, LineJoin};
+    use geo::{
+        Buffer,
+        algorithm::buffer::BufferStyle,
+        buffer::{LineCap, LineJoin},
+    };
 
-    let style = BufferStyle::new(-crate::AGENT_RADIUS)
-        .line_cap(LineCap::Square)
-        .line_join(LineJoin::Bevel);
+    let style =
+        BufferStyle::new(-crate::AGENT_RADIUS).line_cap(LineCap::Square).line_join(LineJoin::Bevel);
 
     let eroded_playable_area = playable_area.buffer_with_style(style);
 
@@ -103,9 +105,8 @@ pub fn playable_area_to_nav_mesh(playable_area: &MultiPolygon<f32>) -> Arc<Valid
     };
 
     for polygon in eroded_playable_area.iter() {
-        let triangulation = polygon
-            .constrained_triangulation(DelaunayTriangulationConfig::default())
-            .unwrap();
+        let triangulation =
+            polygon.constrained_triangulation(DelaunayTriangulationConfig::default()).unwrap();
         for triangle in &triangulation {
             let v1 = triangle.v1();
             let v2 = triangle.v2();
@@ -123,18 +124,10 @@ pub fn playable_area_to_nav_mesh(playable_area: &MultiPolygon<f32>) -> Arc<Valid
 
     let polygon_type_indices = vec![0; polygons.len()];
 
-    let nav_mesh = NavigationMesh2d {
-        vertices,
-        polygons,
-        polygon_type_indices,
-        height_mesh: None,
-    };
+    let nav_mesh = NavigationMesh2d { vertices, polygons, polygon_type_indices, height_mesh: None };
 
-    Arc::new(
-        nav_mesh
-            .validate()
-            .expect("playable area nav mesh should be valid"),
-    )
+    // TODO: validate() sometimes fails (try destroying a lot of terrain)
+    Arc::new(nav_mesh.validate().expect("playable area nav mesh should be valid"))
 }
 
 #[path = "crumble-terrain.rs"]
