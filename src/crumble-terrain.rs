@@ -9,6 +9,7 @@ use geo::{
     BooleanOps, BoundingRect, Buffer, Centroid, Coord, Intersects, LineString, MultiPolygon,
     Polygon, Rect, Translate,
 };
+use rand::Rng;
 
 #[derive(Component)]
 pub struct Rubble;
@@ -187,6 +188,12 @@ pub fn subtract_polygon_from_terrain(
                     let local_multipoly = MultiPolygon::new(vec![local_poly]);
                     let rubble_mesh = geometry_to_mesh(&local_multipoly);
 
+                    let mut rng = rand::thread_rng();
+                    let angle: f32 = rng.gen_range(0.0..std::f32::consts::TAU);
+                    let speed: f32 = rng.gen_range(10.0..30.0);
+                    let velocity =
+                        LinearVelocity(Vec2::new(angle.cos() * speed, angle.sin() * speed));
+
                     commands.spawn((
                         Rubble,
                         Mesh2d(meshes.add(rubble_mesh)),
@@ -194,6 +201,7 @@ pub fn subtract_polygon_from_terrain(
                         Transform::from_translation(center.extend(10.0)), // Set Z to 10.0 to render on top
                         RigidBody::Dynamic,
                         rubble_collider,
+                        velocity,
                         LinearDamping(1.5),
                         AngularDamping(1.5),
                         Friction::new(3.0),
