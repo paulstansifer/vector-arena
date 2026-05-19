@@ -6,11 +6,16 @@ use avian2d::{math::PI, prelude::*};
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use geo::{
-    BooleanOps, BoundingRect, Buffer, Centroid, LineString, MultiPolygon, Polygon, Translate,
+    BooleanOps, BoundingRect, Buffer, Centroid, Coord, Intersects, LineString, MultiPolygon,
+    Polygon, Rect, Translate,
 };
 
 #[derive(Component)]
 pub struct Rubble;
+
+/// Marker for entities (e.g. doors) that should be destroyed if caught in an excavation.
+#[derive(Component)]
+pub struct Fragile;
 
 #[derive(Resource)]
 pub struct RubbleMaterial(pub Handle<ColorMaterial>);
@@ -212,6 +217,7 @@ pub fn handle_right_click_excavation(
     mut meshes: ResMut<Assets<Mesh>>,
     mut nav_meshes: ResMut<Assets<NavMesh2d>>,
     rubble_material: Option<Res<RubbleMaterial>>,
+    fragile_query: Query<(Entity, &ColliderAabb), With<Fragile>>,
 ) {
     if !mouse_button_input.just_pressed(MouseButton::Right) {
         return;
@@ -238,6 +244,17 @@ pub fn handle_right_click_excavation(
     // Create a circular polygon approximating the excavation area
     let input_polygon = create_circle_polygon(world_position, 40.0, 16);
     let input_multipolygon = MultiPolygon::new(vec![input_polygon]);
+
+    for (entity, aabb) in &fragile_query {
+        let rect_poly = Rect::new(Coord { x: aabb.min.x, y: aabb.min.y }, Coord {
+            x: aabb.max.x,
+            y: aabb.max.y,
+        })
+        .to_polygon();
+        if input_multipolygon.intersects(&rect_poly) {
+            commands.entity(entity).despawn();
+        }
+    }
 
     subtract_polygon_from_terrain(
         &mut commands,

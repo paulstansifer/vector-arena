@@ -8,7 +8,7 @@ use vector_arena::{AGENT_RADIUS, WorldBounds, fov, monster, nav, player, terrain
 use monster::Monster;
 use player::{MoveTarget, PLAYER_SPEED, Player, move_player, set_target_on_click};
 use terrain::{
-    DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, NavMeshIslandMarker,
+    DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, Fragile, NavMeshIslandMarker,
     TerrainGeometry, TerrainMarker, geometry_to_collider, geometry_to_mesh,
     handle_right_click_excavation, playable_area_to_nav_mesh, sync_dungeon_to_entities,
 };
@@ -100,6 +100,7 @@ fn setup(
 
         let door_entity = commands
             .spawn((
+                Fragile,
                 Mesh2d(meshes.add(Rectangle::new(disp_width, disp_height))),
                 MeshMaterial2d(door_material.clone()),
                 Transform::from_translation(Vec3::new(center.x, center.y, crate::fov::MOVABLE_Z)),
@@ -111,11 +112,14 @@ fn setup(
         let hinge_world = Vec2::new(door.hinge.0, door.hinge.1);
         let door_center = Vec2::new(center.x, center.y);
 
-        commands.spawn(
-            RevoluteJoint::new(door_entity, terrain_entity)
-                .with_local_anchor1(hinge_world - door_center)
-                .with_local_anchor2(hinge_world), // Terrain is at origin
-        );
+        let joint_entity = commands
+            .spawn(
+                RevoluteJoint::new(door_entity, terrain_entity)
+                    .with_local_anchor1(hinge_world - door_center)
+                    .with_local_anchor2(hinge_world), // Terrain is at origin
+            )
+            .id();
+        commands.entity(door_entity).add_child(joint_entity);
     }
 
     commands.insert_resource(WorldBounds { width: window_width, height: window_height });

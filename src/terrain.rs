@@ -134,7 +134,7 @@ pub fn playable_area_to_nav_mesh(playable_area: &MultiPolygon<f32>) -> Arc<Valid
 pub mod crumble_terrain;
 
 pub use crumble_terrain::{
-    RubbleMaterial, handle_right_click_excavation, subtract_polygon_from_terrain,
+    Fragile, RubbleMaterial, handle_right_click_excavation, subtract_polygon_from_terrain,
 };
 
 #[derive(Component)]
