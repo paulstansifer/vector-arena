@@ -92,39 +92,28 @@ fn setup(
 
     let door_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.25, 0.1)));
     for door in &terrain_geometry.doors {
-        let phys_width = door.phys_rect.width();
-        let phys_height = door.phys_rect.height();
-        let center = door.phys_rect.center();
-
-        let disp_width = door.disp_rect.width();
-        let disp_height = door.disp_rect.height();
+        let center = door.center();
+        let disp = door.disp_size();
 
         let door_entity = commands
             .spawn((
                 Fragile,
                 Opaque,
-                OpaqueVertices(vec![
-                    Vec2::new(-disp_width / 2.0, -disp_height / 2.0),
-                    Vec2::new(disp_width / 2.0, -disp_height / 2.0),
-                    Vec2::new(disp_width / 2.0, disp_height / 2.0),
-                    Vec2::new(-disp_width / 2.0, disp_height / 2.0),
-                ]),
-                Mesh2d(meshes.add(Rectangle::new(disp_width, disp_height))),
+                OpaqueVertices(door.disp_corners()),
+                Mesh2d(meshes.add(Rectangle::new(disp.x, disp.y))),
                 MeshMaterial2d(door_material.clone()),
-                Transform::from_translation(Vec3::new(center.x, center.y, crate::fov::MOVABLE_Z)),
+                Transform::from_translation(center.extend(crate::fov::MOVABLE_Z)),
                 RigidBody::Dynamic,
-                Collider::rectangle(phys_width, phys_height),
+                door.collider(),
             ))
             .id();
 
-        let hinge_world = Vec2::new(door.hinge.0, door.hinge.1);
-        let door_center = Vec2::new(center.x, center.y);
-
+        let hinge = door.hinge_vec();
         let joint_entity = commands
             .spawn(
                 RevoluteJoint::new(door_entity, terrain_entity)
-                    .with_local_anchor1(hinge_world - door_center)
-                    .with_local_anchor2(hinge_world), // Terrain is at origin
+                    .with_local_anchor1(hinge - center)
+                    .with_local_anchor2(hinge), // Terrain is at origin
             )
             .id();
         commands.entity(door_entity).add_child(joint_entity);

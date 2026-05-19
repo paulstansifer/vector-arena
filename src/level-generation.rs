@@ -1,3 +1,5 @@
+use avian2d::prelude::Collider;
+use bevy::math::Vec2;
 use crate::bsp::{Partition, partition_space};
 use geo::{BooleanOps, LineString, MultiPolygon, Polygon, Rect, Translate};
 use rand::prelude::*;
@@ -21,6 +23,32 @@ pub struct DoorGeometry {
     pub phys_rect: Rect<f32>,
     pub disp_rect: Rect<f32>,
     pub hinge: (f32, f32),
+}
+
+impl DoorGeometry {
+    pub fn center(&self) -> Vec2 {
+        let c = self.phys_rect.center();
+        Vec2::new(c.x, c.y)
+    }
+
+    pub fn hinge_vec(&self) -> Vec2 {
+        Vec2::new(self.hinge.0, self.hinge.1)
+    }
+
+    pub fn collider(&self) -> Collider {
+        Collider::rectangle(self.phys_rect.width(), self.phys_rect.height())
+    }
+
+    pub fn disp_size(&self) -> Vec2 {
+        Vec2::new(self.disp_rect.width(), self.disp_rect.height())
+    }
+
+    /// Display-rect corners in local space (centered at origin), suitable for FOV shadow casting.
+    pub fn disp_corners(&self) -> Vec<Vec2> {
+        let w = self.disp_rect.width() / 2.0;
+        let h = self.disp_rect.height() / 2.0;
+        vec![Vec2::new(-w, -h), Vec2::new(w, -h), Vec2::new(w, h), Vec2::new(-w, h)]
+    }
 }
 
 impl TerrainGeometry {
