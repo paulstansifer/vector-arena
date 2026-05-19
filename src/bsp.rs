@@ -4,7 +4,7 @@ use std::ops::Range;
 
 const DOUBLE_CONNECTION_UNCERTAIN: Range<f32> = 500.0..750.0;
 const MIN_PARTITION_SIZE: Range<f32> = 200.0..550.0;
-const MIN_ROOM_SIZE: f32 = MIN_PARTITION_SIZE.start - PADDING * 2.0;
+const MIN_PARTITION_INNER_SIZE: f32 = MIN_PARTITION_SIZE.start - PADDING * 2.0;
 
 #[derive(Clone, Debug)]
 pub struct Partition {
@@ -55,26 +55,11 @@ fn split_partition(bounds: &Partition, rng: &mut impl Rng) -> Option<(Partition,
     let can_split_vertical = width > rng.gen_range(MIN_PARTITION_SIZE);
     let can_split_horizontal = height > rng.gen_range(MIN_PARTITION_SIZE);
 
-    if !can_split_vertical && !can_split_horizontal {
-        return None;
+    match (can_split_vertical, can_split_horizontal, width >= height) {
+        (false, false, _) => None,
+        (true, _, true) | (true, false, _) => split_vertical(bounds, rng),
+        (_, true, _) => split_horizontal(bounds, rng),
     }
-
-    let axis = match (can_split_vertical, can_split_horizontal, width >= height) {
-        (true, _, true) | (true, false, _) => SplitAxis::Vertical,
-        (_, true, _) => SplitAxis::Horizontal,
-        _ => unreachable!(), // both false already returned None above
-    };
-
-    match axis {
-        SplitAxis::Vertical => split_vertical(bounds, rng),
-        SplitAxis::Horizontal => split_horizontal(bounds, rng),
-    }
-}
-
-#[derive(Copy, Clone)]
-enum SplitAxis {
-    Vertical,
-    Horizontal,
 }
 
 fn split_vertical(bounds: &Partition, rng: &mut impl Rng) -> Option<(Partition, Partition)> {
@@ -124,8 +109,8 @@ struct SplitRange {
 
 impl SplitRange {
     fn new(primary: (f32, f32), existing: &(Vec<f32>, Vec<f32>)) -> Self {
-        let min = primary.0 + MIN_ROOM_SIZE + PADDING;
-        let max = primary.1 - MIN_ROOM_SIZE - PADDING;
+        let min = primary.0 + MIN_PARTITION_INNER_SIZE + PADDING;
+        let max = primary.1 - MIN_PARTITION_INNER_SIZE - PADDING;
         let mut start = min;
         let mut end = max;
 
@@ -134,14 +119,11 @@ impl SplitRange {
         reserved.dedup();
 
         for conn in reserved {
-            if conn - PADDING > start && conn + PADDING < end {
-                continue;
-            }
             if conn - PADDING <= start && conn + PADDING > start {
-                start = (conn + PADDING).max(start);
+                start = conn + PADDING;
             }
-            if conn - PADDING < end && conn + PADDING >= end {
-                end = (conn - PADDING).min(end);
+            if conn + PADDING >= end && conn - PADDING < end {
+                end = conn - PADDING;
             }
         }
 
@@ -208,7 +190,7 @@ fn choose_split_coordinate(
 }
 
 fn allocate_coords(coords: &[f32], range: (f32, f32)) -> Vec<f32> {
-    coords.iter().copied().filter(|&coord| coord >= range.0 && coord <= range.1).collect()
+    coords.iter().copied().filter(|&coord| coord >= range.0 && coord < range.1).collect()
 }
 
 fn internal_connection_count(length: f32, rng: &mut impl Rng) -> usize {

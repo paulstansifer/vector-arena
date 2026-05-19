@@ -157,7 +157,7 @@ fn partitions_share_connection(p1: &Partition, p2: &Partition) -> bool {
     let conns2 = partition_connections(p2);
     for c1 in &conns1 {
         for c2 in &conns2 {
-            if (c1.x - c2.x).abs() < 0.1 && (c1.y - c2.y).abs() < 0.1 {
+            if c1.x == c2.x && c1.y == c2.y {
                 return true;
             }
         }
@@ -172,7 +172,7 @@ fn is_double_width_corridor_connection(
     for (partition, role) in bsp {
         if let PartitionRole::Corridor { double_width: true } = role {
             for conn in partition_connections(partition) {
-                if (conn.x - connection.x).abs() < 0.1 && (conn.y - connection.y).abs() < 0.1 {
+                if conn.x == connection.x && conn.y == connection.y {
                     return true;
                 }
             }
@@ -200,9 +200,7 @@ fn render(
         .collect();
 
     let is_live = |c: &ConnectionPoint| {
-        !empty_connections
-            .iter()
-            .any(|&(ex, ey)| (c.x - ex).abs() < f32::EPSILON && (c.y - ey).abs() < f32::EPSILON)
+        !empty_connections.iter().any(|&(ex, ey)| c.x == ex && c.y == ey)
     };
 
     for (partition, role) in bsp {
@@ -222,20 +220,7 @@ fn render(
 
                     let door_prob = if is_double { 0.75 } else { 0.25 };
                     if rng.gen_bool(door_prob) {
-                        let room_entry = match connection.side {
-                            ConnectionSide::Left => {
-                                (room.min().x, connection.y.clamp(room.min().y, room.max().y))
-                            }
-                            ConnectionSide::Right => {
-                                (room.max().x, connection.y.clamp(room.min().y, room.max().y))
-                            }
-                            ConnectionSide::Bottom => {
-                                (connection.x.clamp(room.min().x, room.max().x), room.min().y)
-                            }
-                            ConnectionSide::Top => {
-                                (connection.x.clamp(room.min().x, room.max().x), room.max().y)
-                            }
-                        };
+                        let room_entry = room_entry_point(&room, connection);
 
                         if is_double {
                             let (d1, d2) = create_double_door(connection.side, room_entry);
@@ -380,6 +365,15 @@ fn partition_connections(partition: &Partition) -> Vec<ConnectionPoint> {
     connections
 }
 
+fn room_entry_point(room: &Rect<f32>, connection: ConnectionPoint) -> (f32, f32) {
+    match connection.side {
+        ConnectionSide::Left => (room.min().x, connection.y.clamp(room.min().y, room.max().y)),
+        ConnectionSide::Right => (room.max().x, connection.y.clamp(room.min().y, room.max().y)),
+        ConnectionSide::Bottom => (connection.x.clamp(room.min().x, room.max().x), room.min().y),
+        ConnectionSide::Top => (connection.x.clamp(room.min().x, room.max().x), room.max().y),
+    }
+}
+
 fn shrink_room(partition: &Partition) -> Rect<f32> {
     let width = partition.x.1 - partition.x.0;
     let height = partition.y.1 - partition.y.0;
@@ -404,12 +398,7 @@ fn connect_room_to_connection(
     connection: ConnectionPoint,
     width: f32,
 ) -> Vec<geo::Polygon<f32>> {
-    let room_entry = match connection.side {
-        ConnectionSide::Left => (room.min().x, connection.y.clamp(room.min().y, room.max().y)),
-        ConnectionSide::Right => (room.max().x, connection.y.clamp(room.min().y, room.max().y)),
-        ConnectionSide::Bottom => (connection.x.clamp(room.min().x, room.max().x), room.min().y),
-        ConnectionSide::Top => (connection.x.clamp(room.min().x, room.max().x), room.max().y),
-    };
+    let room_entry = room_entry_point(room, connection);
 
     let conn_pt = (connection.x, connection.y);
     let elbow = if connection.side.is_vertical() {
@@ -500,11 +489,7 @@ fn rect_for_segment(a: (f32, f32), b: (f32, f32), width: f32) -> geo::Polygon<f3
         let half = width / 2.0;
         Rect::new((min_x, a.1 - half), (max_x, a.1 + half)).to_polygon()
     } else {
-        let min_x = a.0.min(b.0);
-        let max_x = a.0.max(b.0);
-        let min_y = a.1.min(b.1);
-        let max_y = a.1.max(b.1);
-        Rect::new((min_x, min_y), (max_x, max_y)).to_polygon()
+        unreachable!("rect_for_segment called with diagonal segment ({:?} to {:?})", a, b)
     }
 }
 
