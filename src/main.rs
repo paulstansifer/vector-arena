@@ -5,6 +5,7 @@ use rand::prelude::*;
 
 use vector_arena::{AGENT_RADIUS, WorldBounds, fov, monster, nav, player, terrain};
 
+use fov::{Opaque, OpaqueVertices};
 use monster::Monster;
 use player::{MoveTarget, PLAYER_SPEED, Player, move_player, set_target_on_click};
 use terrain::{
@@ -101,6 +102,13 @@ fn setup(
         let door_entity = commands
             .spawn((
                 Fragile,
+                Opaque,
+                OpaqueVertices(vec![
+                    Vec2::new(-disp_width / 2.0, -disp_height / 2.0),
+                    Vec2::new(disp_width / 2.0, -disp_height / 2.0),
+                    Vec2::new(disp_width / 2.0, disp_height / 2.0),
+                    Vec2::new(-disp_width / 2.0, disp_height / 2.0),
+                ]),
                 Mesh2d(meshes.add(Rectangle::new(disp_width, disp_height))),
                 MeshMaterial2d(door_material.clone()),
                 Transform::from_translation(Vec3::new(center.x, center.y, crate::fov::MOVABLE_Z)),

@@ -1,5 +1,4 @@
 // Field of view calculation
-
 use bevy::prelude::*;
 use geo::{BooleanOps, Buffer, LineString, MultiPolygon, Polygon, Simplify};
 use std::ops::Range;
@@ -9,6 +8,15 @@ use crate::{
     player::Player,
     terrain::{self, DungeonState},
 };
+
+/// Other than solid rock (a special case), this marks things that block line-of-sight
+#[derive(Component)]
+pub struct Opaque;
+
+/// Local-space polygon vertices for a mobile opaque object.
+/// Add this alongside `Opaque` so the FOV system knows the shape to cast shadows from.
+#[derive(Component)]
+pub struct OpaqueVertices(pub Vec<Vec2>);
 
 /// Calculate a field of view polygon from a start point, optionally restricted to an arc.
 pub fn fov_arc(
@@ -164,6 +172,7 @@ pub fn update_fov(
     player_query: Query<Ref<Transform>, (With<Player>, With<Transform>)>,
     fov_mesh_query: Query<&Mesh2d, With<FovMeshMarker>>,
     never_explored_query: Query<&Mesh2d, (With<NeverExploredMeshMarker>, Without<FovMeshMarker>)>,
+    opaque_query: Query<(&GlobalTransform, &OpaqueVertices)>,
     mut meshes: ResMut<Assets<Mesh>>,
     dungeon_state: Res<DungeonState>,
     bounds: Res<WorldBounds>,
@@ -186,13 +195,27 @@ pub fn update_fov(
     let origin = player_transform.translation.truncate();
     let radius = 600.0;
 
-    let (new_exp, new_fov, new_ne) = update_fov_from_pov(
-        origin,
-        radius,
-        &dungeon_state.solid_rock,
-        &bounds,
-        &exploration_state.0,
-    );
+    // Append mobile obstacle polygons to solid_rock without unioning (fov_arc only needs segments).
+    let mut obstacle_polys: Vec<geo::Polygon<f32>> = dungeon_state.solid_rock.0.clone();
+    for (gtransform, opaque_verts) in &opaque_query {
+        if opaque_verts.0.len() < 3 {
+            continue;
+        }
+        let mut pts: Vec<(f32, f32)> = opaque_verts
+            .0
+            .iter()
+            .map(|&v| {
+                let w = gtransform.transform_point(v.extend(0.0));
+                (w.x, w.y)
+            })
+            .collect();
+        pts.push(pts[0]);
+        obstacle_polys.push(geo::Polygon::new(geo::LineString::from(pts), vec![]));
+    }
+    let obstacles = geo::MultiPolygon::new(obstacle_polys);
+
+    let (new_exp, new_fov, new_ne) =
+        update_fov_from_pov(origin, radius, &obstacles, &bounds, &exploration_state.0);
 
     exploration_state.0 = new_exp;
     *meshes.get_mut(&fov_mesh_handle.0).unwrap() = new_fov;
