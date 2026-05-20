@@ -21,14 +21,11 @@ pub fn set_target_on_click(
     window: Single<&Window>,
     camera_query: Single<(&Camera, &GlobalTransform)>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
-    mut time: ResMut<Time<Virtual>>,
     mut player_query: Query<(&Transform, &mut MoveTarget, &mut AgentTarget2d), With<Player>>,
 ) {
     if !mouse_button_input.just_pressed(MouseButton::Left) {
         return;
     }
-
-    time.set_relative_speed(0.25);
 
     let cursor_position = match window.cursor_position() {
         Some(position) => position,
@@ -59,7 +56,6 @@ pub fn set_target_on_click(
 }
 
 pub fn move_player(
-    mut time: ResMut<Time<Virtual>>,
     mut query: Query<
         (
             &Transform,
@@ -75,11 +71,9 @@ pub fn move_player(
         query.iter_mut()
     {
         if !move_target.active {
-            time.set_relative_speed(0.0);
             *velocity = LinearVelocity::ZERO;
             continue;
         }
-        time.set_relative_speed(1.0);
 
         let current = transform.translation.truncate();
         let distance = (move_target.destination - current).length();

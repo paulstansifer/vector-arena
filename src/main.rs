@@ -3,11 +3,16 @@ use bevy::prelude::*;
 use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::prelude::*;
 
-use vector_arena::{AGENT_RADIUS, WorldBounds, fov, monster, nav, player, terrain};
+use vector_arena::{AGENT_RADIUS, WorldBounds, fov, monster, nav, player, projectile, terrain};
 
 use fov::{Opaque, OpaqueVertices};
 use monster::Monster;
 use player::{MoveTarget, PLAYER_SPEED, Player, move_player, set_target_on_click};
+use projectile::{
+    MonsterShootTimer, apply_missile_knockback, manage_time_scale, monster_fire_missiles,
+    player_fire_missile, update_missiles,
+};
+use vector_arena::GameLayer;
 use terrain::{
     DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, Fragile, NavMeshIslandMarker,
     TerrainGeometry, TerrainMarker, geometry_to_collider, geometry_to_mesh,
@@ -32,6 +37,11 @@ fn main() {
         .add_systems(Update, fov::update_fov)
         .add_systems(Update, handle_right_click_excavation)
         .add_systems(Update, sync_dungeon_to_entities)
+        .add_systems(Update, player_fire_missile)
+        .add_systems(Update, monster_fire_missiles)
+        .add_systems(Update, update_missiles)
+        .add_systems(Update, apply_missile_knockback)
+        .add_systems(Update, manage_time_scale.after(move_player))
         .insert_resource(Gravity::ZERO)
         .run();
 }
@@ -87,6 +97,7 @@ fn setup(
             Transform::from_translation(Vec3::new(0.0, 0.0, crate::fov::TERRAIN_Z)),
             terrain_collider,
             RigidBody::Static,
+            CollisionLayers::new(GameLayer::Wall, [GameLayer::Wall, GameLayer::Dynamic, GameLayer::Missile]),
         ))
         .id();
 
@@ -105,6 +116,7 @@ fn setup(
                 Transform::from_translation(center.extend(crate::fov::MOVABLE_Z)),
                 RigidBody::Dynamic,
                 door.collider(),
+                CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
             ))
             .id();
 
@@ -150,6 +162,7 @@ fn setup(
             // Transform::from_translation(player_position.extend(0.0)),
             RigidBody::Dynamic,
             Collider::circle(AGENT_RADIUS),
+            CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
             LockedAxes::ROTATION_LOCKED,
             MoveTarget::default(),
             Agent2dBundle {
@@ -182,11 +195,13 @@ fn setup(
     for position in monster_positions.into_iter().take(2) {
         commands.spawn((
             Monster,
+            MonsterShootTimer::new(),
             Mesh2d(monster_mesh.clone()),
             MeshMaterial2d(monster_material.clone()),
             Transform::from_translation(position.extend(crate::fov::MOVABLE_Z)),
             RigidBody::Dynamic,
             Collider::circle(AGENT_RADIUS),
+            CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
             LockedAxes::ROTATION_LOCKED,
             Agent2dBundle {
                 agent: Default::default(),

@@ -1,6 +1,9 @@
-use crate::terrain::{
-    DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, geometry_to_collider,
-    geometry_to_mesh, playable_area_to_nav_mesh,
+use crate::{
+    GameLayer,
+    terrain::{
+        DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, geometry_to_collider,
+        geometry_to_mesh, playable_area_to_nav_mesh,
+    },
 };
 use avian2d::{math::PI, prelude::*};
 use bevy::prelude::*;
@@ -201,6 +204,7 @@ pub fn subtract_polygon_from_terrain(
                         Transform::from_translation(center.extend(10.0)), // Set Z to 10.0 to render on top
                         RigidBody::Dynamic,
                         rubble_collider,
+                        CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
                         velocity,
                         LinearDamping(1.5),
                         AngularDamping(1.5),
