@@ -10,6 +10,7 @@ bevy_mesh = "0.18"
 geo = "0.32"
 rand = "0.8"
 bevy_landmass = "0.11.1"
+bevy_egui = "0.39.1"
 
 [profile.dev]
 opt-level = 1 # Suggested by the Bevy docs
