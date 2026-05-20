@@ -4,7 +4,9 @@ use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::prelude::*;
 
 use vector_arena::{
-    AGENT_RADIUS, WorldBounds, fov, item, monster, nav, player, projectile, rope, terrain,
+    AGENT_RADIUS, WorldBounds,
+    effects::{projectile, rope},
+    fov, item, monster, nav, player,
 };
 
 use fov::{Opaque, OpaqueVertices};
@@ -16,12 +18,18 @@ use projectile::{
     monster_fire_missiles, player_fire_missile, spawn_missile_trails, update_missile_trails,
     update_missiles,
 };
-use terrain::{
-    DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, Fragile, NavMeshIslandMarker,
-    TerrainGeometry, TerrainMarker, geometry_to_collider, geometry_to_mesh,
-    handle_right_click_excavation, playable_area_to_nav_mesh, sync_dungeon_to_entities,
+use vector_arena::{
+    GameLayer,
+    dungeon::{
+        level_generation::TerrainGeometry,
+        terrain::{
+            DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, NavMeshIslandMarker,
+            TerrainMarker, geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh,
+            sync_dungeon_to_entities,
+        },
+    },
+    effects::crumble_terrain::{Fragile, handle_right_click_excavation},
 };
-use vector_arena::GameLayer;
 
 fn main() {
     App::new()
@@ -149,7 +157,8 @@ fn setup(
 
     commands.insert_resource(WorldBounds { width: window_width, height: window_height });
     let rubble_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.45, 0.42)));
-    commands.insert_resource(terrain::RubbleMaterial(rubble_material));
+    commands
+        .insert_resource(vector_arena::effects::crumble_terrain::RubbleMaterial(rubble_material));
 
     fov::spawn_fov_meshes(&mut commands, &mut meshes, &mut materials, window_width, window_height);
 

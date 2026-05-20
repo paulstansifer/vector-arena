@@ -1,6 +1,6 @@
 use crate::{
     GameLayer,
-    terrain::{
+    dungeon::terrain::{
         DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, geometry_to_collider,
         geometry_to_mesh, playable_area_to_nav_mesh,
     },

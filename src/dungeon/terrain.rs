@@ -8,11 +8,6 @@ use geo::{
 };
 use std::sync::Arc;
 
-#[path = "level-generation.rs"]
-pub mod level_generation;
-
-pub use level_generation::{CORRIDOR_WIDTH, PADDING, PartitionRole, TerrainGeometry};
-
 /// Convert the terrain geometry to a Bevy mesh for rendering.
 pub fn geometry_to_mesh(geometry: &MultiPolygon<f32>) -> Mesh {
     let mut positions = Vec::new();
@@ -131,13 +126,6 @@ pub fn playable_area_to_nav_mesh(playable_area: &MultiPolygon<f32>) -> Arc<Valid
     // TODO: validate() sometimes fails (try destroying a lot of terrain)
     Arc::new(nav_mesh.validate().expect("playable area nav mesh should be valid"))
 }
-
-#[path = "crumble-terrain.rs"]
-pub mod crumble_terrain;
-
-pub use crumble_terrain::{
-    Fragile, RubbleMaterial, handle_right_click_excavation, subtract_polygon_from_terrain,
-};
 
 #[derive(Component)]
 pub struct TerrainMarker;

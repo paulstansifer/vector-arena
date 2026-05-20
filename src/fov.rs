@@ -5,8 +5,8 @@ use std::ops::Range;
 
 use crate::{
     WorldBounds,
+    dungeon::terrain::{self, DungeonState},
     player::Player,
-    terrain::{self, DungeonState},
 };
 
 /// Other than solid rock (a special case), this marks things that block line-of-sight
@@ -254,9 +254,9 @@ fn update_fov_from_pov(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
+    use crate::dungeon::{
         bsp::Partition,
-        terrain::{PartitionRole, TerrainGeometry},
+        level_generation::{PartitionRole, TerrainGeometry},
     };
     use geo::CoordsIter;
     use rand::{SeedableRng, rngs::StdRng};

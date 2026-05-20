@@ -1,6 +1,6 @@
+use crate::dungeon::bsp::{Partition, partition_space};
 use avian2d::prelude::Collider;
 use bevy::math::Vec2;
-use crate::bsp::{Partition, partition_space};
 use geo::{BooleanOps, LineString, MultiPolygon, Polygon, Rect, Translate};
 use rand::prelude::*;
 
@@ -31,17 +31,13 @@ impl DoorGeometry {
         Vec2::new(c.x, c.y)
     }
 
-    pub fn hinge_vec(&self) -> Vec2 {
-        Vec2::new(self.hinge.0, self.hinge.1)
-    }
+    pub fn hinge_vec(&self) -> Vec2 { Vec2::new(self.hinge.0, self.hinge.1) }
 
     pub fn collider(&self) -> Collider {
         Collider::rectangle(self.phys_rect.width(), self.phys_rect.height())
     }
 
-    pub fn disp_size(&self) -> Vec2 {
-        Vec2::new(self.disp_rect.width(), self.disp_rect.height())
-    }
+    pub fn disp_size(&self) -> Vec2 { Vec2::new(self.disp_rect.width(), self.disp_rect.height()) }
 
     /// Display-rect corners in local space (centered at origin), suitable for FOV shadow casting.
     pub fn disp_corners(&self) -> Vec<Vec2> {
@@ -227,9 +223,8 @@ fn render(
         .flat_map(|(partition, _)| partition_connections(partition).into_iter().map(|c| (c.x, c.y)))
         .collect();
 
-    let is_live = |c: &ConnectionPoint| {
-        !empty_connections.iter().any(|&(ex, ey)| c.x == ex && c.y == ey)
-    };
+    let is_live =
+        |c: &ConnectionPoint| !empty_connections.iter().any(|&(ex, ey)| c.x == ex && c.y == ey);
 
     for (partition, role) in bsp {
         let mut region = MultiPolygon::new(vec![]);

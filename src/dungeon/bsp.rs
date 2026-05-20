@@ -1,4 +1,4 @@
-use crate::terrain::{CORRIDOR_WIDTH, PADDING};
+use crate::dungeon::level_generation::{CORRIDOR_WIDTH, PADDING};
 use rand::prelude::*;
 use std::ops::Range;
 

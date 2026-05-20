@@ -1,12 +1,10 @@
-pub mod bsp;
+pub mod dungeon;
+pub mod effects;
 pub mod fov;
 pub mod item;
 pub mod monster;
 pub mod nav;
 pub mod player;
-pub mod projectile;
-pub mod rope;
-pub mod terrain;
 
 pub const AGENT_RADIUS: f32 = 10.0;
 

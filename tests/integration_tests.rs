@@ -5,9 +5,12 @@ use rand::{prelude::*, rngs::StdRng};
 use std::time::Duration;
 use vector_arena::{
     AGENT_RADIUS,
-    bsp::Partition,
+    dungeon::{
+        bsp::Partition,
+        level_generation::{PartitionRole, TerrainGeometry},
+        terrain::playable_area_to_nav_mesh,
+    },
     player::{MoveTarget, PLAYER_SPEED, Player, move_player},
-    terrain::{PartitionRole, TerrainGeometry, playable_area_to_nav_mesh},
 };
 
 fn mock_physics_system(
