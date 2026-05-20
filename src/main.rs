@@ -3,7 +3,9 @@ use bevy::prelude::*;
 use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::prelude::*;
 
-use vector_arena::{AGENT_RADIUS, WorldBounds, fov, monster, nav, player, projectile, terrain};
+use vector_arena::{
+    AGENT_RADIUS, WorldBounds, fov, monster, nav, player, projectile, rope, terrain,
+};
 
 use fov::{Opaque, OpaqueVertices};
 use monster::Monster;
@@ -13,12 +15,12 @@ use projectile::{
     monster_fire_missiles, player_fire_missile, spawn_missile_trails, update_missile_trails,
     update_missiles,
 };
-use vector_arena::GameLayer;
 use terrain::{
     DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, Fragile, NavMeshIslandMarker,
     TerrainGeometry, TerrainMarker, geometry_to_collider, geometry_to_mesh,
     handle_right_click_excavation, playable_area_to_nav_mesh, sync_dungeon_to_entities,
 };
+use vector_arena::GameLayer;
 
 fn main() {
     App::new()
@@ -30,6 +32,7 @@ fn main() {
             avian2d::PhysicsPlugins::default(),
             Landmass2dPlugin::default(),
             // bevy_landmass::debug::Landmass2dDebugPlugin::default(),
+            rope::RopePlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(Startup, init_trail_meshes)
@@ -47,6 +50,7 @@ fn main() {
         .add_systems(Update, apply_missile_knockback)
         .add_systems(Update, manage_time_scale.after(move_player))
         .insert_resource(Gravity::ZERO)
+        .insert_resource(SubstepCount(40)) // To make rope physics behave well.
         .run();
 }
 
@@ -101,7 +105,12 @@ fn setup(
             Transform::from_translation(Vec3::new(0.0, 0.0, crate::fov::TERRAIN_Z)),
             terrain_collider,
             RigidBody::Static,
-            CollisionLayers::new(GameLayer::Wall, [GameLayer::Wall, GameLayer::Dynamic, GameLayer::Missile]),
+            CollisionLayers::new(GameLayer::Wall, [
+                GameLayer::Wall,
+                GameLayer::Dynamic,
+                GameLayer::Missile,
+                GameLayer::Rope,
+            ]),
         ))
         .id();
 
