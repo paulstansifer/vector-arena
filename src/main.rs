@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::prelude::*;
 
-use vector_arena::{AGENT_RADIUS, WorldBounds, fov, monster, nav, player, terrain};
+use vector_arena::{AGENT_RADIUS, WorldBounds, fov, missile, monster, nav, player, terrain};
 
 use fov::{Opaque, OpaqueVertices};
 use monster::Monster;
@@ -32,6 +32,9 @@ fn main() {
         .add_systems(Update, fov::update_fov)
         .add_systems(Update, handle_right_click_excavation)
         .add_systems(Update, sync_dungeon_to_entities)
+        .add_systems(Update, missile::fire_missile)
+        .add_systems(Update, missile::update_missiles)
+        .add_systems(Update, missile::fade_trails)
         .insert_resource(Gravity::ZERO)
         .run();
 }

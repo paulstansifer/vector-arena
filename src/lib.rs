@@ -1,5 +1,6 @@
 pub mod bsp;
 pub mod fov;
+pub mod missile;
 pub mod monster;
 pub mod nav;
 pub mod player;
