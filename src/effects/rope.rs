@@ -1,3 +1,8 @@
+// Drag-to-draw rope with segment physics.
+// Press R and drag to place a rope.  `spawn_rope` subdivides the line into
+// SEGMENT_TARGET_LEN capsule segments connected by RevoluteJoints with slight
+// compliance, anchoring endpoints to whatever entity (or terrain) is within
+// 3 units.  Segments collide with Wall only.
 use avian2d::prelude::*;
 use bevy::prelude::*;
 
@@ -127,10 +132,12 @@ fn spawn_rope(
                 .with_local_anchor1(Vec2::new(half_inner, 0.0))
                 .with_local_anchor2(Vec2::new(-half_inner, 0.0))
                 .with_point_compliance(ROPE_COMPLIANCE),
-            // This needs more tuning to make the rope less jiggly.
+            // TODO: This needs more tuning to make the rope less jiggly.
             JointDamping { linear: 15.0, angular: 10.0 },
         ));
     }
+
+    // TODO: anchoring to terrain doesn't actually work
 
     // Pin the start of the rope to whatever is at the drag origin.
     if let Some(anchor) = find_anchor(spatial_query, start) {

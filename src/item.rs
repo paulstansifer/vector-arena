@@ -1,3 +1,7 @@
+// Items, inventory, and pickup animation.
+// When the player walks within PICKUP_RADIUS, a `PickingUp` component is added
+// to the item entity.  The 0.25s ease-in animation runs on `Real` time so it
+// plays at normal speed even during bullet-time.
 use bevy::{prelude::*, time::Real};
 
 use crate::player::Player;

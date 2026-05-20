@@ -1,3 +1,7 @@
+// Player component, click-to-move targeting, and steering.
+// `MoveTarget` drives both the custom lerped-velocity steering and the Landmass
+// `AgentTarget2d` (so the navmesh path is kept current even though the player
+// uses its own steering rather than the landmass-computed velocity).
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;

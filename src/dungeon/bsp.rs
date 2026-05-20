@@ -1,3 +1,9 @@
+// Binary Space Partitioning: recursively divides the map rectangle into a flat
+// `Vec<Partition>`.  Each `Partition` records its bounds and the connection
+// coordinates on its four edges where corridors will attach.  The split
+// coordinate avoids landing on existing connections; double connections (two
+// corridors between adjacent partitions) kick in probabilistically once a
+// partition is wide enough.
 use crate::dungeon::level_generation::{CORRIDOR_WIDTH, PADDING};
 use rand::prelude::*;
 use std::ops::Range;

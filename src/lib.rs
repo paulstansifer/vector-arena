@@ -1,3 +1,4 @@
+// Module exports, global constants, and shared types.
 pub mod dungeon;
 pub mod effects;
 pub mod fov;
@@ -6,6 +7,7 @@ pub mod monster;
 pub mod nav;
 pub mod player;
 
+// TODO: move all these things out!
 pub const AGENT_RADIUS: f32 = 10.0;
 
 #[derive(bevy::prelude::Resource)]

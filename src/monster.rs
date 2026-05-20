@@ -1,3 +1,6 @@
+// Monster marker component. Targeting and velocity are handled externally:
+// `main.rs` attaches `AgentTarget2d::Entity(player)` and `nav.rs` converts the
+// Landmass desired-velocity into an Avian2D `LinearVelocity` each frame.
 use bevy::prelude::*;
 
 pub const MONSTER_SPEED: f32 = 80.0;

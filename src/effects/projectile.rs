@@ -1,3 +1,9 @@
+// Magic missiles, trails, knockback, and bullet-time.
+// Missiles use the Missile physics layer (collides with Wall only); knockback
+// against Dynamic bodies is applied manually by querying overlaps rather than
+// via collision events.  `manage_time_scale` sets Time<Virtual> to 0.05× while
+// any missile exists and adjusts the fixed-timestep period to keep physics at
+// ~64 Hz real-time regardless of scale.
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use rand::Rng;

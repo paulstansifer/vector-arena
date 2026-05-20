@@ -1,3 +1,7 @@
+// Bridge between Landmass pathfinding and Avian2D physics for monsters.
+// Reads `AgentDesiredVelocity2d` computed by Landmass each frame and writes it
+// to `LinearVelocity`, capped at MONSTER_SPEED. The player is excluded here
+// because it uses custom steering instead.
 use crate::player;
 use avian2d::prelude::LinearVelocity;
 use bevy::prelude::*;

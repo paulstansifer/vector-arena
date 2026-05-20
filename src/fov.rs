@@ -1,4 +1,9 @@
-// Field of view calculation
+// Raycasting FOV and cumulative exploration tracking.
+// `fov_arc` collects angles to obstacle endpoints (with ±0.01° offsets), adds 64 circle-boundary
+// angles, and casts a ray in each direction stopping at the nearest obstacle edge.
+// `ExplorationState` accumulates the ever-seen area as a MultiPolygon unioned with the current
+// FOV each frame. `Opaque`/`OpaqueVertices` mark sight-blocking entities; doors use local-space
+// polygon vertices so they cast correct shadows as they swing.
 use bevy::prelude::*;
 use geo::{BooleanOps, Buffer, LineString, MultiPolygon, Polygon, Simplify};
 use std::ops::Range;

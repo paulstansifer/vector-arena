@@ -1,3 +1,9 @@
+// Bridges TerrainGeometry into Bevy/Avian2D/Landmass entities.
+// `geometry_to_mesh` triangulates polygons into a Bevy Mesh.
+// `geometry_to_collider` turns polygon rings into an Avian2D polyline Collider.
+// `playable_area_to_nav_mesh` erodes by AGENT_RADIUS, triangulates, and
+// deduplicates vertices for Landmass.  `sync_dungeon_to_entities` is a system
+// that rebuilds all three whenever DungeonState changes (e.g. after excavation).
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;

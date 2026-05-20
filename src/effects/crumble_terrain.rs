@@ -1,3 +1,9 @@
+// Right-click excavation and rubble spawning.
+// Subtracts a 40-unit circle from solid_rock, unions it into playable_area, then
+// shatters the removed rock: iteratively slices pieces along random-angle planes
+// until all pieces are < 18 units, filters out tiny fragments, erodes by 4 units,
+// and spawns Dynamic Rubble entities with convex hull colliders and random outward
+// velocities.  Fragile entities (doors) inside the circle are despawned.
 use crate::{
     GameLayer,
     dungeon::terrain::{

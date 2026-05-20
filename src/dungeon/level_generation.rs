@@ -1,3 +1,8 @@
+// Converts BSP output into dungeon geometry (`TerrainGeometry`).
+// Each partition gets a role: Room, Corridor { double_width }, or Empty.
+// Rooms are padded inward (min 60 units after padding).  Corridors generate
+// L-shaped or straight hallways with beveled corners at junctions.  Doors are
+// placed at corridor/room boundaries with a hinge point for revolute joints.
 use crate::dungeon::bsp::{Partition, partition_space};
 use avian2d::prelude::Collider;
 use bevy::math::Vec2;
