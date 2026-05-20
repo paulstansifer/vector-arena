@@ -4,10 +4,11 @@ use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::prelude::*;
 
 use vector_arena::{
-    AGENT_RADIUS, WorldBounds, fov, monster, nav, player, projectile, rope, terrain,
+    AGENT_RADIUS, WorldBounds, fov, item, monster, nav, player, projectile, rope, terrain,
 };
 
 use fov::{Opaque, OpaqueVertices};
+use item::{Inventory, Item, ItemKind, PotionColor, ScrollName, animate_pickup, pickup_items};
 use monster::Monster;
 use player::{MoveTarget, PLAYER_SPEED, Player, move_player, set_target_on_click};
 use projectile::{
@@ -48,6 +49,8 @@ fn main() {
         .add_systems(Update, spawn_missile_trails)
         .add_systems(Update, update_missile_trails)
         .add_systems(Update, apply_missile_knockback)
+        .add_systems(Update, pickup_items)
+        .add_systems(Update, animate_pickup)
         .add_systems(Update, manage_time_scale.after(move_player))
         .insert_resource(Gravity::ZERO)
         .insert_resource(SubstepCount(40)) // To make rope physics behave well.
@@ -170,6 +173,7 @@ fn setup(
     let player = commands
         .spawn((
             Player,
+            Inventory::default(),
             Mesh2d(meshes.add(Circle::new(AGENT_RADIUS))),
             MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
             Transform::from_translation(player_position.extend(fov::MOVABLE_Z)),
@@ -227,5 +231,50 @@ fn setup(
             },
             AgentTarget2d::Entity(player),
         ));
+    }
+
+    let all_item_kinds = [
+        ItemKind::Potion(PotionColor::Red),
+        ItemKind::Potion(PotionColor::Green),
+        ItemKind::Potion(PotionColor::Blue),
+        ItemKind::Scroll(ScrollName::Readme),
+        ItemKind::Scroll(ScrollName::Agents),
+        ItemKind::Scroll(ScrollName::License),
+    ];
+    let item_count = rng.gen_range(4..=5);
+    let chosen_kinds: Vec<ItemKind> =
+        all_item_kinds.choose_multiple(&mut rng, item_count).copied().collect();
+
+    let potion_mesh = meshes.add(RegularPolygon::new(7.0, 3));
+    let scroll_mesh = meshes.add(Rectangle::new(12.0, 12.0));
+
+    for kind in chosen_kinds {
+        let room = terrain_geometry.rooms.choose(&mut rng).unwrap();
+        let center = room.center();
+        let half_w = (room.width() / 2.0 - 18.0).max(5.0);
+        let half_h = (room.height() / 2.0 - 18.0).max(5.0);
+        let x = center.x + rng.gen_range(-half_w..=half_w);
+        let y = center.y + rng.gen_range(-half_h..=half_h);
+        let pos = Vec3::new(x, y, fov::ON_FLOOR_Z);
+
+        // Each item gets its own material so the pickup fade can be applied independently.
+        match kind {
+            ItemKind::Potion(_) => {
+                commands.spawn((
+                    Item(kind),
+                    Mesh2d(potion_mesh.clone()),
+                    MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.2, 0.85, 0.3)))),
+                    Transform::from_translation(pos),
+                ));
+            }
+            ItemKind::Scroll(_) => {
+                commands.spawn((
+                    Item(kind),
+                    Mesh2d(scroll_mesh.clone()),
+                    MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.8, 0.8, 0.75)))),
+                    Transform::from_translation(pos),
+                ));
+            }
+        }
     }
 }

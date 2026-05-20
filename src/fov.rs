@@ -121,10 +121,11 @@ pub fn fov_arc(
     Polygon::new(LineString::from(polygon_points), vec![])
 }
 
-const NEVER_EXPLORED_Z: f32 = 40.0;
-pub const TERRAIN_Z: f32 = 30.0;
-const NOT_IN_FOV_Z: f32 = 20.0;
-pub const MOVABLE_Z: f32 = 10.0;
+const NEVER_EXPLORED_Z: f32 = 50.0;
+pub const TERRAIN_Z: f32 = 40.0;
+const NOT_IN_FOV_Z: f32 = 30.0;
+pub const MOVABLE_Z: f32 = 20.0;
+pub const ON_FLOOR_Z: f32 = 10.0;
 
 #[derive(Component)]
 pub struct FovMeshMarker;
