@@ -20,8 +20,10 @@ pub fn geometry_to_mesh(geometry: &MultiPolygon<f32>) -> Mesh {
     let mut normals = Vec::new();
 
     for polygon in geometry.iter() {
-        let triangulation =
-            polygon.constrained_triangulation(DelaunayTriangulationConfig::default()).unwrap();
+        // TODO: This `.expect()` has failed before! Figure out why this can fail!
+        let triangulation = polygon
+            .constrained_triangulation(DelaunayTriangulationConfig::default())
+            .expect("generating visual terrain mesh");
         for triangle in &triangulation {
             for coord in &[triangle.v1(), triangle.v2(), triangle.v3()] {
                 indices.push(positions.len() as u32);

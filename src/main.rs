@@ -9,8 +9,9 @@ use fov::{Opaque, OpaqueVertices};
 use monster::Monster;
 use player::{MoveTarget, PLAYER_SPEED, Player, move_player, set_target_on_click};
 use projectile::{
-    MonsterShootTimer, apply_missile_knockback, manage_time_scale, monster_fire_missiles,
-    player_fire_missile, update_missiles,
+    MonsterShootTimer, apply_missile_knockback, init_trail_meshes, manage_time_scale,
+    monster_fire_missiles, player_fire_missile, spawn_missile_trails, update_missile_trails,
+    update_missiles,
 };
 use vector_arena::GameLayer;
 use terrain::{
@@ -31,6 +32,7 @@ fn main() {
             // bevy_landmass::debug::Landmass2dDebugPlugin::default(),
         ))
         .add_systems(Startup, setup)
+        .add_systems(Startup, init_trail_meshes)
         .add_systems(Update, set_target_on_click)
         .add_systems(Update, move_player)
         .add_systems(Update, nav::apply_agent_velocity)
@@ -40,6 +42,8 @@ fn main() {
         .add_systems(Update, player_fire_missile)
         .add_systems(Update, monster_fire_missiles)
         .add_systems(Update, update_missiles)
+        .add_systems(Update, spawn_missile_trails)
+        .add_systems(Update, update_missile_trails)
         .add_systems(Update, apply_missile_knockback)
         .add_systems(Update, manage_time_scale.after(move_player))
         .insert_resource(Gravity::ZERO)
@@ -159,7 +163,7 @@ fn setup(
             Player,
             Mesh2d(meshes.add(Circle::new(AGENT_RADIUS))),
             MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
-            // Transform::from_translation(player_position.extend(0.0)),
+            Transform::from_translation(player_position.extend(fov::MOVABLE_Z)),
             RigidBody::Dynamic,
             Collider::circle(AGENT_RADIUS),
             CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
