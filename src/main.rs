@@ -17,8 +17,8 @@ use monster::Monster;
 use player::{MoveTarget, PLAYER_SPEED, Player, move_player, set_target_on_click};
 use projectile::{
     MonsterShootTimer, apply_missile_knockback, init_trail_meshes, manage_time_scale,
-    monster_fire_missiles, player_fire_missile, spawn_missile_trails, update_missile_trails,
-    update_missiles,
+    monster_fire_missiles, player_fire_missile, spawn_missile_trails, tick_knockback_cooldowns,
+    update_missile_trails, update_missiles,
 };
 use vector_arena::{
     GameLayer,
@@ -60,6 +60,7 @@ fn main() {
         .add_systems(Update, spawn_missile_trails)
         .add_systems(Update, update_missile_trails)
         .add_systems(Update, apply_missile_knockback)
+        .add_systems(Update, tick_knockback_cooldowns)
         .add_systems(Update, pickup_items)
         .add_systems(Update, animate_pickup)
         .add_systems(Update, manage_time_scale.after(move_player))

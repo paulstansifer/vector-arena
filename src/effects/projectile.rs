@@ -21,7 +21,8 @@ pub const MISSILE_SPEED: f32 = PLAYER_SPEED * 10.0;
 pub const MISSILE_MAX_DISTANCE: f32 = 1000.0;
 pub const MONSTER_FIRE_RANGE: f32 = 100.0;
 const TIME_SCALE_MISSILE: f32 = 0.5;
-const KNOCKBACK_SPEED: f32 = 6000.0;
+const KNOCKBACK_SPEED: f32 = 600.0;
+const KNOCKBACK_COOLDOWN: f32 = 0.15; // virtual seconds; prevents double-hits per pass
 const TRAIL_CORE_HEIGHT: f32 = 1.0;
 const TRAIL_GLOW_HEIGHT: f32 = 4.0;
 
@@ -53,9 +54,12 @@ pub struct MissileTrail {
 pub struct MagicMissile {
     pub distance_traveled: f32,
     pub fired_by_player: bool,
-    knocked_back: Vec<Entity>,
     last_trail_pos: Option<Vec2>,
+    last_trail_vel: Option<Vec2>,
 }
+
+#[derive(Component)]
+pub struct KnockbackCooldown(f32);
 
 #[derive(Component)]
 pub struct MonsterShootTimer(pub f32);
@@ -83,8 +87,8 @@ fn spawn_missile(
         MagicMissile {
             distance_traveled: 0.0,
             fired_by_player,
-            knocked_back: Vec::new(),
             last_trail_pos: None,
+            last_trail_vel: None,
         },
         Mesh2d(meshes.add(Circle::new(4.0))),
         MeshMaterial2d(materials.add(ColorMaterial::from(color))),
@@ -173,15 +177,20 @@ pub fn update_missiles(
     }
 }
 
-/// For each missile, find overlapping Dynamic-layer entities and apply a one-shot velocity push.
+/// For each missile, find overlapping Dynamic-layer entities and apply a velocity push.
 /// Missiles don't physically interact with Dynamic entities (collision layers exclude this),
-/// so we handle the knockback manually here.
+/// so we handle knockback manually. A short per-entity cooldown prevents double-hits from
+/// simultaneous missiles while allowing a bounced missile to knock back again on a later pass.
 pub fn apply_missile_knockback(
+    mut commands: Commands,
     spatial_query: SpatialQuery,
-    mut missiles: Query<(&Transform, &LinearVelocity, &mut MagicMissile)>,
-    mut dynamic_query: Query<&mut LinearVelocity, (Without<MagicMissile>, With<RigidBody>)>,
+    missiles: Query<(&Transform, &LinearVelocity), With<MagicMissile>>,
+    mut dynamic_query: Query<
+        (&mut LinearVelocity, Option<&KnockbackCooldown>),
+        (Without<MagicMissile>, With<RigidBody>),
+    >,
 ) {
-    for (transform, missile_vel, mut missile) in missiles.iter_mut() {
+    for (transform, missile_vel) in missiles.iter() {
         let pos = transform.translation.truncate();
         let knockback_dir = missile_vel.0.normalize_or_zero();
 
@@ -193,80 +202,127 @@ pub fn apply_missile_knockback(
         );
 
         for hit in hits {
-            if missile.knocked_back.contains(&hit) {
-                continue;
-            }
-            missile.knocked_back.push(hit);
-            if let Ok(mut vel) = dynamic_query.get_mut(hit) {
+            if let Ok((mut vel, cooldown)) = dynamic_query.get_mut(hit) {
+                if cooldown.is_some_and(|c| c.0 > 0.0) {
+                    continue;
+                }
                 vel.0 += knockback_dir * KNOCKBACK_SPEED;
+                commands.entity(hit).insert(KnockbackCooldown(KNOCKBACK_COOLDOWN));
             }
         }
     }
 }
 
+pub fn tick_knockback_cooldowns(
+    time: Res<Time>,
+    mut query: Query<&mut KnockbackCooldown>,
+) {
+    for mut cooldown in query.iter_mut() {
+        cooldown.0 -= time.delta_secs();
+    }
+}
+
+/// Returns the approximate bounce contact point if the missile's direction changed enough
+/// between last_pos/last_dir and current_pos/current_dir to indicate a wall bounce.
+/// Uses ray-ray intersection: the contact lies on both the forward ray from last_pos
+/// and the backward ray from current_pos.
+fn bounce_contact(last_pos: Vec2, last_dir: Vec2, current_pos: Vec2, current_dir: Vec2) -> Option<Vec2> {
+    if last_dir.dot(current_dir) > 0.95 {
+        return None; // directions nearly identical, no bounce
+    }
+    // Solve: last_pos + t*last_dir = current_pos - s*current_dir
+    let diff = current_pos - last_pos;
+    let det = last_dir.x * current_dir.y - last_dir.y * current_dir.x;
+    if det.abs() < 1e-6 {
+        return None;
+    }
+    let t = (diff.x * current_dir.y - diff.y * current_dir.x) / det;
+    let s = (last_dir.x * diff.y - last_dir.y * diff.x) / det;
+    if t < 0.0 || s < 0.0 {
+        return None;
+    }
+    Some(last_pos + t * last_dir)
+}
+
+fn spawn_trail_segment(
+    commands: &mut Commands,
+    trail_meshes: &TrailMeshes,
+    materials: &mut Assets<ColorMaterial>,
+    missile_entity: Entity,
+    fired_by_player: bool,
+    from: Vec2,
+    to: Vec2,
+    extra_lifetime: f32,
+) {
+    let delta = to - from;
+    let segment_len = delta.length();
+    if segment_len < 0.5 {
+        return;
+    }
+    let midpoint = from + delta * 0.5;
+    let rotation = Quat::from_rotation_z(delta.y.atan2(delta.x));
+
+    let (core_color, glow_color) = if fired_by_player {
+        (Color::srgba(0.6, 0.8, 1.0, 1.0), Color::srgba(0.3, 0.5, 1.0, 0.4))
+    } else {
+        (Color::srgba(1.0, 0.6, 0.4, 1.0), Color::srgba(1.0, 0.3, 0.1, 0.4))
+    };
+
+    commands.spawn((
+        MissileTrail { source_missile: missile_entity, fired_by_player, is_glow: false, extra_lifetime, expiration: None },
+        Mesh2d(trail_meshes.core.clone()),
+        MeshMaterial2d(materials.add(ColorMaterial::from(core_color))),
+        Transform::from_translation(midpoint.extend(MOVABLE_Z + 0.6))
+            .with_rotation(rotation)
+            .with_scale(Vec3::new(segment_len, 1.0, 1.0)),
+    ));
+    commands.spawn((
+        MissileTrail { source_missile: missile_entity, fired_by_player, is_glow: true, extra_lifetime, expiration: None },
+        Mesh2d(trail_meshes.glow.clone()),
+        MeshMaterial2d(materials.add(ColorMaterial::from(glow_color))),
+        Transform::from_translation(midpoint.extend(MOVABLE_Z + 0.5))
+            .with_rotation(rotation)
+            .with_scale(Vec3::new(segment_len, 1.0, 1.0)),
+    ));
+}
+
 pub fn spawn_missile_trails(
-    mut query: Query<(Entity, &Transform, &mut MagicMissile)>,
+    mut query: Query<(Entity, &Transform, &LinearVelocity, &mut MagicMissile)>,
     trail_meshes: Res<TrailMeshes>,
     mut commands: Commands,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    for (missile_entity, transform, mut missile) in query.iter_mut() {
+    for (missile_entity, transform, velocity, mut missile) in query.iter_mut() {
         let current_pos = transform.translation.truncate();
+        let current_vel = velocity.0;
 
-        let Some(last_pos) = missile.last_trail_pos else {
-            missile.last_trail_pos = Some(current_pos);
-            continue;
+        let (last_pos, last_vel) = match (missile.last_trail_pos, missile.last_trail_vel) {
+            (Some(p), Some(v)) => (p, v),
+            _ => {
+                missile.last_trail_pos = Some(current_pos);
+                missile.last_trail_vel = Some(current_vel);
+                continue;
+            }
         };
         missile.last_trail_pos = Some(current_pos);
+        missile.last_trail_vel = Some(current_vel);
 
-        let delta = current_pos - last_pos;
-        let segment_len = delta.length();
-        if segment_len < 0.5 {
-            continue;
-        }
-
-        let dir = delta / segment_len;
-        let midpoint = last_pos + delta * 0.5;
-        let rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
-
-        let (core_color, glow_color) = if missile.fired_by_player {
-            (Color::srgba(0.6, 0.8, 1.0, 1.0), Color::srgba(0.3, 0.5, 1.0, 0.4))
-        } else {
-            (Color::srgba(1.0, 0.6, 0.4, 1.0), Color::srgba(1.0, 0.3, 0.1, 0.4))
-        };
-
-        // Tail segments (spawned early) get up to 0.5 s extra life; head segments (spawned late) get 0.
+        // Tail segments (spawned early) get up to 0.5 s extra life; head segments get 0.
         let t = (missile.distance_traveled / MISSILE_MAX_DISTANCE).clamp(0.0, 1.0);
         let extra_lifetime = (1.0 - t) * 0.5;
 
-        commands.spawn((
-            MissileTrail {
-                source_missile: missile_entity,
-                fired_by_player: missile.fired_by_player,
-                is_glow: false,
-                extra_lifetime,
-                expiration: None,
-            },
-            Mesh2d(trail_meshes.core.clone()),
-            MeshMaterial2d(materials.add(ColorMaterial::from(core_color))),
-            Transform::from_translation(midpoint.extend(MOVABLE_Z + 0.6))
-                .with_rotation(rotation)
-                .with_scale(Vec3::new(segment_len, 1.0, 1.0)),
-        ));
-        commands.spawn((
-            MissileTrail {
-                source_missile: missile_entity,
-                fired_by_player: missile.fired_by_player,
-                is_glow: true,
-                extra_lifetime,
-                expiration: None,
-            },
-            Mesh2d(trail_meshes.glow.clone()),
-            MeshMaterial2d(materials.add(ColorMaterial::from(glow_color))),
-            Transform::from_translation(midpoint.extend(MOVABLE_Z + 0.5))
-                .with_rotation(rotation)
-                .with_scale(Vec3::new(segment_len, 1.0, 1.0)),
-        ));
+        let last_dir = last_vel.normalize_or_zero();
+        let current_dir = current_vel.normalize_or_zero();
+
+        if let Some(contact) = bounce_contact(last_pos, last_dir, current_pos, current_dir) {
+            spawn_trail_segment(&mut commands, &trail_meshes, &mut materials,
+                missile_entity, missile.fired_by_player, last_pos, contact, extra_lifetime);
+            spawn_trail_segment(&mut commands, &trail_meshes, &mut materials,
+                missile_entity, missile.fired_by_player, contact, current_pos, extra_lifetime);
+        } else {
+            spawn_trail_segment(&mut commands, &trail_meshes, &mut materials,
+                missile_entity, missile.fired_by_player, last_pos, current_pos, extra_lifetime);
+        }
     }
 }
 
