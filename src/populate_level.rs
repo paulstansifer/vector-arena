@@ -12,7 +12,7 @@ use crate::{
     effects::projectile::MonsterShootTimer,
     fov,
     item::{Inventory, Item, ItemKind, PotionColor, ScrollName},
-    monster::{Monster, MONSTER_SPEED},
+    monster::{MONSTER_SPEED, Monster},
     player::{MoveTarget, PLAYER_SPEED, Player},
     ui::PlayerStats,
 };
@@ -31,13 +31,22 @@ pub fn populate(
     // Pick the player's room by index so we can exclude it when placing the staircase.
     let player_room_idx = if rooms.is_empty() { 0 } else { rng.gen_range(0..rooms.len()) };
 
-    let player_position = rooms.get(player_room_idx)
-        .map(|r| { let c = r.center(); Vec2::new(c.x, c.y) })
+    let player_position = rooms
+        .get(player_room_idx)
+        .map(|r| {
+            let c = r.center();
+            Vec2::new(c.x, c.y)
+        })
         .unwrap_or(Vec2::ZERO);
 
-    let staircase_position = rooms.iter().enumerate()
+    let staircase_position = rooms
+        .iter()
+        .enumerate()
         .filter(|(i, _)| *i != player_room_idx)
-        .map(|(_, r)| { let c = r.center(); Vec2::new(c.x, c.y) })
+        .map(|(_, r)| {
+            let c = r.center();
+            Vec2::new(c.x, c.y)
+        })
         .collect::<Vec<_>>()
         .choose(&mut rng)
         .copied()
@@ -77,9 +86,14 @@ pub fn populate(
     let monster_material = materials.add(ColorMaterial::from(Color::srgb(0.85, 0.12, 0.12)));
     let monster_mesh = meshes.add(Circle::new(AGENT_RADIUS));
 
-    let monster_positions: Vec<Vec2> = rooms.iter().enumerate()
+    let monster_positions: Vec<Vec2> = rooms
+        .iter()
+        .enumerate()
         .filter(|(i, _)| *i != player_room_idx)
-        .map(|(_, r)| { let c = r.center(); Vec2::new(c.x, c.y) })
+        .map(|(_, r)| {
+            let c = r.center();
+            Vec2::new(c.x, c.y)
+        })
         .collect();
 
     // One more monster per depth level (2 at depth 1, 3 at depth 2, …).
@@ -173,29 +187,30 @@ fn spawn_staircase(
     let bg_mesh = meshes.add(Rectangle::new(SIZE, SIZE));
     let line_mesh = meshes.add(Rectangle::new(LINE_W, LINE_L));
 
-    let staircase = commands.spawn((
-        Staircase,
-        Transform::from_translation(position.extend(fov::ON_FLOOR_Z)),
-        Visibility::default(),
-    )).id();
+    let staircase = commands
+        .spawn((
+            Staircase,
+            Transform::from_translation(position.extend(fov::ON_FLOOR_Z)),
+            Visibility::default(),
+        ))
+        .id();
 
-    let bg_child = commands.spawn((
-        Mesh2d(bg_mesh),
-        MeshMaterial2d(bg_mat),
-        Transform::default(),
-    )).id();
+    let bg_child =
+        commands.spawn((Mesh2d(bg_mesh), MeshMaterial2d(bg_mat), Transform::default())).id();
     commands.entity(staircase).add_child(bg_child);
 
     // 3 parallel hatch lines at 45°, spaced along the perpendicular (-45°) direction.
     let perp = Vec2::new(1.0, -1.0).normalize();
     for i in [-1i32, 0, 1] {
         let offset = perp * (i as f32 * LINE_SPACING);
-        let line_child = commands.spawn((
-            Mesh2d(line_mesh.clone()),
-            MeshMaterial2d(line_mat.clone()),
-            Transform::from_translation(offset.extend(1.0))
-                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)),
-        )).id();
+        let line_child = commands
+            .spawn((
+                Mesh2d(line_mesh.clone()),
+                MeshMaterial2d(line_mat.clone()),
+                Transform::from_translation(offset.extend(1.0))
+                    .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)),
+            ))
+            .id();
         commands.entity(staircase).add_child(line_child);
     }
 }

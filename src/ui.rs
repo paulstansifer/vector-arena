@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 
-use crate::{DungeonDepth, GameTransition, StaircaseDialog};
-use crate::item::{Inventory, ItemKind};
-use crate::player::Player;
+use crate::{
+    DungeonDepth, GameTransition,
+    item::{Inventory, ItemKind},
+    player::Player,
+};
 
 const BAR_WIDTH: f32 = 140.0;
 const BAR_HEIGHT: f32 = 22.0; // 4px taller than egui's default 18px interact_size
@@ -23,9 +25,7 @@ pub struct MessageLog {
 }
 
 impl MessageLog {
-    pub fn push(&mut self, msg: impl Into<String>) {
-        self.messages.push(msg.into());
-    }
+    pub fn push(&mut self, msg: impl Into<String>) { self.messages.push(msg.into()); }
 }
 
 #[derive(Resource, Default)]
@@ -48,16 +48,16 @@ impl Plugin for UiPlugin {
 fn ui_system(
     mut contexts: EguiContexts,
     mut ui_state: ResMut<UiState>,
-    player_query: Query<(&PlayerStats, &Inventory), With<Player>>,
+    player_query: Query<(&PlayerStats, &Inventory, &Transform), With<Player>>,
+    staircase_q: Query<&Transform, With<crate::Staircase>>,
     message_log: Res<MessageLog>,
     mut app_exit: MessageWriter<AppExit>,
     mut transitions: MessageWriter<GameTransition>,
     depth: Res<DungeonDepth>,
-    mut staircase_dialog: ResMut<StaircaseDialog>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
-    let Ok((stats, inventory)) = player_query.single() else {
+    let Ok((stats, inventory, player_tf)) = player_query.single() else {
         return Ok(());
     };
 
@@ -85,15 +85,15 @@ fn ui_system(
 
             // Expanded log: chronological order, newest at the bottom.
             if messages_expanded {
-                egui::ScrollArea::vertical()
-                    .max_height(200.0)
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(200.0).stick_to_bottom(true).show(
+                    ui,
+                    |ui| {
                         ui.set_min_width(ui.available_width());
                         for msg in message_log.messages.iter() {
                             ui.label(msg);
                         }
-                    });
+                    },
+                );
             }
 
             response.clicked()
@@ -116,8 +116,15 @@ fn ui_system(
 
     let (hp, max_hp, mana, max_mana) = (stats.hp, stats.max_hp, stats.mana, stats.max_mana);
 
+    let near_staircase = if let Ok(stair_tf) = staircase_q.single() {
+        player_tf.translation.truncate().distance(stair_tf.translation.truncate()) < 20.0
+    } else {
+        false
+    };
+
     // --- Bottom bar: HP/mana bars, inventory icons, hamburger ---
     let mut toggle_menu = false;
+    let mut do_descend = false;
     egui::TopBottomPanel::bottom("hud").show(ctx, |ui| {
         ui.horizontal(|ui| {
             draw_stat_bar(
@@ -148,6 +155,10 @@ fn ui_system(
                 }
                 ui.separator();
                 ui.label(format!("Depth {}", depth.0));
+                ui.separator();
+                if ui.add_visible(near_staircase, egui::Button::new("Descend")).clicked() {
+                    do_descend = true;
+                }
             });
         });
     });
@@ -192,43 +203,15 @@ fn ui_system(
         ui_state.menu_open = false;
     }
 
-    // --- Staircase descent dialog ---
-    let mut do_descend = false;
-    let mut decline_descent = false;
-    if staircase_dialog.show && !menu_open {
-        egui::Window::new("Descend?")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.label("A staircase leads down into the darkness.");
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Descend").clicked() {
-                        do_descend = true;
-                    }
-                    ui.add_space(4.0);
-                    if ui.button("Stay").clicked() {
-                        decline_descent = true;
-                    }
-                });
-            });
-    }
     if do_descend {
-        staircase_dialog.show = false;
         transitions.write(GameTransition::Descend);
-    }
-    if decline_descent {
-        staircase_dialog.show = false;
-        staircase_dialog.declined = true;
     }
 
     Ok(())
 }
 
 fn draw_stat_bar(ui: &mut egui::Ui, ratio: f32, color: egui::Color32, label: &str) {
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(BAR_WIDTH, BAR_HEIGHT), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(BAR_WIDTH, BAR_HEIGHT), egui::Sense::hover());
     let painter = ui.painter_at(rect);
 
     painter.rect_filled(rect, BAR_ROUNDING, egui::Color32::from_rgb(40, 40, 40));

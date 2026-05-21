@@ -7,8 +7,7 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use rand::Rng;
-use std::collections::HashSet;
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use crate::{
     AGENT_RADIUS, GameLayer,
@@ -213,10 +212,7 @@ pub fn apply_missile_knockback(
     }
 }
 
-pub fn tick_knockback_cooldowns(
-    time: Res<Time>,
-    mut query: Query<&mut KnockbackCooldown>,
-) {
+pub fn tick_knockback_cooldowns(time: Res<Time>, mut query: Query<&mut KnockbackCooldown>) {
     for mut cooldown in query.iter_mut() {
         cooldown.0 -= time.delta_secs();
     }
@@ -226,7 +222,12 @@ pub fn tick_knockback_cooldowns(
 /// between last_pos/last_dir and current_pos/current_dir to indicate a wall bounce.
 /// Uses ray-ray intersection: the contact lies on both the forward ray from last_pos
 /// and the backward ray from current_pos.
-fn bounce_contact(last_pos: Vec2, last_dir: Vec2, current_pos: Vec2, current_dir: Vec2) -> Option<Vec2> {
+fn bounce_contact(
+    last_pos: Vec2,
+    last_dir: Vec2,
+    current_pos: Vec2,
+    current_dir: Vec2,
+) -> Option<Vec2> {
     if last_dir.dot(current_dir) > 0.95 {
         return None; // directions nearly identical, no bounce
     }
@@ -269,7 +270,13 @@ fn spawn_trail_segment(
     };
 
     commands.spawn((
-        MissileTrail { source_missile: missile_entity, fired_by_player, is_glow: false, extra_lifetime, expiration: None },
+        MissileTrail {
+            source_missile: missile_entity,
+            fired_by_player,
+            is_glow: false,
+            extra_lifetime,
+            expiration: None,
+        },
         Mesh2d(trail_meshes.core.clone()),
         MeshMaterial2d(materials.add(ColorMaterial::from(core_color))),
         Transform::from_translation(midpoint.extend(MOVABLE_Z + 0.6))
@@ -277,7 +284,13 @@ fn spawn_trail_segment(
             .with_scale(Vec3::new(segment_len, 1.0, 1.0)),
     ));
     commands.spawn((
-        MissileTrail { source_missile: missile_entity, fired_by_player, is_glow: true, extra_lifetime, expiration: None },
+        MissileTrail {
+            source_missile: missile_entity,
+            fired_by_player,
+            is_glow: true,
+            extra_lifetime,
+            expiration: None,
+        },
         Mesh2d(trail_meshes.glow.clone()),
         MeshMaterial2d(materials.add(ColorMaterial::from(glow_color))),
         Transform::from_translation(midpoint.extend(MOVABLE_Z + 0.5))
@@ -315,13 +328,37 @@ pub fn spawn_missile_trails(
         let current_dir = current_vel.normalize_or_zero();
 
         if let Some(contact) = bounce_contact(last_pos, last_dir, current_pos, current_dir) {
-            spawn_trail_segment(&mut commands, &trail_meshes, &mut materials,
-                missile_entity, missile.fired_by_player, last_pos, contact, extra_lifetime);
-            spawn_trail_segment(&mut commands, &trail_meshes, &mut materials,
-                missile_entity, missile.fired_by_player, contact, current_pos, extra_lifetime);
+            spawn_trail_segment(
+                &mut commands,
+                &trail_meshes,
+                &mut materials,
+                missile_entity,
+                missile.fired_by_player,
+                last_pos,
+                contact,
+                extra_lifetime,
+            );
+            spawn_trail_segment(
+                &mut commands,
+                &trail_meshes,
+                &mut materials,
+                missile_entity,
+                missile.fired_by_player,
+                contact,
+                current_pos,
+                extra_lifetime,
+            );
         } else {
-            spawn_trail_segment(&mut commands, &trail_meshes, &mut materials,
-                missile_entity, missile.fired_by_player, last_pos, current_pos, extra_lifetime);
+            spawn_trail_segment(
+                &mut commands,
+                &trail_meshes,
+                &mut materials,
+                missile_entity,
+                missile.fired_by_player,
+                last_pos,
+                current_pos,
+                extra_lifetime,
+            );
         }
     }
 }

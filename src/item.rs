@@ -4,8 +4,7 @@
 // plays at normal speed even during bullet-time.
 use bevy::{prelude::*, time::Real};
 
-use crate::player::Player;
-use crate::ui::MessageLog;
+use crate::{player::Player, ui::MessageLog};
 
 fn item_name(item: ItemKind) -> &'static str {
     match item {

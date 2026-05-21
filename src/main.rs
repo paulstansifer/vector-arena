@@ -2,27 +2,23 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_egui::input::egui_wants_any_pointer_input;
 use bevy_landmass::{NavMeshHandle, prelude::*};
-use rand::prelude::*;
 
 use vector_arena::{
-    AGENT_RADIUS, DungeonDepth, GameTransition, Staircase, StaircaseDialog,
-    WorldBounds,
+    AGENT_RADIUS, DungeonDepth, GameTransition, Staircase, WorldBounds,
     effects::{projectile, rope},
     fov, item, monster, nav, player, ui,
 };
 
 use fov::{FovMeshMarker, NeverExploredMeshMarker, Opaque, OpaqueVertices};
-use ui::{PlayerStats, UiPlugin};
 use item::{Inventory, Item, animate_pickup, pickup_items};
 use monster::Monster;
-use player::{MoveTarget, Player, move_player, set_target_on_click};
+use player::{Player, move_player, set_target_on_click};
 use projectile::{
-    MagicMissile, MissileTrail,
-    apply_missile_knockback, init_trail_meshes, manage_time_scale,
+    MagicMissile, MissileTrail, apply_missile_knockback, init_trail_meshes, manage_time_scale,
     monster_fire_missiles, player_fire_missile, spawn_missile_trails, tick_knockback_cooldowns,
     update_missile_trails, update_missiles,
 };
-use vector_arena::populate_level;
+use ui::{MessageLog, PlayerStats, UiPlugin};
 use vector_arena::{
     GameLayer,
     dungeon::{
@@ -32,10 +28,10 @@ use vector_arena::{
             geometry_to_mesh, sync_dungeon_to_entities,
         },
     },
-    nav::{DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
     effects::crumble_terrain::{Fragile, Rubble, handle_right_click_excavation},
+    nav::{DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
+    populate_level,
 };
-use ui::MessageLog;
 
 fn main() {
     App::new()
@@ -53,7 +49,6 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(Startup, init_trail_meshes)
         .add_systems(Update, handle_game_transition)
-        .add_systems(Update, check_staircase)
         .add_systems(Update, set_target_on_click.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, move_player)
         .add_systems(Update, nav::apply_agent_velocity)
@@ -75,7 +70,6 @@ fn main() {
         .insert_resource(SubstepCount(40)) // To make rope physics behave well.
         .add_message::<GameTransition>()
         .init_resource::<DungeonDepth>()
-        .init_resource::<StaircaseDialog>()
         .run();
 }
 
@@ -91,7 +85,16 @@ fn setup(
 
     let window_width = window.width();
     let window_height = window.height();
-    spawn_game_world(&mut commands, &mut meshes, &mut materials, &mut nav_meshes, window_width, window_height, 1, None);
+    spawn_game_world(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut nav_meshes,
+        window_width,
+        window_height,
+        1,
+        None,
+    );
 }
 
 fn spawn_game_world(
@@ -194,7 +197,15 @@ fn spawn_game_world(
         nav_mesh: NavMeshHandle(nav_mesh_handle),
     }));
 
-    populate_level::populate(commands, meshes, materials, &terrain_geometry.rooms, archipelago_id, depth, saved_player);
+    populate_level::populate(
+        commands,
+        meshes,
+        materials,
+        &terrain_geometry.rooms,
+        archipelago_id,
+        depth,
+        saved_player,
+    );
 }
 
 fn handle_game_transition(
@@ -206,14 +217,29 @@ fn handle_game_transition(
     bounds: Res<WorldBounds>,
     mut depth: ResMut<DungeonDepth>,
     mut message_log: ResMut<MessageLog>,
-    game_entities_a: Query<Entity, Or<(
-        With<TerrainMarker>, With<Fragile>, With<FovMeshMarker>,
-        With<NeverExploredMeshMarker>, With<NavMeshIslandMarker>, With<Archipelago2d>,
-    )>>,
-    game_entities_b: Query<Entity, Or<(
-        With<Player>, With<Monster>, With<Item>,
-        With<MagicMissile>, With<MissileTrail>, With<Rubble>, With<Staircase>,
-    )>>,
+    game_entities_a: Query<
+        Entity,
+        Or<(
+            With<TerrainMarker>,
+            With<Fragile>,
+            With<FovMeshMarker>,
+            With<NeverExploredMeshMarker>,
+            With<NavMeshIslandMarker>,
+            With<Archipelago2d>,
+        )>,
+    >,
+    game_entities_b: Query<
+        Entity,
+        Or<(
+            With<Player>,
+            With<Monster>,
+            With<Item>,
+            With<MagicMissile>,
+            With<MissileTrail>,
+            With<Rubble>,
+            With<Staircase>,
+        )>,
+    >,
     player_data: Query<(&PlayerStats, &Inventory), With<Player>>,
 ) {
     let Some(&transition) = transitions.read().next() else { return };
@@ -243,34 +269,13 @@ fn handle_game_transition(
     };
 
     spawn_game_world(
-        &mut commands, &mut meshes, &mut materials, &mut nav_meshes,
-        bounds.width, bounds.height,
-        new_depth, saved_player,
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut nav_meshes,
+        bounds.width,
+        bounds.height,
+        new_depth,
+        saved_player,
     );
 }
-
-fn check_staircase(
-    player_q: Query<(&Transform, &MoveTarget), With<Player>>,
-    staircase_q: Query<&Transform, With<Staircase>>,
-    mut dialog: ResMut<StaircaseDialog>,
-) {
-    let Ok((player_tf, move_target)) = player_q.single() else { return };
-    let Ok(stair_tf) = staircase_q.single() else {
-        dialog.declined = false;
-        dialog.show = false;
-        return;
-    };
-
-    let nearby = player_tf.translation.truncate()
-        .distance(stair_tf.translation.truncate()) < 20.0;
-
-    if !nearby {
-        dialog.declined = false;
-        return;
-    }
-
-    if !move_target.active && !dialog.declined && !dialog.show {
-        dialog.show = true;
-    }
-}
-

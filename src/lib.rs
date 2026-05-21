@@ -34,11 +34,6 @@ impl Default for DungeonDepth {
     fn default() -> Self { Self(1) }
 }
 
-#[derive(bevy::prelude::Resource, Default)]
-pub struct StaircaseDialog {
-    pub show: bool,
-    pub declined: bool,
-}
 
 use avian2d::prelude::PhysicsLayer;
 
