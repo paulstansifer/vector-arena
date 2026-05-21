@@ -7,9 +7,9 @@
 use crate::{
     GameLayer,
     dungeon::terrain::{
-        DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, geometry_to_collider,
-        geometry_to_mesh, playable_area_to_nav_mesh,
+        DungeonCollider, DungeonState, DungeonVisuals, geometry_to_collider, geometry_to_mesh,
     },
+    nav::{DungeonNavMesh, playable_area_to_nav_mesh},
 };
 use avian2d::{math::PI, prelude::*};
 use bevy::prelude::*;

@@ -25,11 +25,11 @@ use vector_arena::{
     dungeon::{
         level_generation::TerrainGeometry,
         terrain::{
-            DungeonCollider, DungeonNavMesh, DungeonState, DungeonVisuals, NavMeshIslandMarker,
-            TerrainMarker, geometry_to_collider, geometry_to_mesh, playable_area_to_nav_mesh,
-            sync_dungeon_to_entities,
+            DungeonCollider, DungeonState, DungeonVisuals, TerrainMarker, geometry_to_collider,
+            geometry_to_mesh, sync_dungeon_to_entities,
         },
     },
+    nav::{DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
     effects::crumble_terrain::{Fragile, handle_right_click_excavation},
 };
 
@@ -51,6 +51,7 @@ fn main() {
         .add_systems(Update, set_target_on_click.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, move_player)
         .add_systems(Update, nav::apply_agent_velocity)
+        .add_systems(Update, nav::sync_island_nav_mesh)
         .add_systems(Update, fov::update_fov)
         .add_systems(Update, handle_right_click_excavation.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, sync_dungeon_to_entities)

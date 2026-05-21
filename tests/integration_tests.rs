@@ -8,8 +8,8 @@ use vector_arena::{
     dungeon::{
         bsp::Partition,
         level_generation::{PartitionRole, TerrainGeometry},
-        terrain::playable_area_to_nav_mesh,
     },
+    nav::playable_area_to_nav_mesh,
     player::{MoveTarget, PLAYER_SPEED, Player, move_player},
 };
 
