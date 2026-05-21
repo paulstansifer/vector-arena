@@ -1,12 +1,13 @@
 // Magic missiles, trails, knockback, and bullet-time.
 // Missiles use the Missile physics layer (collides with Wall only); knockback
 // against Dynamic bodies is applied manually by querying overlaps rather than
-// via collision events.  `manage_time_scale` sets Time<Virtual> to 0.05× while
+// via collision events.  `manage_time_scale` sets Time<Virtual> to 0.25× while
 // any missile exists and adjusts the fixed-timestep period to keep physics at
 // ~64 Hz real-time regardless of scale.
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use rand::Rng;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::{
@@ -16,14 +17,11 @@ use crate::{
     player::{MoveTarget, PLAYER_SPEED, Player},
 };
 
-pub const MISSILE_SPEED: f32 = PLAYER_SPEED * 20.0;
+pub const MISSILE_SPEED: f32 = PLAYER_SPEED * 10.0;
 pub const MISSILE_MAX_DISTANCE: f32 = 1000.0;
 pub const MONSTER_FIRE_RANGE: f32 = 100.0;
-const TIME_SCALE_MISSILE: f32 = 0.05;
+const TIME_SCALE_MISSILE: f32 = 0.5;
 const KNOCKBACK_SPEED: f32 = 6000.0;
-
-const TRAIL_FULL_SECS: f32 = 500.0 / MISSILE_SPEED;
-const TRAIL_TOTAL_SECS: f32 = 750.0 / MISSILE_SPEED;
 const TRAIL_CORE_HEIGHT: f32 = 1.0;
 const TRAIL_GLOW_HEIGHT: f32 = 4.0;
 
@@ -42,9 +40,13 @@ pub fn init_trail_meshes(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>
 
 #[derive(Component)]
 pub struct MissileTrail {
-    age: f32,
+    source_missile: Entity,
     fired_by_player: bool,
     is_glow: bool,
+    // 0.0 (head/newest) to 0.5 (tail/oldest) virtual seconds of extra life after missile dies.
+    extra_lifetime: f32,
+    // Virtual-time timestamp at which to despawn; None while the missile is still alive.
+    expiration: Option<f32>,
 }
 
 #[derive(Component)]
@@ -203,12 +205,12 @@ pub fn apply_missile_knockback(
 }
 
 pub fn spawn_missile_trails(
-    mut query: Query<(&Transform, &mut MagicMissile)>,
+    mut query: Query<(Entity, &Transform, &mut MagicMissile)>,
     trail_meshes: Res<TrailMeshes>,
     mut commands: Commands,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    for (transform, mut missile) in query.iter_mut() {
+    for (missile_entity, transform, mut missile) in query.iter_mut() {
         let current_pos = transform.translation.truncate();
 
         let Some(last_pos) = missile.last_trail_pos else {
@@ -233,8 +235,18 @@ pub fn spawn_missile_trails(
             (Color::srgba(1.0, 0.6, 0.4, 1.0), Color::srgba(1.0, 0.3, 0.1, 0.4))
         };
 
+        // Tail segments (spawned early) get up to 0.5 s extra life; head segments (spawned late) get 0.
+        let t = (missile.distance_traveled / MISSILE_MAX_DISTANCE).clamp(0.0, 1.0);
+        let extra_lifetime = (1.0 - t) * 0.5;
+
         commands.spawn((
-            MissileTrail { age: 0.0, fired_by_player: missile.fired_by_player, is_glow: false },
+            MissileTrail {
+                source_missile: missile_entity,
+                fired_by_player: missile.fired_by_player,
+                is_glow: false,
+                extra_lifetime,
+                expiration: None,
+            },
             Mesh2d(trail_meshes.core.clone()),
             MeshMaterial2d(materials.add(ColorMaterial::from(core_color))),
             Transform::from_translation(midpoint.extend(MOVABLE_Z + 0.6))
@@ -242,7 +254,13 @@ pub fn spawn_missile_trails(
                 .with_scale(Vec3::new(segment_len, 1.0, 1.0)),
         ));
         commands.spawn((
-            MissileTrail { age: 0.0, fired_by_player: missile.fired_by_player, is_glow: true },
+            MissileTrail {
+                source_missile: missile_entity,
+                fired_by_player: missile.fired_by_player,
+                is_glow: true,
+                extra_lifetime,
+                expiration: None,
+            },
             Mesh2d(trail_meshes.glow.clone()),
             MeshMaterial2d(materials.add(ColorMaterial::from(glow_color))),
             Transform::from_translation(midpoint.extend(MOVABLE_Z + 0.5))
@@ -255,20 +273,31 @@ pub fn spawn_missile_trails(
 pub fn update_missile_trails(
     mut commands: Commands,
     time: Res<Time>,
-    mut query: Query<(Entity, &mut MissileTrail, &MeshMaterial2d<ColorMaterial>)>,
+    missile_query: Query<Entity, With<MagicMissile>>,
+    mut trail_query: Query<(Entity, &mut MissileTrail, &MeshMaterial2d<ColorMaterial>)>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    for (entity, mut trail, mat_handle) in query.iter_mut() {
-        trail.age += time.delta_secs();
-        if trail.age >= TRAIL_TOTAL_SECS {
+    let alive: HashSet<Entity> = missile_query.iter().collect();
+    let now = time.elapsed_secs();
+
+    for (entity, mut trail, mat_handle) in trail_query.iter_mut() {
+        // When the source missile disappears, stamp the expiration time.
+        if trail.expiration.is_none() && !alive.contains(&trail.source_missile) {
+            trail.expiration = Some(now + trail.extra_lifetime);
+        }
+
+        let Some(expires_at) = trail.expiration else {
+            continue; // missile still alive; trail stays fully opaque
+        };
+
+        let remaining = expires_at - now;
+        if remaining <= 0.0 {
             commands.entity(entity).despawn();
             continue;
         }
-        let fade = if trail.age < TRAIL_FULL_SECS {
-            1.0_f32
-        } else {
-            1.0 - (trail.age - TRAIL_FULL_SECS) / (TRAIL_TOTAL_SECS - TRAIL_FULL_SECS)
-        };
+
+        // Fade linearly from opaque to transparent over this segment's extra_lifetime.
+        let fade = if trail.extra_lifetime > 0.0 { remaining / trail.extra_lifetime } else { 0.0 };
         let color = match (trail.fired_by_player, trail.is_glow) {
             (true, false) => Color::srgba(0.6, 0.8, 1.0, fade),
             (true, true) => Color::srgba(0.3, 0.5, 1.0, fade * 0.4),
@@ -294,10 +323,9 @@ pub fn manage_time_scale(
 
     if any_missile {
         time.set_relative_speed(TIME_SCALE_MISSILE);
-        // Time<Fixed> accumulates from virtual time, so at 0.05× virtual speed physics would
-        // drop to 3.2 Hz real-time (one step every ~312 ms). Compensate by running the fixed
-        // schedule 20× faster in virtual terms so it still fires ~64 Hz in real time.
-        fixed_time.set_timestep(Duration::from_secs_f64(1.0 / (64.0 / TIME_SCALE_MISSILE as f64)));
+        // Physics would normally slow down for the time dialation, but the magic missles are so fast
+        // that we need it to speed up in order for the bounces to work right.
+        fixed_time.set_timestep(Duration::from_secs_f64(1.0 / (256.0 / TIME_SCALE_MISSILE as f64)));
     } else {
         fixed_time.set_timestep(Duration::from_secs_f64(1.0 / 64.0));
         if move_target.active {
