@@ -1,15 +1,17 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
+use bevy_egui::input::egui_wants_any_pointer_input;
 use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::prelude::*;
 
 use vector_arena::{
     AGENT_RADIUS, WorldBounds,
     effects::{projectile, rope},
-    fov, item, monster, nav, player,
+    fov, item, monster, nav, player, ui,
 };
 
 use fov::{Opaque, OpaqueVertices};
+use ui::{PlayerStats, UiPlugin};
 use item::{Inventory, Item, ItemKind, PotionColor, ScrollName, animate_pickup, pickup_items};
 use monster::Monster;
 use player::{MoveTarget, PLAYER_SPEED, Player, move_player, set_target_on_click};
@@ -42,14 +44,15 @@ fn main() {
             Landmass2dPlugin::default(),
             // bevy_landmass::debug::Landmass2dDebugPlugin::default(),
             rope::RopePlugin,
+            UiPlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(Startup, init_trail_meshes)
-        .add_systems(Update, set_target_on_click)
+        .add_systems(Update, set_target_on_click.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, move_player)
         .add_systems(Update, nav::apply_agent_velocity)
         .add_systems(Update, fov::update_fov)
-        .add_systems(Update, handle_right_click_excavation)
+        .add_systems(Update, handle_right_click_excavation.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, sync_dungeon_to_entities)
         .add_systems(Update, player_fire_missile)
         .add_systems(Update, monster_fire_missiles)
@@ -183,6 +186,7 @@ fn setup(
         .spawn((
             Player,
             Inventory::default(),
+            PlayerStats { hp: 100.0, max_hp: 100.0, mana: 80.0, max_mana: 80.0 },
             Mesh2d(meshes.add(Circle::new(AGENT_RADIUS))),
             MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
             Transform::from_translation(player_position.extend(fov::MOVABLE_Z)),

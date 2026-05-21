@@ -5,6 +5,18 @@
 use bevy::{prelude::*, time::Real};
 
 use crate::player::Player;
+use crate::ui::MessageLog;
+
+fn item_name(item: ItemKind) -> &'static str {
+    match item {
+        ItemKind::Potion(PotionColor::Red) => "a red potion",
+        ItemKind::Potion(PotionColor::Green) => "a green potion",
+        ItemKind::Potion(PotionColor::Blue) => "a blue potion",
+        ItemKind::Scroll(ScrollName::Readme) => "a scroll labeled README",
+        ItemKind::Scroll(ScrollName::Agents) => "a scroll labeled AGENTS.md",
+        ItemKind::Scroll(ScrollName::License) => "a scroll labeled LICENSE",
+    }
+}
 
 const PICKUP_RADIUS: f32 = 22.0;
 const ANIM_SECS: f32 = 0.25;
@@ -77,6 +89,7 @@ pub fn animate_pickup(
     player_query: Query<&Transform, With<Player>>,
     mut inventory_query: Query<&mut Inventory, With<Player>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut log: ResMut<MessageLog>,
 ) {
     // Update target each frame so the item tracks the player if they move.
     let player_pos = player_query.single().map(|t| t.translation.truncate()).ok();
@@ -101,6 +114,7 @@ pub fn animate_pickup(
         }
 
         if picking_up.progress >= 1.0 {
+            log.push(format!("You pick up {}.", item_name(item.0)));
             inventory.0.push(item.0);
             commands.entity(entity).despawn();
         }

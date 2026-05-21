@@ -6,6 +6,7 @@ pub mod item;
 pub mod monster;
 pub mod nav;
 pub mod player;
+pub mod ui;
 
 // TODO: move all these things out!
 pub const AGENT_RADIUS: f32 = 10.0;
