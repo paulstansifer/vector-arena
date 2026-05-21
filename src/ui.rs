@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 
 use crate::{
-    DungeonDepth, GameTransition,
+    DungeonDepth, GameState,
     item::{Inventory, ItemKind},
     player::Player,
 };
@@ -52,7 +52,7 @@ fn ui_system(
     staircase_q: Query<&Transform, With<crate::Staircase>>,
     message_log: Res<MessageLog>,
     mut app_exit: MessageWriter<AppExit>,
-    mut transitions: MessageWriter<GameTransition>,
+    mut next_state: ResMut<NextState<GameState>>,
     depth: Res<DungeonDepth>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
@@ -199,12 +199,12 @@ fn ui_system(
         app_exit.write(AppExit::Success);
     }
     if restart {
-        transitions.write(GameTransition::Restart);
+        next_state.set(GameState::Restart);
         ui_state.menu_open = false;
     }
 
     if do_descend {
-        transitions.write(GameTransition::Descend);
+        next_state.set(GameState::Descend);
     }
 
     Ok(())

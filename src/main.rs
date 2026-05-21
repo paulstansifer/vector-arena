@@ -4,19 +4,18 @@ use bevy_egui::input::egui_wants_any_pointer_input;
 use bevy_landmass::{NavMeshHandle, prelude::*};
 
 use vector_arena::{
-    AGENT_RADIUS, DungeonDepth, GameTransition, Staircase, WorldBounds,
+    AGENT_RADIUS, DungeonDepth, GameState, WorldBounds,
     effects::{projectile, rope},
-    fov, item, monster, nav, player, ui,
+    fov, item, nav, player, ui,
 };
 
-use fov::{FovMeshMarker, NeverExploredMeshMarker, Opaque, OpaqueVertices};
-use item::{Inventory, Item, animate_pickup, pickup_items};
-use monster::Monster;
+use fov::{Opaque, OpaqueVertices};
+use item::{Inventory, animate_pickup, pickup_items};
 use player::{Player, move_player, set_target_on_click};
 use projectile::{
-    MagicMissile, MissileTrail, apply_missile_knockback, init_trail_meshes, manage_time_scale,
-    monster_fire_missiles, player_fire_missile, spawn_missile_trails, tick_knockback_cooldowns,
-    update_missile_trails, update_missiles,
+    apply_missile_knockback, init_trail_meshes, manage_time_scale, monster_fire_missiles,
+    player_fire_missile, spawn_missile_trails, tick_knockback_cooldowns, update_missile_trails,
+    update_missiles,
 };
 use ui::{MessageLog, PlayerStats, UiPlugin};
 use vector_arena::{
@@ -28,10 +27,13 @@ use vector_arena::{
             geometry_to_mesh, sync_dungeon_to_entities,
         },
     },
-    effects::crumble_terrain::{Fragile, Rubble, handle_right_click_excavation},
+    effects::crumble_terrain::{Fragile, handle_right_click_excavation},
     nav::{DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
     populate_level,
 };
+
+#[derive(Resource, Default)]
+struct SavedPlayer(Option<(PlayerStats, Inventory)>);
 
 fn main() {
     App::new()
@@ -46,9 +48,13 @@ fn main() {
             rope::RopePlugin,
             UiPlugin,
         ))
+        .init_state::<GameState>()
+        .init_resource::<SavedPlayer>()
         .add_systems(Startup, setup)
         .add_systems(Startup, init_trail_meshes)
-        .add_systems(Update, handle_game_transition)
+        .add_systems(OnEnter(GameState::Restart), on_enter_restart)
+        .add_systems(OnEnter(GameState::Descend), on_enter_descend)
+        .add_systems(OnExit(GameState::InLevel), save_player_on_exit)
         .add_systems(Update, set_target_on_click.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, move_player)
         .add_systems(Update, nav::apply_agent_velocity)
@@ -68,33 +74,72 @@ fn main() {
         .add_systems(Update, manage_time_scale.after(move_player))
         .insert_resource(Gravity::ZERO)
         .insert_resource(SubstepCount(40)) // To make rope physics behave well.
-        .add_message::<GameTransition>()
         .init_resource::<DungeonDepth>()
         .run();
 }
 
-fn setup(
+fn setup(mut commands: Commands) {
+    commands.insert_resource(ClearColor(Color::srgb(0.9, 0.9, 0.9)));
+    commands.spawn(Camera2d);
+}
+
+fn on_enter_restart(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut nav_meshes: ResMut<Assets<NavMesh2d>>,
     window: Single<&Window>,
+    mut depth: ResMut<DungeonDepth>,
+    mut message_log: ResMut<MessageLog>,
+    mut next_state: ResMut<NextState<GameState>>,
 ) {
-    commands.insert_resource(ClearColor(Color::srgb(0.9, 0.9, 0.9)));
-    commands.spawn(Camera2d);
-
-    let window_width = window.width();
-    let window_height = window.height();
+    message_log.messages.clear();
+    depth.0 = 1;
     spawn_game_world(
         &mut commands,
         &mut meshes,
         &mut materials,
         &mut nav_meshes,
-        window_width,
-        window_height,
+        window.width(),
+        window.height(),
         1,
         None,
     );
+    next_state.set(GameState::InLevel);
+}
+
+fn on_enter_descend(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut nav_meshes: ResMut<Assets<NavMesh2d>>,
+    window: Single<&Window>,
+    mut depth: ResMut<DungeonDepth>,
+    mut message_log: ResMut<MessageLog>,
+    saved_player: Res<SavedPlayer>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    depth.0 += 1;
+    message_log.push(format!("You descend to depth {}.", depth.0));
+    spawn_game_world(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut nav_meshes,
+        window.width(),
+        window.height(),
+        depth.0,
+        saved_player.0.as_ref().map(|(stats, inv)| (*stats, Inventory(inv.0.clone()))),
+    );
+    next_state.set(GameState::InLevel);
+}
+
+fn save_player_on_exit(
+    player_data: Query<(&PlayerStats, &Inventory), With<Player>>,
+    mut saved_player: ResMut<SavedPlayer>,
+) {
+    saved_player.0 =
+        player_data.single().ok().map(|(stats, inv)| (*stats, Inventory(inv.0.clone())));
 }
 
 fn spawn_game_world(
@@ -109,7 +154,10 @@ fn spawn_game_world(
 ) {
     // Create the archipelago (the "world" for landmass pathfinding)
     let archipelago_id = commands
-        .spawn(Archipelago2d::new(ArchipelagoOptions::from_agent_radius(AGENT_RADIUS)))
+        .spawn((
+            DespawnOnExit(GameState::InLevel),
+            Archipelago2d::new(ArchipelagoOptions::from_agent_radius(AGENT_RADIUS)),
+        ))
         .id();
 
     let terrain_geometry = TerrainGeometry::new(window_width, window_height);
@@ -138,6 +186,7 @@ fn spawn_game_world(
     // Spawn terrain entity with mesh and collider from the resources
     let terrain_entity = commands
         .spawn((
+            DespawnOnExit(GameState::InLevel),
             TerrainMarker,
             Mesh2d(terrain_mesh_handle),
             MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.2, 0.2, 0.2)))),
@@ -160,6 +209,7 @@ fn spawn_game_world(
 
         let door_entity = commands
             .spawn((
+                DespawnOnExit(GameState::InLevel),
                 Fragile,
                 Opaque,
                 OpaqueVertices(door.disp_corners()),
@@ -174,11 +224,12 @@ fn spawn_game_world(
 
         let hinge = door.hinge_vec();
         let joint_entity = commands
-            .spawn(
+            .spawn((
+                DespawnOnExit(GameState::InLevel),
                 RevoluteJoint::new(door_entity, terrain_entity)
                     .with_local_anchor1(hinge - center)
                     .with_local_anchor2(hinge), // Terrain is at origin
-            )
+            ))
             .id();
         commands.entity(door_entity).add_child(joint_entity);
     }
@@ -191,7 +242,7 @@ fn spawn_game_world(
     fov::spawn_fov_meshes(commands, meshes, materials, window_width, window_height);
 
     // Spawn the island (navigation surface) for landmass
-    commands.spawn((NavMeshIslandMarker, Island2dBundle {
+    commands.spawn((DespawnOnExit(GameState::InLevel), NavMeshIslandMarker, Island2dBundle {
         island: Island,
         archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
         nav_mesh: NavMeshHandle(nav_mesh_handle),
@@ -204,78 +255,6 @@ fn spawn_game_world(
         &terrain_geometry.rooms,
         archipelago_id,
         depth,
-        saved_player,
-    );
-}
-
-fn handle_game_transition(
-    mut transitions: MessageReader<GameTransition>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    mut nav_meshes: ResMut<Assets<NavMesh2d>>,
-    bounds: Res<WorldBounds>,
-    mut depth: ResMut<DungeonDepth>,
-    mut message_log: ResMut<MessageLog>,
-    game_entities_a: Query<
-        Entity,
-        Or<(
-            With<TerrainMarker>,
-            With<Fragile>,
-            With<FovMeshMarker>,
-            With<NeverExploredMeshMarker>,
-            With<NavMeshIslandMarker>,
-            With<Archipelago2d>,
-        )>,
-    >,
-    game_entities_b: Query<
-        Entity,
-        Or<(
-            With<Player>,
-            With<Monster>,
-            With<Item>,
-            With<MagicMissile>,
-            With<MissileTrail>,
-            With<Rubble>,
-            With<Staircase>,
-        )>,
-    >,
-    player_data: Query<(&PlayerStats, &Inventory), With<Player>>,
-) {
-    let Some(&transition) = transitions.read().next() else { return };
-
-    let saved_player = match transition {
-        GameTransition::Descend => {
-            player_data.single().ok().map(|(stats, inv)| (*stats, Inventory(inv.0.clone())))
-        }
-        GameTransition::Restart => None,
-    };
-
-    for e in game_entities_a.iter().chain(game_entities_b.iter()) {
-        commands.entity(e).despawn();
-    }
-
-    let new_depth = match transition {
-        GameTransition::Restart => {
-            message_log.messages.clear();
-            depth.0 = 1;
-            1
-        }
-        GameTransition::Descend => {
-            depth.0 += 1;
-            message_log.push(format!("You descend to depth {}.", depth.0));
-            depth.0
-        }
-    };
-
-    spawn_game_world(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        &mut nav_meshes,
-        bounds.width,
-        bounds.height,
-        new_depth,
         saved_player,
     );
 }

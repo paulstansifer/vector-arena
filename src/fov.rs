@@ -9,7 +9,7 @@ use geo::{BooleanOps, Buffer, LineString, MultiPolygon, Polygon, Simplify};
 use std::ops::Range;
 
 use crate::{
-    WorldBounds,
+    GameState, WorldBounds,
     dungeon::terrain::{self, DungeonState},
     player::Player,
 };
@@ -150,6 +150,7 @@ pub fn spawn_fov_meshes(
 ) {
     let fov_material = materials.add(ColorMaterial::from(Color::srgb(0.7, 0.7, 0.7)));
     commands.spawn((
+        DespawnOnExit(GameState::InLevel),
         FovMeshMarker,
         Mesh2d(
             meshes.add(Mesh::new(bevy_mesh::PrimitiveTopology::TriangleList, Default::default())),
@@ -167,6 +168,7 @@ pub fn spawn_fov_meshes(
     commands.insert_resource(ExplorationState(bg_poly.clone()));
 
     commands.spawn((
+        DespawnOnExit(GameState::InLevel),
         NeverExploredMeshMarker,
         Mesh2d(meshes.add(terrain::geometry_to_mesh(&bg_poly))),
         MeshMaterial2d(never_explored_material),

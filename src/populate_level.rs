@@ -8,7 +8,7 @@ use geo::Rect;
 use rand::prelude::*;
 
 use crate::{
-    AGENT_RADIUS, GameLayer, Staircase,
+    AGENT_RADIUS, GameLayer, GameState, Staircase,
     effects::projectile::MonsterShootTimer,
     fov,
     item::{Inventory, Item, ItemKind, PotionColor, ScrollName},
@@ -59,6 +59,7 @@ pub fn populate(
 
     let player = commands
         .spawn((
+            DespawnOnExit(GameState::InLevel),
             Player,
             initial_inventory,
             initial_stats,
@@ -100,6 +101,7 @@ pub fn populate(
     let monster_count = (depth as usize + 1).min(monster_positions.len());
     for position in monster_positions.into_iter().take(monster_count) {
         commands.spawn((
+            DespawnOnExit(GameState::InLevel),
             Monster,
             MonsterShootTimer::new(),
             Mesh2d(monster_mesh.clone()),
@@ -150,6 +152,7 @@ pub fn populate(
         match kind {
             ItemKind::Potion(_) => {
                 commands.spawn((
+                    DespawnOnExit(GameState::InLevel),
                     Item(kind),
                     Mesh2d(potion_mesh.clone()),
                     MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.2, 0.85, 0.3)))),
@@ -158,6 +161,7 @@ pub fn populate(
             }
             ItemKind::Scroll(_) => {
                 commands.spawn((
+                    DespawnOnExit(GameState::InLevel),
                     Item(kind),
                     Mesh2d(scroll_mesh.clone()),
                     MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.8, 0.8, 0.75)))),
@@ -189,14 +193,16 @@ fn spawn_staircase(
 
     let staircase = commands
         .spawn((
+            DespawnOnExit(GameState::InLevel),
             Staircase,
             Transform::from_translation(position.extend(fov::ON_FLOOR_Z)),
             Visibility::default(),
         ))
         .id();
 
-    let bg_child =
-        commands.spawn((Mesh2d(bg_mesh), MeshMaterial2d(bg_mat), Transform::default())).id();
+    let bg_child = commands
+        .spawn((DespawnOnExit(GameState::InLevel), Mesh2d(bg_mesh), MeshMaterial2d(bg_mat), Transform::default()))
+        .id();
     commands.entity(staircase).add_child(bg_child);
 
     // 3 parallel hatch lines at 45°, spaced along the perpendicular (-45°) direction.
@@ -205,6 +211,7 @@ fn spawn_staircase(
         let offset = perp * (i as f32 * LINE_SPACING);
         let line_child = commands
             .spawn((
+                DespawnOnExit(GameState::InLevel),
                 Mesh2d(line_mesh.clone()),
                 MeshMaterial2d(line_mat.clone()),
                 Transform::from_translation(offset.extend(1.0))

@@ -18,10 +18,12 @@ pub struct WorldBounds {
     pub height: f32,
 }
 
-#[derive(bevy::prelude::Message, Clone, Copy)]
-pub enum GameTransition {
+#[derive(bevy::prelude::States, Default, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum GameState {
+    #[default]
     Restart,
     Descend,
+    InLevel,
 }
 
 #[derive(bevy::prelude::Component)]

@@ -6,7 +6,7 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 
-use crate::{GameLayer, fov::MOVABLE_Z};
+use crate::{GameLayer, GameState, fov::MOVABLE_Z};
 
 const SEGMENT_TARGET_LEN: f32 = 10.0;
 const ROPE_RADIUS: f32 = 1.0;
@@ -101,6 +101,7 @@ fn spawn_rope(
         let pos = start + dir * ((i as f32 + 0.5) * spacing);
         let seg = commands
             .spawn((
+                DespawnOnExit(GameState::InLevel),
                 RopeSegment,
                 RigidBody::Dynamic,
                 Collider::capsule_endpoints(
@@ -128,6 +129,7 @@ fn spawn_rope(
     for i in 0..n - 1 {
         let (a, b) = (segments[i], segments[i + 1]);
         commands.spawn((
+            DespawnOnExit(GameState::InLevel),
             RevoluteJoint::new(a, b)
                 .with_local_anchor1(Vec2::new(half_inner, 0.0))
                 .with_local_anchor2(Vec2::new(-half_inner, 0.0))
@@ -142,22 +144,24 @@ fn spawn_rope(
     // Pin the start of the rope to whatever is at the drag origin.
     if let Some(anchor) = find_anchor(spatial_query, start) {
         let local = world_to_local(anchor, start, anchor_query);
-        commands.spawn(
+        commands.spawn((
+            DespawnOnExit(GameState::InLevel),
             RevoluteJoint::new(anchor, segments[0])
                 .with_local_anchor1(local)
                 .with_local_anchor2(Vec2::new(-half_inner, 0.0)),
-        );
+        ));
     }
 
     // Pin the end.
     if let Some(anchor) = find_anchor(spatial_query, end) {
         let local = world_to_local(anchor, end, anchor_query);
         let last = *segments.last().unwrap();
-        commands.spawn(
+        commands.spawn((
+            DespawnOnExit(GameState::InLevel),
             RevoluteJoint::new(anchor, last)
                 .with_local_anchor1(local)
                 .with_local_anchor2(Vec2::new(half_inner, 0.0)),
-        );
+        ));
     }
 
     commands.spawn(Rope { segments });

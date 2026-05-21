@@ -10,7 +10,7 @@ use rand::Rng;
 use std::{collections::HashSet, time::Duration};
 
 use crate::{
-    AGENT_RADIUS, GameLayer,
+    AGENT_RADIUS, GameLayer, GameState,
     fov::MOVABLE_Z,
     monster::Monster,
     player::{MoveTarget, PLAYER_SPEED, Player},
@@ -83,6 +83,7 @@ fn spawn_missile(
         if fired_by_player { Color::srgb(0.4, 0.6, 1.0) } else { Color::srgb(1.0, 0.4, 0.2) };
 
     commands.spawn((
+        DespawnOnExit(GameState::InLevel),
         MagicMissile {
             distance_traveled: 0.0,
             fired_by_player,
@@ -270,6 +271,7 @@ fn spawn_trail_segment(
     };
 
     commands.spawn((
+        DespawnOnExit(GameState::InLevel),
         MissileTrail {
             source_missile: missile_entity,
             fired_by_player,
@@ -284,6 +286,7 @@ fn spawn_trail_segment(
             .with_scale(Vec3::new(segment_len, 1.0, 1.0)),
     ));
     commands.spawn((
+        DespawnOnExit(GameState::InLevel),
         MissileTrail {
             source_missile: missile_entity,
             fired_by_player,

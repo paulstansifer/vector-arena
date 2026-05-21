@@ -5,7 +5,7 @@
 // and spawns Dynamic Rubble entities with convex hull colliders and random outward
 // velocities.  Fragile entities (doors) inside the circle are despawned.
 use crate::{
-    GameLayer,
+    GameLayer, GameState,
     dungeon::terrain::{
         DungeonCollider, DungeonState, DungeonVisuals, geometry_to_collider, geometry_to_mesh,
     },
@@ -204,6 +204,7 @@ pub fn subtract_polygon_from_terrain(
                         LinearVelocity(Vec2::new(angle.cos() * speed, angle.sin() * speed));
 
                     commands.spawn((
+                        DespawnOnExit(GameState::InLevel),
                         Rubble,
                         Mesh2d(meshes.add(rubble_mesh)),
                         MeshMaterial2d(rubble_material.clone()),
