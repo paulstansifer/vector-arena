@@ -6,7 +6,8 @@ use bevy_landmass::{NavMeshHandle, prelude::*};
 use vector_arena::{
     AGENT_RADIUS, DungeonDepth, GameState, WorldBounds,
     effects::{projectile, rope},
-    fov, item, nav, player, ui,
+    fov, item, nav, player,
+    ui::{self, enable_ui_input_absorption},
 };
 
 use fov::{Opaque, OpaqueVertices};
@@ -51,6 +52,7 @@ fn main() {
         .init_state::<GameState>()
         .init_resource::<SavedPlayer>()
         .add_systems(Startup, setup)
+        .add_systems(Startup, enable_ui_input_absorption)
         .add_systems(Startup, init_trail_meshes)
         .add_systems(OnEnter(GameState::Restart), on_enter_restart)
         .add_systems(OnEnter(GameState::Descend), on_enter_descend)

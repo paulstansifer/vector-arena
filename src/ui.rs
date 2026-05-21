@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
+use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, egui};
 
 use crate::{
     DungeonDepth, GameState,
@@ -32,6 +32,10 @@ impl MessageLog {
 struct UiState {
     messages_expanded: bool,
     menu_open: bool,
+}
+
+pub fn enable_ui_input_absorption(mut egui_settings: ResMut<EguiGlobalSettings>) {
+    egui_settings.enable_absorb_bevy_input_system = true;
 }
 
 pub struct UiPlugin;
