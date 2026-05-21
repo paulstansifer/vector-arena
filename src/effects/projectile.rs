@@ -414,8 +414,10 @@ pub fn manage_time_scale(
     mut fixed_time: ResMut<Time<Fixed>>,
     missile_query: Query<&MagicMissile>,
     move_target: Single<&MoveTarget, With<Player>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
 ) {
     let any_missile = missile_query.iter().next().is_some();
+    let spacebar_held = keyboard.pressed(KeyCode::Space);
 
     if any_missile {
         time.set_relative_speed(TIME_SCALE_MISSILE);
@@ -424,7 +426,7 @@ pub fn manage_time_scale(
         fixed_time.set_timestep(Duration::from_secs_f64(1.0 / (256.0 / TIME_SCALE_MISSILE as f64)));
     } else {
         fixed_time.set_timestep(Duration::from_secs_f64(1.0 / 64.0));
-        if move_target.active {
+        if move_target.active || spacebar_held {
             time.set_relative_speed(1.0);
         } else {
             time.set_relative_speed(0.0);
