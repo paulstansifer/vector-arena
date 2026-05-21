@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 
-use crate::{DescendPending, DungeonDepth, RestartPending, StaircaseDialog};
+use crate::{DungeonDepth, GameTransition, StaircaseDialog};
 use crate::item::{Inventory, ItemKind};
 use crate::player::Player;
 
@@ -51,10 +51,9 @@ fn ui_system(
     player_query: Query<(&PlayerStats, &Inventory), With<Player>>,
     message_log: Res<MessageLog>,
     mut app_exit: MessageWriter<AppExit>,
-    mut restart_pending: ResMut<RestartPending>,
+    mut transitions: MessageWriter<GameTransition>,
     depth: Res<DungeonDepth>,
     mut staircase_dialog: ResMut<StaircaseDialog>,
-    mut descend_pending: ResMut<DescendPending>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -189,7 +188,7 @@ fn ui_system(
         app_exit.write(AppExit::Success);
     }
     if restart {
-        restart_pending.0 = true;
+        transitions.write(GameTransition::Restart);
         ui_state.menu_open = false;
     }
 
@@ -217,7 +216,7 @@ fn ui_system(
     }
     if do_descend {
         staircase_dialog.show = false;
-        descend_pending.0 = true;
+        transitions.write(GameTransition::Descend);
     }
     if decline_descent {
         staircase_dialog.show = false;

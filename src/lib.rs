@@ -18,8 +18,11 @@ pub struct WorldBounds {
     pub height: f32,
 }
 
-#[derive(bevy::prelude::Resource, Default)]
-pub struct RestartPending(pub bool);
+#[derive(bevy::prelude::Message, Clone, Copy)]
+pub enum GameTransition {
+    Restart,
+    Descend,
+}
 
 #[derive(bevy::prelude::Component)]
 pub struct Staircase;
@@ -30,9 +33,6 @@ pub struct DungeonDepth(pub u32);
 impl Default for DungeonDepth {
     fn default() -> Self { Self(1) }
 }
-
-#[derive(bevy::prelude::Resource, Default)]
-pub struct DescendPending(pub bool);
 
 #[derive(bevy::prelude::Resource, Default)]
 pub struct StaircaseDialog {

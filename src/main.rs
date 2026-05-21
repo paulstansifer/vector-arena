@@ -5,7 +5,7 @@ use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::prelude::*;
 
 use vector_arena::{
-    AGENT_RADIUS, DescendPending, DungeonDepth, RestartPending, Staircase, StaircaseDialog,
+    AGENT_RADIUS, DungeonDepth, GameTransition, Staircase, StaircaseDialog,
     WorldBounds,
     effects::{projectile, rope},
     fov, item, monster, nav, player, ui,
@@ -52,8 +52,7 @@ fn main() {
         ))
         .add_systems(Startup, setup)
         .add_systems(Startup, init_trail_meshes)
-        .add_systems(Update, restart_game)
-        .add_systems(Update, descend_level)
+        .add_systems(Update, handle_game_transition)
         .add_systems(Update, check_staircase)
         .add_systems(Update, set_target_on_click.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, move_player)
@@ -74,9 +73,8 @@ fn main() {
         .add_systems(Update, manage_time_scale.after(move_player))
         .insert_resource(Gravity::ZERO)
         .insert_resource(SubstepCount(40)) // To make rope physics behave well.
-        .init_resource::<RestartPending>()
+        .add_message::<GameTransition>()
         .init_resource::<DungeonDepth>()
-        .init_resource::<DescendPending>()
         .init_resource::<StaircaseDialog>()
         .run();
 }
@@ -199,8 +197,8 @@ fn spawn_game_world(
     populate_level::populate(commands, meshes, materials, &terrain_geometry.rooms, archipelago_id, depth, saved_player);
 }
 
-fn restart_game(
-    mut restart: ResMut<RestartPending>,
+fn handle_game_transition(
+    mut transitions: MessageReader<GameTransition>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -216,23 +214,39 @@ fn restart_game(
         With<Player>, With<Monster>, With<Item>,
         With<MagicMissile>, With<MissileTrail>, With<Rubble>, With<Staircase>,
     )>>,
+    player_data: Query<(&PlayerStats, &Inventory), With<Player>>,
 ) {
-    if !restart.0 {
-        return;
-    }
-    restart.0 = false;
+    let Some(&transition) = transitions.read().next() else { return };
 
-    let width = bounds.width;
-    let height = bounds.height;
+    let saved_player = match transition {
+        GameTransition::Descend => {
+            player_data.single().ok().map(|(stats, inv)| (*stats, Inventory(inv.0.clone())))
+        }
+        GameTransition::Restart => None,
+    };
 
     for e in game_entities_a.iter().chain(game_entities_b.iter()) {
         commands.entity(e).despawn();
     }
 
-    message_log.messages.clear();
+    let new_depth = match transition {
+        GameTransition::Restart => {
+            message_log.messages.clear();
+            depth.0 = 1;
+            1
+        }
+        GameTransition::Descend => {
+            depth.0 += 1;
+            message_log.push(format!("You descend to depth {}.", depth.0));
+            depth.0
+        }
+    };
 
-    depth.0 = 1;
-    spawn_game_world(&mut commands, &mut meshes, &mut materials, &mut nav_meshes, width, height, 1, None);
+    spawn_game_world(
+        &mut commands, &mut meshes, &mut materials, &mut nav_meshes,
+        bounds.width, bounds.height,
+        new_depth, saved_player,
+    );
 }
 
 fn check_staircase(
@@ -260,46 +274,3 @@ fn check_staircase(
     }
 }
 
-fn descend_level(
-    mut descend: ResMut<DescendPending>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    mut nav_meshes: ResMut<Assets<NavMesh2d>>,
-    bounds: Res<WorldBounds>,
-    mut depth: ResMut<DungeonDepth>,
-    mut message_log: ResMut<MessageLog>,
-    game_entities_a: Query<Entity, Or<(
-        With<TerrainMarker>, With<Fragile>, With<FovMeshMarker>,
-        With<NeverExploredMeshMarker>, With<NavMeshIslandMarker>, With<Archipelago2d>,
-    )>>,
-    game_entities_b: Query<Entity, Or<(
-        With<Player>, With<Monster>, With<Item>,
-        With<MagicMissile>, With<MissileTrail>, With<Rubble>, With<Staircase>,
-    )>>,
-    player_data: Query<(&PlayerStats, &Inventory), With<Player>>,
-) {
-    if !descend.0 {
-        return;
-    }
-    descend.0 = false;
-
-    let saved_player = player_data.single().ok().map(|(stats, inv)| {
-        (*stats, Inventory(inv.0.clone()))
-    });
-
-    depth.0 += 1;
-    let new_depth = depth.0;
-
-    for e in game_entities_a.iter().chain(game_entities_b.iter()) {
-        commands.entity(e).despawn();
-    }
-
-    message_log.push(format!("You descend to depth {}.", new_depth));
-
-    spawn_game_world(
-        &mut commands, &mut meshes, &mut materials, &mut nav_meshes,
-        bounds.width, bounds.height,
-        new_depth, saved_player,
-    );
-}
