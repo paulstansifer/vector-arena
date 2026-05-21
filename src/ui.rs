@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 
+use crate::{DescendPending, DungeonDepth, RestartPending, StaircaseDialog};
 use crate::item::{Inventory, ItemKind};
 use crate::player::Player;
 
@@ -8,7 +9,7 @@ const BAR_WIDTH: f32 = 140.0;
 const BAR_HEIGHT: f32 = 22.0; // 4px taller than egui's default 18px interact_size
 const BAR_ROUNDING: u8 = 3;
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Clone, Copy)]
 pub struct PlayerStats {
     pub hp: f32,
     pub max_hp: f32,
@@ -50,6 +51,10 @@ fn ui_system(
     player_query: Query<(&PlayerStats, &Inventory), With<Player>>,
     message_log: Res<MessageLog>,
     mut app_exit: MessageWriter<AppExit>,
+    mut restart_pending: ResMut<RestartPending>,
+    depth: Res<DungeonDepth>,
+    mut staircase_dialog: ResMut<StaircaseDialog>,
+    mut descend_pending: ResMut<DescendPending>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -142,6 +147,8 @@ fn ui_system(
                 if ui.button("☰").clicked() {
                     toggle_menu = true;
                 }
+                ui.separator();
+                ui.label(format!("Depth {}", depth.0));
             });
         });
     });
@@ -153,6 +160,7 @@ fn ui_system(
     // --- Game menu modal ---
     let mut close_menu = false;
     let mut quit = false;
+    let mut restart = false;
     if menu_open {
         egui::Window::new("Menu")
             .collapsible(false)
@@ -161,7 +169,7 @@ fn ui_system(
             .show(ctx, |ui| {
                 ui.set_min_width(120.0);
                 if ui.button("Restart").clicked() {
-                    // TODO: implement restart
+                    restart = true;
                 }
                 ui.add_space(4.0);
                 if ui.button("Quit").clicked() {
@@ -179,6 +187,41 @@ fn ui_system(
     }
     if quit {
         app_exit.write(AppExit::Success);
+    }
+    if restart {
+        restart_pending.0 = true;
+        ui_state.menu_open = false;
+    }
+
+    // --- Staircase descent dialog ---
+    let mut do_descend = false;
+    let mut decline_descent = false;
+    if staircase_dialog.show && !menu_open {
+        egui::Window::new("Descend?")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("A staircase leads down into the darkness.");
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Descend").clicked() {
+                        do_descend = true;
+                    }
+                    ui.add_space(4.0);
+                    if ui.button("Stay").clicked() {
+                        decline_descent = true;
+                    }
+                });
+            });
+    }
+    if do_descend {
+        staircase_dialog.show = false;
+        descend_pending.0 = true;
+    }
+    if decline_descent {
+        staircase_dialog.show = false;
+        staircase_dialog.declined = true;
     }
 
     Ok(())

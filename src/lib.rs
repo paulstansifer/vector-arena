@@ -6,6 +6,7 @@ pub mod item;
 pub mod monster;
 pub mod nav;
 pub mod player;
+pub mod populate_level;
 pub mod ui;
 
 // TODO: move all these things out!
@@ -15,6 +16,28 @@ pub const AGENT_RADIUS: f32 = 10.0;
 pub struct WorldBounds {
     pub width: f32,
     pub height: f32,
+}
+
+#[derive(bevy::prelude::Resource, Default)]
+pub struct RestartPending(pub bool);
+
+#[derive(bevy::prelude::Component)]
+pub struct Staircase;
+
+#[derive(bevy::prelude::Resource)]
+pub struct DungeonDepth(pub u32);
+
+impl Default for DungeonDepth {
+    fn default() -> Self { Self(1) }
+}
+
+#[derive(bevy::prelude::Resource, Default)]
+pub struct DescendPending(pub bool);
+
+#[derive(bevy::prelude::Resource, Default)]
+pub struct StaircaseDialog {
+    pub show: bool,
+    pub declined: bool,
 }
 
 use avian2d::prelude::PhysicsLayer;
