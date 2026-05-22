@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 // Player component, click-to-move targeting, and steering.
 // `MoveTarget` drives both the custom lerped-velocity steering and the Landmass
 // `AgentTarget2d` (so the navmesh path is kept current even though the player
@@ -17,6 +19,7 @@ pub struct MoveTarget {
     pub destination: Vec2,
     pub origin: Vec2,
     pub active: bool,
+    pub time_set: Duration,
 }
 
 fn lerp(start: f32, end: f32, t: f32) -> f32 { start + (end - start) * t }
@@ -26,6 +29,7 @@ pub fn set_target_on_click(
     camera_query: Single<(&Camera, &GlobalTransform)>,
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     mut player_query: Query<(&Transform, &mut MoveTarget, &mut AgentTarget2d), With<Player>>,
+    time: Res<Time>,
 ) {
     if !mouse_button_input.just_pressed(MouseButton::Left) {
         return;
@@ -55,6 +59,7 @@ pub fn set_target_on_click(
         move_target.destination = world_position;
         move_target.origin = transform.translation.truncate();
         move_target.active = true;
+        move_target.time_set = time.elapsed();
         *agent_target = AgentTarget2d::Point(world_position);
     }
 }
@@ -70,11 +75,16 @@ pub fn move_player(
         ),
         With<Player>,
     >,
+    time: Res<Time>,
 ) {
     for (transform, mut velocity, mut move_target, desired_velocity, mut agent_target) in
         query.iter_mut()
     {
-        if !move_target.active {
+        if !move_target.active
+            || (velocity.length() < PLAYER_SPEED / 100.0
+                && (time.elapsed() - move_target.time_set) > Duration::from_millis(100))
+        {
+            move_target.active = false;
             *velocity = LinearVelocity::ZERO;
             continue;
         }
