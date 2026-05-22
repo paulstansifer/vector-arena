@@ -5,11 +5,11 @@
 // FOV each frame. `Opaque`/`OpaqueVertices` mark sight-blocking entities; doors use local-space
 // polygon vertices so they cast correct shadows as they swing.
 use bevy::prelude::*;
-use geo::{BooleanOps, Buffer, LineString, MultiPolygon, Polygon, Simplify};
+use geo::{BooleanOps, Buffer, Contains, LineString, MultiPolygon, Polygon, Simplify};
 use std::ops::Range;
 
 use crate::{
-    GameState, WorldBounds,
+    GameState, Staircase, WorldBounds,
     dungeon::terrain::{self, DungeonState},
     player::Player,
 };
@@ -181,6 +181,7 @@ pub fn update_fov(
     fov_mesh_query: Query<&Mesh2d, With<FovMeshMarker>>,
     never_explored_query: Query<&Mesh2d, (With<NeverExploredMeshMarker>, Without<FovMeshMarker>)>,
     opaque_query: Query<(&GlobalTransform, &OpaqueVertices)>,
+    staircase_query: Query<&Transform, With<Staircase>>,
     mut meshes: ResMut<Assets<Mesh>>,
     dungeon_state: Res<DungeonState>,
     bounds: Res<WorldBounds>,
@@ -222,8 +223,18 @@ pub fn update_fov(
     }
     let obstacles = geo::MultiPolygon::new(obstacle_polys);
 
+    // If the staircase position is no longer in the never-explored area it has been seen
+    // before; pass it so the fog mesh gets a hole there revealing it below movable things.
+    let seen_staircase: Vec<Vec2> = staircase_query
+        .iter()
+        .filter_map(|tf| {
+            let p = tf.translation.truncate();
+            if !exploration_state.0.contains(&geo::Point::new(p.x, p.y)) { Some(p) } else { None }
+        })
+        .collect();
+
     let (new_exp, new_fov, new_ne) =
-        update_fov_from_pov(origin, radius, &obstacles, &bounds, &exploration_state.0);
+        update_fov_from_pov(origin, radius, &obstacles, &bounds, &exploration_state.0, &seen_staircase);
 
     exploration_state.0 = new_exp;
     *meshes.get_mut(&fov_mesh_handle.0).unwrap() = new_fov;
@@ -236,6 +247,7 @@ fn update_fov_from_pov(
     solid_rock: &MultiPolygon<f32>,
     bounds: &WorldBounds,
     exploration: &MultiPolygon<f32>,
+    remembered_positions: &[Vec2],
 ) -> (MultiPolygon<f32>, Mesh, Mesh) {
     let fov_poly = fov_arc(origin, radius, None, solid_rock);
     let fov_multi = MultiPolygon::new(vec![fov_poly]);
@@ -249,7 +261,18 @@ fn update_fov_from_pov(
 
     // The negative buffer is a bit of a hack to remove little erroneous rays that sometimes sneak through the terrain.
     // The positive buffer allows looking at the walls.
-    let dark_area = bg_poly.difference(&fov_multi.buffer(-1.0).buffer(5.0));
+    let mut dark_area = bg_poly.difference(&fov_multi.buffer(-1.0).buffer(5.0));
+
+    // Cut holes in the fog at positions of previously-seen floor markers so they remain
+    // visible through the grey overlay even when outside the current FOV.
+    for &pos in remembered_positions {
+        let half = 11.0_f32;
+        let hole = MultiPolygon::new(vec![
+            geo::Rect::new((pos.x - half, pos.y - half), (pos.x + half, pos.y + half))
+                .to_polygon(),
+        ]);
+        dark_area = dark_area.difference(&hole);
+    }
 
     (
         exploration.intersection(&dark_area).simplify(1e-1),
@@ -328,6 +351,7 @@ mod tests {
                 &terrain_geometry.solid_rock,
                 &world_bounds,
                 &exploration_state.0,
+                &[],
             );
             exploration_state.0 = new_exp;
         }
