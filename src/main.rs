@@ -99,7 +99,7 @@ fn on_enter_restart(
     mut message_log: ResMut<MessageLog>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    message_log.messages.clear();
+    message_log.clear();
     depth.0 = 1;
     spawn_game_world(
         &mut commands,

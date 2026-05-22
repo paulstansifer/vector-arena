@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, egui};
 use pyri_tooltip::prelude::*;
@@ -20,11 +22,47 @@ pub struct WorldTooltip(pub String);
 
 #[derive(Resource, Default)]
 pub struct MessageLog {
-    pub messages: Vec<String>,
+    // Empty strings are tombstones for entries that were moved to the end.
+    messages: Vec<String>,
+    // (prefix, entity) -> (repeat_count, index into messages)
+    repeating: HashMap<(String, Entity), (usize, usize)>,
 }
 
 impl MessageLog {
     pub fn push(&mut self, msg: impl Into<String>) { self.messages.push(msg.into()); }
+
+    /// Push a collapsible message. Repeated calls with the same `prefix`+`entity`
+    /// key move the entry to the end and show a repeat count: `"{prefix} (3x){suffix}"`.
+    pub fn push_repeating(
+        &mut self,
+        prefix: impl Into<String>,
+        entity: Entity,
+        suffix: impl Into<String>,
+    ) {
+        let prefix = prefix.into();
+        let suffix = suffix.into();
+        let key = (prefix.clone(), entity);
+        if let Some((count, idx)) = self.repeating.get_mut(&key) {
+            *count += 1;
+            let c = *count;
+            self.messages[*idx] = String::new(); // tombstone old slot
+            *idx = self.messages.len();
+            self.messages.push(format!("{prefix} ({c}x){suffix}"));
+        } else {
+            let idx = self.messages.len();
+            self.messages.push(format!("{prefix}{suffix}"));
+            self.repeating.insert(key, (1, idx));
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.messages.clear();
+        self.repeating.clear();
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &str> {
+        self.messages.iter().filter(|s| !s.is_empty()).map(|s| s.as_str())
+    }
 }
 
 #[derive(Resource, Default)]
@@ -78,7 +116,7 @@ fn ui_system(
     // --- Top bar: most-recent message; full-width click expands log ---
     let top_clicked = egui::TopBottomPanel::top("message_bar")
         .show(ctx, |ui| {
-            let latest = message_log.messages.last().map(|s| s.as_str()).unwrap_or("—");
+            let latest = message_log.iter().next_back().unwrap_or("—");
 
             // Full-width clickable row for the summary line.
             let row_height = ui.spacing().interact_size.y;
@@ -100,7 +138,7 @@ fn ui_system(
                     ui,
                     |ui| {
                         ui.set_min_width(ui.available_width());
-                        for msg in message_log.messages.iter() {
+                        for msg in message_log.iter() {
                             ui.label(msg);
                         }
                     },

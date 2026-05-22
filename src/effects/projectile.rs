@@ -261,8 +261,19 @@ pub fn apply_missile_knockback(
             let was_alive = stats.hp > 0.0;
             stats.hp -= MISSILE_DAMAGE;
 
-            if is_monster && stats.hp <= 0.0 {
-                commands.entity(hit).despawn();
+            if is_monster {
+                message_log.push_repeating(
+                    "The magic missile hits the monster",
+                    hit,
+                    if stats.hp <= 0.0 {
+                        ", destroying it".to_string()
+                    } else {
+                        format!("; it now has {} hp", stats.hp)
+                    },
+                );
+                if stats.hp <= 0.0 {
+                    commands.entity(hit).despawn();
+                }
             } else if is_player {
                 if was_alive && stats.hp <= 0.0 {
                     message_log.push("Ouch!");
