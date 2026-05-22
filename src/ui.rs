@@ -2,8 +2,11 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, egui};
 use pyri_tooltip::prelude::*;
 
+use geo::Contains;
+
 use crate::{
     DungeonDepth, GameState,
+    fov::ExplorationState,
     item::{Inventory, ItemKind, item_display_name},
     player::Player,
 };
@@ -14,14 +17,6 @@ const BAR_ROUNDING: u8 = 3;
 
 #[derive(Component, Default)]
 pub struct WorldTooltip(pub String);
-
-#[derive(Component, Default, Clone, Copy)]
-pub struct PlayerStats {
-    pub hp: f32,
-    pub max_hp: f32,
-    pub mana: f32,
-    pub max_mana: f32,
-}
 
 #[derive(Resource, Default)]
 pub struct MessageLog {
@@ -58,7 +53,7 @@ impl Plugin for UiPlugin {
 fn ui_system(
     mut contexts: EguiContexts,
     mut ui_state: ResMut<UiState>,
-    player_query: Query<(&PlayerStats, &Inventory, &Transform), With<Player>>,
+    player_query: Query<(&crate::monster::Stats, &Inventory, &Transform), With<Player>>,
     staircase_q: Query<&Transform, With<crate::Staircase>>,
     message_log: Res<MessageLog>,
     mut app_exit: MessageWriter<AppExit>,
@@ -305,6 +300,7 @@ fn show_world_entity_tooltip(
     camera_query: Query<(&Camera, &GlobalTransform)>,
     entity_query: Query<(&Transform, &WorldTooltip)>,
     windows: Query<&Window>,
+    exploration_state: Option<Res<ExplorationState>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let window = match windows.single() {
@@ -328,7 +324,13 @@ fn show_world_entity_tooltip(
 
     let hover_distance = 20.0;
     for (transform, tooltip) in entity_query.iter() {
-        if transform.translation.truncate().distance(world_pos) < hover_distance {
+        let pos = transform.translation.truncate();
+        if let Some(ref exp) = exploration_state {
+            if exp.0.contains(&geo::Point::new(pos.x, pos.y)) {
+                continue;
+            }
+        }
+        if pos.distance(world_pos) < hover_distance {
             make_egui_tooltop(ctx, egui::Id::new("world_tooltip"), mouse_pos, |ui| {
                 ui.label(&tooltip.0);
             });

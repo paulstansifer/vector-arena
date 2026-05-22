@@ -12,9 +12,9 @@ use crate::{
     effects::projectile::MonsterShootTimer,
     fov,
     item::{Inventory, Item, ItemKind, PotionColor, ScrollName, item_display_name},
-    monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterStats},
+    monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, Stats},
     player::{MoveTarget, PLAYER_SPEED, Player},
-    ui::{PlayerStats, WorldTooltip},
+    ui::WorldTooltip,
 };
 
 pub fn populate(
@@ -24,7 +24,7 @@ pub fn populate(
     rooms: &[Rect<f32>],
     archipelago_id: Entity,
     depth: u32,
-    saved_player: Option<(PlayerStats, Inventory)>,
+    saved_player: Option<(Stats, Inventory)>,
 ) {
     let mut rng = rand::thread_rng();
 
@@ -53,7 +53,7 @@ pub fn populate(
         .unwrap_or(player_position + Vec2::new(50.0, 0.0));
 
     let (initial_stats, initial_inventory) = saved_player.unwrap_or((
-        PlayerStats { hp: 100.0, max_hp: 100.0, mana: 80.0, max_mana: 80.0 },
+        Stats { hp: 100.0, max_hp: 100.0, mana: 80.0, max_mana: 80.0 },
         Inventory::default(),
     ));
 
@@ -104,7 +104,7 @@ pub fn populate(
         commands.spawn((
             DespawnOnExit(GameState::InLevel),
             Monster,
-            MonsterStats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP },
+            Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
             WorldTooltip::default(),
             MonsterShootTimer::new(),
             Mesh2d(monster_mesh.clone()),

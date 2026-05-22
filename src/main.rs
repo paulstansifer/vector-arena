@@ -6,7 +6,9 @@ use bevy_landmass::{NavMeshHandle, prelude::*};
 use vector_arena::{
     AGENT_RADIUS, DungeonDepth, GameState, WorldBounds,
     effects::{projectile, rope},
-    fov, item, nav, player,
+    fov, item,
+    monster::Stats,
+    nav, player,
     ui::{self, enable_ui_input_absorption},
 };
 
@@ -18,7 +20,7 @@ use projectile::{
     player_fire_missile, spawn_missile_trails, tick_knockback_cooldowns, update_missile_trails,
     update_missiles,
 };
-use ui::{MessageLog, PlayerStats, UiPlugin};
+use ui::{MessageLog, UiPlugin};
 use vector_arena::{
     GameLayer,
     dungeon::{
@@ -34,7 +36,7 @@ use vector_arena::{
 };
 
 #[derive(Resource, Default)]
-struct SavedPlayer(Option<(PlayerStats, Inventory)>);
+struct SavedPlayer(Option<(Stats, Inventory)>);
 
 fn main() {
     App::new()
@@ -137,7 +139,7 @@ fn on_enter_descend(
 }
 
 fn save_player_on_exit(
-    player_data: Query<(&PlayerStats, &Inventory), With<Player>>,
+    player_data: Query<(&Stats, &Inventory), With<Player>>,
     mut saved_player: ResMut<SavedPlayer>,
 ) {
     saved_player.0 =
@@ -152,7 +154,7 @@ fn spawn_game_world(
     window_width: f32,
     window_height: f32,
     depth: u32,
-    saved_player: Option<(PlayerStats, Inventory)>,
+    saved_player: Option<(Stats, Inventory)>,
 ) {
     // Create the archipelago (the "world" for landmass pathfinding)
     let archipelago_id = commands
