@@ -1,14 +1,10 @@
 use bevy::prelude::*;
-use bevy_egui::{
-    EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass,
-    egui::{self, LayerId, PopupAnchor},
-};
+use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, egui};
 use pyri_tooltip::prelude::*;
 
 use crate::{
     DungeonDepth, GameState,
     item::{Inventory, ItemKind, item_display_name},
-    monster::{Monster, MonsterStats},
     player::Player,
 };
 
