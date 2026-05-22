@@ -1,15 +1,23 @@
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, egui};
+use bevy_egui::{
+    EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass,
+    egui::{self, LayerId, PopupAnchor},
+};
+use pyri_tooltip::prelude::*;
 
 use crate::{
     DungeonDepth, GameState,
-    item::{Inventory, ItemKind},
+    item::{Inventory, ItemKind, item_display_name},
+    monster::{Monster, MonsterStats},
     player::Player,
 };
 
 const BAR_WIDTH: f32 = 140.0;
 const BAR_HEIGHT: f32 = 22.0; // 4px taller than egui's default 18px interact_size
 const BAR_ROUNDING: u8 = 3;
+
+#[derive(Component, Default)]
+pub struct WorldTooltip(pub String);
 
 #[derive(Component, Default, Clone, Copy)]
 pub struct PlayerStats {
@@ -42,10 +50,12 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(EguiPlugin::default())
+        app.add_plugins((EguiPlugin::default(), TooltipPlugin::default()))
             .init_resource::<MessageLog>()
             .init_resource::<UiState>()
-            .add_systems(EguiPrimaryContextPass, ui_system);
+            .add_systems(EguiPrimaryContextPass, ui_system)
+            .add_systems(Update, crate::monster::refresh_monster_tooltips)
+            .add_systems(Update, show_world_entity_tooltip);
     }
 }
 
@@ -60,6 +70,12 @@ fn ui_system(
     depth: Res<DungeonDepth>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
+
+    ctx.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+        style.spacing.tooltip_width = 80.0;
+    });
 
     let Ok((stats, inventory, player_tf)) = player_query.single() else {
         return Ok(());
@@ -243,7 +259,7 @@ fn draw_stat_bar(ui: &mut egui::Ui, ratio: f32, color: egui::Color32, label: &st
 
 fn draw_item_icon(ui: &mut egui::Ui, item: ItemKind, count: usize) {
     let size = BAR_HEIGHT; // square icon, same height as the bars
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     let center = rect.center();
 
@@ -281,4 +297,66 @@ fn draw_item_icon(ui: &mut egui::Ui, item: ItemKind, count: usize) {
             egui::Color32::WHITE,
         );
     }
+
+    // Show tooltip on hover
+    if response.hovered() {
+        response.on_hover_text(item_display_name(item));
+    }
+}
+
+fn show_world_entity_tooltip(
+    mut contexts: EguiContexts,
+    camera_query: Query<(&Camera, &GlobalTransform)>,
+    entity_query: Query<(&Transform, &WorldTooltip)>,
+    windows: Query<&Window>,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+    let window = match windows.single() {
+        Ok(w) => w,
+        Err(_) => return Ok(()),
+    };
+
+    let Some(mouse_pos) = window.cursor_position() else {
+        return Ok(());
+    };
+
+    let (camera, camera_transform) = match camera_query.single() {
+        Ok(cam) => cam,
+        Err(_) => return Ok(()),
+    };
+
+    let world_pos = match camera.viewport_to_world_2d(camera_transform, mouse_pos) {
+        Ok(pos) => pos,
+        Err(_) => return Ok(()),
+    };
+
+    let hover_distance = 20.0;
+    for (transform, tooltip) in entity_query.iter() {
+        if transform.translation.truncate().distance(world_pos) < hover_distance {
+            make_egui_tooltop(ctx, egui::Id::new("world_tooltip"), mouse_pos, |ui| {
+                ui.label(&tooltip.0);
+            });
+            return Ok(());
+        }
+    }
+
+    Ok(())
+}
+
+fn make_egui_tooltop(
+    ctx: &egui::Context,
+    id: egui::Id,
+    cursor_pos: Vec2,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    egui::Area::new(id)
+        .kind(egui::UiKind::Popup)
+        .order(egui::Order::Tooltip)
+        .pivot(egui::Align2::RIGHT_BOTTOM)
+        .fixed_pos(egui::pos2(cursor_pos.x - 4.0, cursor_pos.y - 4.0))
+        .default_width(ctx.style().spacing.tooltip_width)
+        .sense(egui::Sense::hover())
+        .show(ctx, |ui| {
+            egui::Frame::popup(&ctx.style()).show(ui, add_contents);
+        });
 }

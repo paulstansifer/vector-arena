@@ -4,10 +4,25 @@
 use bevy::prelude::*;
 
 pub const MONSTER_SPEED: f32 = 80.0;
+pub const MONSTER_MAX_HP: f32 = 20.0;
 // pub const MONSTER_STOP_DIST: f32 = 50.0;
 
 #[derive(Component)]
 pub struct Monster;
+
+#[derive(Component, Clone, Copy)]
+pub struct MonsterStats {
+    pub hp: f32,
+    pub max_hp: f32,
+}
+
+pub fn refresh_monster_tooltips(
+    mut query: Query<(&MonsterStats, &mut crate::ui::WorldTooltip), With<Monster>>,
+) {
+    for (stats, mut tooltip) in query.iter_mut() {
+        tooltip.0 = format!("HP: {}/{}", stats.hp as i32, stats.max_hp as i32);
+    }
+}
 
 // pub fn move_monsters(
 //     player_query: Query<&Transform, (With<Player>, Without<Monster>)>,

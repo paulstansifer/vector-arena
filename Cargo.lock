@@ -4866,6 +4866,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0c5ccf5294c6ccd63a74f1565028353830a9c2f5eb0c682c355c471726a6e3f"
 
 [[package]]
+name = "pyri_tooltip"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d9600de6bc2e669aead828cd3efa2eed2c1d68d81497544db22f070d3a9d6ee"
+dependencies = [
+ "bevy_app",
+ "bevy_asset",
+ "bevy_camera",
+ "bevy_color",
+ "bevy_ecs",
+ "bevy_math",
+ "bevy_reflect",
+ "bevy_sprite",
+ "bevy_text",
+ "bevy_time",
+ "bevy_transform",
+ "bevy_ui",
+ "bevy_window",
+ "tiny_bail",
+]
+
+[[package]]
 name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5682,6 +5704,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tiny_bail"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ba9f3c9f90a216158fbb3552b4e3352739f2a9df25c9ba63690f3125b76e027"
+dependencies = [
+ "tracing",
+]
+
+[[package]]
 name = "tinystr"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5763,6 +5794,7 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
+ "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
@@ -5981,6 +6013,7 @@ dependencies = [
  "geo 0.32.0",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
+ "pyri_tooltip",
  "rand 0.8.6",
 ]
 

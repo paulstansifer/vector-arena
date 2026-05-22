@@ -11,10 +11,10 @@ use crate::{
     AGENT_RADIUS, GameLayer, GameState, Staircase,
     effects::projectile::MonsterShootTimer,
     fov,
-    item::{Inventory, Item, ItemKind, PotionColor, ScrollName},
-    monster::{MONSTER_SPEED, Monster},
+    item::{Inventory, Item, ItemKind, PotionColor, ScrollName, item_display_name},
+    monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterStats},
     player::{MoveTarget, PLAYER_SPEED, Player},
-    ui::PlayerStats,
+    ui::{PlayerStats, WorldTooltip},
 };
 
 pub fn populate(
@@ -103,6 +103,8 @@ pub fn populate(
         commands.spawn((
             DespawnOnExit(GameState::InLevel),
             Monster,
+            MonsterStats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP },
+            WorldTooltip::default(),
             MonsterShootTimer::new(),
             Mesh2d(monster_mesh.clone()),
             MeshMaterial2d(monster_material.clone()),
@@ -154,6 +156,7 @@ pub fn populate(
                 commands.spawn((
                     DespawnOnExit(GameState::InLevel),
                     Item(kind),
+                    WorldTooltip(item_display_name(kind).to_string()),
                     Mesh2d(potion_mesh.clone()),
                     MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.2, 0.85, 0.3)))),
                     Transform::from_translation(pos),
@@ -163,6 +166,7 @@ pub fn populate(
                 commands.spawn((
                     DespawnOnExit(GameState::InLevel),
                     Item(kind),
+                    WorldTooltip(item_display_name(kind).to_string()),
                     Mesh2d(scroll_mesh.clone()),
                     MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.8, 0.8, 0.75)))),
                     Transform::from_translation(pos),

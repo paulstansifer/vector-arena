@@ -17,6 +17,17 @@ fn item_name(item: ItemKind) -> &'static str {
     }
 }
 
+pub fn item_display_name(item: ItemKind) -> &'static str {
+    match item {
+        ItemKind::Potion(PotionColor::Red) => "Red Potion",
+        ItemKind::Potion(PotionColor::Green) => "Green Potion",
+        ItemKind::Potion(PotionColor::Blue) => "Blue Potion",
+        ItemKind::Scroll(ScrollName::Readme) => "Scroll titled 'README'",
+        ItemKind::Scroll(ScrollName::Agents) => "Scroll titled 'AGENTS'",
+        ItemKind::Scroll(ScrollName::License) => "Scroll titled 'LICENSE'",
+    }
+}
+
 const PICKUP_RADIUS: f32 = 22.0;
 const ANIM_SECS: f32 = 0.25;
 
