@@ -14,7 +14,7 @@ use vector_arena::{
 
 use fov::{Opaque, OpaqueVertices};
 use item::{Inventory, animate_pickup, pickup_items};
-use player::{Player, move_player, set_target_on_click};
+use player::{Player, advance_exploration, move_player, set_target_on_click};
 use projectile::{
     apply_missile_knockback, init_trail_meshes, manage_time_scale, monster_fire_missiles,
     player_fire_missile, spawn_missile_trails, tick_knockback_cooldowns, update_hit_flash,
@@ -61,6 +61,7 @@ fn main() {
         .add_systems(OnExit(GameState::InLevel), save_player_on_exit)
         .add_systems(Update, set_target_on_click.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, move_player)
+        .add_systems(Update, advance_exploration.after(move_player))
         .add_systems(Update, nav::apply_agent_velocity)
         .add_systems(Update, nav::sync_island_nav_mesh)
         .add_systems(Update, fov::update_fov)

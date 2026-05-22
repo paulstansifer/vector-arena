@@ -36,7 +36,6 @@ impl Default for DungeonDepth {
     fn default() -> Self { Self(1) }
 }
 
-
 use avian2d::prelude::PhysicsLayer;
 
 #[derive(PhysicsLayer, Clone, Copy, Debug, Default)]

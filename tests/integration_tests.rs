@@ -103,7 +103,12 @@ fn test_player_can_path_within_room_and_to_other_room() {
             Player,
             Transform::from_translation(start_pos.extend(0.0)),
             LinearVelocity::ZERO,
-            MoveTarget { destination: start_pos, origin: start_pos, active: false },
+            MoveTarget {
+                destination: start_pos,
+                origin: start_pos,
+                active: false,
+                time_set: Default::default(),
+            },
             Agent2dBundle {
                 agent: Default::default(),
                 settings: AgentSettings {

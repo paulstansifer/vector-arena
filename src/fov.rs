@@ -5,7 +5,10 @@
 // FOV each frame. `Opaque`/`OpaqueVertices` mark sight-blocking entities; doors use local-space
 // polygon vertices so they cast correct shadows as they swing.
 use bevy::prelude::*;
-use geo::{BooleanOps, Buffer, Contains, LineString, MultiPolygon, Polygon, Simplify};
+use geo::{
+    BooleanOps, Buffer, Contains, Intersects, Line as GeoLine, LineString, MultiPolygon, Polygon,
+    Simplify,
+};
 use std::ops::Range;
 
 use crate::{
@@ -22,6 +25,46 @@ pub struct Opaque;
 /// Add this alongside `Opaque` so the FOV system knows the shape to cast shadows from.
 #[derive(Component)]
 pub struct OpaqueVertices(pub Vec<Vec2>);
+
+/// Find a point on the boundary of `exploration` (the never-explored area) that:
+/// - lies inside `playable_area` (so the navmesh can route there), and
+/// - has an unobstructed line-of-sight to `target` through `known_blockers`.
+/// Returns the qualifying candidate closest to `target`, or `None` if none exist.
+pub fn find_exploration_waypoint(
+    target: Vec2,
+    exploration: &MultiPolygon<f32>,
+    known_blockers: &MultiPolygon<f32>,
+    playable_area: &MultiPolygon<f32>,
+) -> Option<Vec2> {
+    let step = 15.0_f32;
+
+    exploration
+        .iter()
+        .flat_map(|poly| std::iter::once(poly.exterior()).chain(poly.interiors()))
+        .flat_map(|ring| {
+            ring.lines().flat_map(move |line| {
+                let a = Vec2::new(line.start.x, line.start.y);
+                let b = Vec2::new(line.end.x, line.end.y);
+                let dist = a.distance(b);
+                let n_steps = ((dist / step).ceil() as usize).max(1);
+                (0..=n_steps).map(move |i| a.lerp(b, i as f32 / n_steps as f32))
+            })
+        })
+        // `intersects` rather than `contains` because frontier points lie on the shared
+        // boundary between playable_area and the exploration polygon — boundary points
+        // are excluded by `contains` but included by `intersects`.
+        .filter(|&p| playable_area.intersects(&geo::Point::new(p.x, p.y)))
+        .filter(|&p| {
+            let seg = GeoLine::new(geo::Coord { x: p.x, y: p.y }, geo::Coord {
+                x: target.x,
+                y: target.y,
+            });
+            !known_blockers.intersects(&seg)
+        })
+        .min_by(|&a, &b| {
+            a.distance(target).partial_cmp(&b.distance(target)).unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
 
 /// Calculate a field of view polygon from a start point, optionally restricted to an arc.
 pub fn fov_arc(
@@ -233,8 +276,14 @@ pub fn update_fov(
         })
         .collect();
 
-    let (new_exp, new_fov, new_ne) =
-        update_fov_from_pov(origin, radius, &obstacles, &bounds, &exploration_state.0, &seen_staircase);
+    let (new_exp, new_fov, new_ne) = update_fov_from_pov(
+        origin,
+        radius,
+        &obstacles,
+        &bounds,
+        &exploration_state.0,
+        &seen_staircase,
+    );
 
     exploration_state.0 = new_exp;
     *meshes.get_mut(&fov_mesh_handle.0).unwrap() = new_fov;
@@ -268,8 +317,7 @@ fn update_fov_from_pov(
     for &pos in remembered_positions {
         let half = 11.0_f32;
         let hole = MultiPolygon::new(vec![
-            geo::Rect::new((pos.x - half, pos.y - half), (pos.x + half, pos.y + half))
-                .to_polygon(),
+            geo::Rect::new((pos.x - half, pos.y - half), (pos.x + half, pos.y + half)).to_polygon(),
         ]);
         dark_area = dark_area.difference(&hole);
     }
@@ -366,6 +414,7 @@ mod tests {
                     &terrain_geometry.solid_rock,
                     &world_bounds,
                     &exploration_state.0,
+                    &[],
                 );
                 exploration_state.0 = new_exp;
             }
@@ -375,5 +424,83 @@ mod tests {
         assert!(pass_1_points < 500, "{}", pass_1_points);
         let extra_points = pass_2_points - pass_1_points;
         assert!(extra_points < 5, "{}", extra_points);
+    }
+
+    // Helper: a MultiPolygon rectangle.
+    fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> MultiPolygon<f32> {
+        MultiPolygon::new(vec![geo::Rect::new((x0, y0), (x1, y1)).to_polygon()])
+    }
+
+    /// The frontier of exploration lies exactly on the boundary of `playable_area` (the shared
+    /// edge where explored meets unexplored).  `geo::Contains` excludes boundary points, so it
+    /// would return None here.  `geo::Intersects` correctly includes them.
+    #[test]
+    fn test_waypoint_boundary_frontier() {
+        // Explored corridor: x=-200..0, y=-50..50
+        // Unexplored block: x=0..200, y=-50..50
+        // The frontier (left edge of unexplored at x=0) is the right boundary of playable_area.
+        // Every sampled point on that edge is on the boundary of playable_area, not its interior.
+        let exploration = rect(0.0, -50.0, 200.0, 50.0);
+        let playable_area = rect(-200.0, -50.0, 0.0, 50.0);
+        let known_blockers = MultiPolygon::new(vec![]);
+        let target = Vec2::new(300.0, 0.0);
+
+        let result =
+            find_exploration_waypoint(target, &exploration, &known_blockers, &playable_area);
+        assert!(result.is_some(), "should find waypoint at corridor entrance boundary");
+        let w = result.unwrap();
+        assert!(w.x.abs() < 1.0, "waypoint should be on the frontier at x=0, got {w:?}");
+    }
+
+    /// Same setup with a very narrow corridor (14 units wide): the frontier edge is too short
+    /// for `step=15` to produce any strictly-interior sample — only the two wall-corner endpoints,
+    /// both on the boundary of `playable_area`.
+    #[test]
+    fn test_waypoint_narrow_frontier() {
+        let exploration = rect(0.0, -7.0, 200.0, 7.0);
+        let playable_area = rect(-200.0, -7.0, 0.0, 7.0);
+        let known_blockers = MultiPolygon::new(vec![]);
+        let target = Vec2::new(300.0, 0.0);
+
+        let result =
+            find_exploration_waypoint(target, &exploration, &known_blockers, &playable_area);
+        assert!(result.is_some(), "should find waypoint even at a 14-unit wide corridor entrance");
+        let w = result.unwrap();
+        assert!(w.x.abs() < 1.0, "waypoint should be at x=0 frontier, got {w:?}");
+        assert!(w.y.abs() <= 7.0, "waypoint should be within corridor height, got {w:?}");
+    }
+
+    /// Among multiple frontier openings, the function should prefer the one closest to the target.
+    #[test]
+    fn test_waypoint_picks_closest_frontier() {
+        // Two unexplored strips both fronting x=0 from the playable area.
+        // Upper strip (y=20..50) is closer to the target at (300, 30) than lower (y=-50..-20).
+        let exploration = MultiPolygon::new(vec![
+            geo::Rect::new((0.0_f32, -50.0), (200.0_f32, -20.0)).to_polygon(),
+            geo::Rect::new((0.0_f32, 20.0), (200.0_f32, 50.0)).to_polygon(),
+        ]);
+        let playable_area = rect(-200.0, -50.0, 0.0, 50.0);
+        let known_blockers = MultiPolygon::new(vec![]);
+        let target = Vec2::new(300.0, 30.0);
+
+        let result =
+            find_exploration_waypoint(target, &exploration, &known_blockers, &playable_area);
+        assert!(result.is_some(), "should find a frontier waypoint");
+        let w = result.unwrap();
+        assert!(w.y >= 0.0, "should prefer the upper (y>0) strip closer to target y=30, got {w:?}");
+    }
+
+    /// When a known wall blocks LOS from every frontier point to the target, return None.
+    #[test]
+    fn test_waypoint_all_los_blocked() {
+        let exploration = rect(0.0, -50.0, 200.0, 50.0);
+        let playable_area = rect(-200.0, -50.0, 0.0, 50.0);
+        // A thick wall spanning the full corridor height, known to the player.
+        let known_blockers = rect(50.0, -200.0, 100.0, 200.0);
+        let target = Vec2::new(300.0, 0.0); // behind the wall
+
+        let result =
+            find_exploration_waypoint(target, &exploration, &known_blockers, &playable_area);
+        assert!(result.is_none(), "should return None when all LOS paths cross a known wall");
     }
 }
