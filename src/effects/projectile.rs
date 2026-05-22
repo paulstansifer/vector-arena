@@ -12,7 +12,7 @@ use std::{collections::HashSet, time::Duration};
 use crate::{
     AGENT_RADIUS, GameLayer, GameState,
     fov::MOVABLE_Z,
-    monster::{Monster, Stats},
+    monster::{AlertedByMissile, Monster, Stats},
     player::{MoveTarget, Player},
     ui::MessageLog,
 };
@@ -193,7 +193,7 @@ pub fn update_missiles(
 pub fn apply_missile_knockback(
     mut commands: Commands,
     spatial_query: SpatialQuery,
-    missiles: Query<(&Transform, &LinearVelocity), With<MagicMissile>>,
+    missiles: Query<(&Transform, &LinearVelocity, &MagicMissile)>,
     mut dynamic_query: Query<
         (
             &mut LinearVelocity,
@@ -209,7 +209,8 @@ pub fn apply_missile_knockback(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut message_log: ResMut<MessageLog>,
 ) {
-    for (transform, missile_vel) in missiles.iter() {
+    for (transform, missile_vel, missile) in missiles.iter() {
+        let fired_by_player = missile.fired_by_player;
         let pos = transform.translation.truncate();
         let knockback_dir = missile_vel.0.normalize_or_zero();
 
@@ -262,6 +263,9 @@ pub fn apply_missile_knockback(
             stats.hp -= MISSILE_DAMAGE;
 
             if is_monster {
+                if fired_by_player {
+                    commands.entity(hit).insert(AlertedByMissile);
+                }
                 message_log.push_repeating(
                     "The magic missile hits the monster",
                     hit,

@@ -7,7 +7,7 @@ use vector_arena::{
     AGENT_RADIUS, DungeonDepth, GameState, WorldBounds,
     effects::{projectile, rope},
     fov, item,
-    monster::Stats,
+    monster::{self, Stats},
     nav, player,
     ui::{self, enable_ui_input_absorption},
 };
@@ -62,6 +62,8 @@ fn main() {
         .add_systems(Update, set_target_on_click.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, move_player)
         .add_systems(Update, advance_exploration.after(move_player))
+        .add_systems(Update, monster::update_monster_ai)
+        .add_systems(Update, monster::refresh_monster_tooltips.after(monster::update_monster_ai))
         .add_systems(Update, nav::apply_agent_velocity)
         .add_systems(Update, nav::sync_island_nav_mesh)
         .add_systems(Update, fov::update_fov)

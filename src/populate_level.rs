@@ -12,7 +12,7 @@ use crate::{
     effects::projectile::MonsterShootTimer,
     fov,
     item::{Inventory, Item, ItemKind, PotionColor, ScrollName, item_display_name},
-    monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, Stats},
+    monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterState, Stats},
     player::{MoveTarget, PLAYER_SPEED, Player},
     ui::WorldTooltip,
 };
@@ -57,7 +57,7 @@ pub fn populate(
         Inventory::default(),
     ));
 
-    let player = commands
+    commands
         .spawn((
             DespawnOnExit(GameState::InLevel),
             Player,
@@ -82,8 +82,7 @@ pub fn populate(
                 archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
             },
             AgentTarget2d::None,
-        ))
-        .id();
+        ));
 
     let monster_mesh = meshes.add(Circle::new(AGENT_RADIUS));
 
@@ -103,6 +102,7 @@ pub fn populate(
         commands.spawn((
             DespawnOnExit(GameState::InLevel),
             Monster,
+            MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
             Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
             WorldTooltip::default(),
             MonsterShootTimer::new(),
@@ -122,7 +122,7 @@ pub fn populate(
                 },
                 archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
             },
-            AgentTarget2d::Entity(player),
+            AgentTarget2d::None,
         ));
     }
 

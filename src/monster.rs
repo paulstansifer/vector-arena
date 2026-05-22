@@ -1,11 +1,20 @@
-// Monster marker component. Targeting and velocity are handled externally:
-// `main.rs` attaches `AgentTarget2d::Entity(player)` and `nav.rs` converts the
-// Landmass desired-velocity into an Avian2D `LinearVelocity` each frame.
+// Monster marker component, AI state machine, and tooltip refresh.
+// `MonsterState` drives behavior each frame: sleeping monsters ignore the player,
+// wandering ones path to a random nearby location at half speed, seeking ones chase
+// the player, tired ones rest briefly, and distracted ones path to a fixed point.
 use bevy::prelude::*;
+use bevy_landmass::prelude::*;
+use geo::Intersects;
+
+use crate::{dungeon::terrain::DungeonState, player::Player};
 
 pub const MONSTER_SPEED: f32 = 80.0;
 pub const MONSTER_MAX_HP: f32 = 20.0;
-// pub const MONSTER_STOP_DIST: f32 = 50.0;
+pub const MONSTER_SEEK_RANGE: f32 = 150.0;
+const MONSTER_WANDER_SPEED: f32 = MONSTER_SPEED * 0.5;
+const MONSTER_WANDER_RANGE: f32 = 200.0;
+const WANDER_ARRIVE_DIST: f32 = 30.0;
+const FOCUS_DIST: f32 = 200.0;  /// Don't get tired if the player is this close.
 
 #[derive(Component, Default, Clone, Copy)]
 pub struct Stats {
@@ -18,33 +27,175 @@ pub struct Stats {
 #[derive(Component)]
 pub struct Monster;
 
-pub fn refresh_monster_tooltips(
-    mut query: Query<(&Stats, &mut crate::ui::WorldTooltip), With<Monster>>,
-) {
-    for (stats, mut tooltip) in query.iter_mut() {
-        tooltip.0 = format!("HP: {}/{}", stats.hp as i32, stats.max_hp as i32);
+/// Inserted by the projectile system when a player-fired missile hits this monster.
+/// The AI system reads and removes this each frame to trigger a Seeking transition.
+#[derive(Component)]
+pub struct AlertedByMissile;
+
+#[derive(Component, Clone)]
+pub enum MonsterState {
+    /// Not moving; after timer expires may wander or sleep again.
+    Sleeping { timer: f32 },
+    /// Pathing to a random location ≤200 units away at half speed; falls asleep on arrival.
+    Wandering { target: Vec2 },
+    /// Chasing the player; transitions to Tired after its timer runs out.
+    Seeking { timer: f32 },
+    /// Pathing to a fixed location (future use).
+    Distracted { target: Vec2 },
+    /// Resting after seeking; then randomly wanders or sleeps.
+    Tired { timer: f32 },
+}
+
+impl MonsterState {
+    pub fn label(&self) -> &'static str {
+        match self {
+            MonsterState::Sleeping { .. } => "sleeping",
+            MonsterState::Wandering { .. } => "wandering",
+            MonsterState::Seeking { .. } => "seeking",
+            MonsterState::Distracted { .. } => "distracted",
+            MonsterState::Tired { .. } => "tired",
+        }
     }
 }
 
-// pub fn move_monsters(
-//     player_query: Query<&Transform, (With<Player>, Without<Monster>)>,
-//     mut monster_query: Query<(&Transform, &mut LinearVelocity), With<Monster>>,
-// ) {
-//     let player_transform = player_query.single().unwrap();
+/// Advance `state` by one frame, updating the agent target and settings to match.
+///
+/// `should_seek` (LOS + range, or missile alert) overrides any non-seeking state.
+/// When no transition occurs the state is mutated in place (timer decremented),
+/// so there is no need for an Option return — the "no change" path simply falls through.
+fn tick_state(
+    state: &mut MonsterState,
+    target: &mut AgentTarget2d,
+    settings: &mut AgentSettings,
+    monster_pos: Vec2,
+    player_entity: Entity,
+    dist_to_player: f32,
+    should_seek: bool,
+    dt: f32,
+    rng: &mut impl rand::Rng,
+) {
+    if should_seek && !matches!(state, MonsterState::Seeking { .. }) {
+        *state = MonsterState::Seeking { timer: rng.gen_range(2.0..3.0) };
+    }
 
-//     let player_position = player_transform.translation.truncate();
+    match state {
+        MonsterState::Sleeping { timer } => {
+            *target = AgentTarget2d::None;
+            settings.desired_speed = 0.0;
+            *timer -= dt;
+            if *timer <= 0.0 {
+                *state = MonsterState::Wandering { target: random_wander_target(monster_pos, rng) };                    
+            }
+        }
+        MonsterState::Wandering { target: wander_pos } => {
+            let wt = *wander_pos;
+            *target = AgentTarget2d::Point(wt);
+            settings.desired_speed = MONSTER_WANDER_SPEED;
+            if monster_pos.distance(wt) < WANDER_ARRIVE_DIST {
+                *state = MonsterState::Sleeping { timer: rng.gen_range(2.0..5.0) };
+            }
+        }
+        MonsterState::Seeking { timer } => {
+            *target = AgentTarget2d::Entity(player_entity);
+            settings.desired_speed = MONSTER_SPEED;
+            *timer -= dt;
+            if *timer <= 0.0 && dist_to_player > FOCUS_DIST {
+                *state = MonsterState::Tired { timer: rng.gen_range(2.0..3.0) };
+            }
+        }
+        MonsterState::Distracted { target: dist_pos } => {
+            let dp = *dist_pos;
+            *target = AgentTarget2d::Point(dp);
+            settings.desired_speed = MONSTER_SPEED;
+            if monster_pos.distance(dp) < WANDER_ARRIVE_DIST {
+                *state = if rng.gen_bool(0.5) {
+                    MonsterState::Wandering { target: random_wander_target(monster_pos, rng) }
+                } else {
+                    MonsterState::Sleeping { timer: rng.gen_range(2.0..5.0) }
+                };
+            }
+        }
+        MonsterState::Tired { timer } => {
+            *target = AgentTarget2d::None;
+            settings.desired_speed = 0.0;
+            *timer -= dt;
+            if *timer <= 0.0 {
+                *state = if rng.gen_bool(0.5) {
+                    MonsterState::Wandering { target: random_wander_target(monster_pos, rng) }
+                } else {
+                    MonsterState::Sleeping { timer: rng.gen_range(2.0..5.0) }
+                };
+            }
+        }
+    }
+}
 
-//     for (transform, mut velocity) in monster_query.iter_mut() {
-//         let current = transform.translation.truncate();
-//         let delta = player_position - current;
-//         let distance = delta.length();
+pub fn refresh_monster_tooltips(
+    mut query: Query<(&Stats, &MonsterState, &mut crate::ui::WorldTooltip), With<Monster>>,
+) {
+    for (stats, state, mut tooltip) in query.iter_mut() {
+        tooltip.0 =
+            format!("HP: {}/{} [{}]", stats.hp as i32, stats.max_hp as i32, state.label());
+    }
+}
 
-//         if distance <= MONSTER_STOP_DIST {
-//             *velocity = LinearVelocity::ZERO;
-//             continue;
-//         }
+pub fn update_monster_ai(
+    time: Res<Time>,
+    player_query: Single<(Entity, &Transform), With<Player>>,
+    mut monster_query: Query<
+        (
+            Entity,
+            &Transform,
+            &mut MonsterState,
+            &mut AgentTarget2d,
+            &mut AgentSettings,
+            Option<&AlertedByMissile>,
+        ),
+        With<Monster>,
+    >,
+    dungeon_state: Res<DungeonState>,
+    mut commands: Commands,
+) {
+    let (player_entity, player_transform) = *player_query;
+    let player_pos = player_transform.translation.truncate();
+    let solid_rock = &dungeon_state.solid_rock;
+    let dt = time.delta_secs();
 
-//         let direction = delta.normalize_or_zero();
-//         velocity.0 = direction * MONSTER_SPEED;
-//     }
-// }
+    for (entity, transform, mut state, mut target, mut settings, alerted) in
+        monster_query.iter_mut()
+    {
+        let monster_pos = transform.translation.truncate();
+
+        let missile_alerted = alerted.is_some();
+        if missile_alerted {
+            commands.entity(entity).remove::<AlertedByMissile>();
+        }
+
+        let dist_to_player = monster_pos.distance(player_pos);
+        let has_los = dist_to_player < MONSTER_SEEK_RANGE && {
+            let seg = geo::Line::new(
+                geo::Coord { x: monster_pos.x, y: monster_pos.y },
+                geo::Coord { x: player_pos.x, y: player_pos.y },
+            );
+            !solid_rock.intersects(&seg)
+        };
+
+        tick_state(
+            &mut state,
+            &mut target,
+            &mut settings,
+            monster_pos,
+            player_entity,
+            dist_to_player,
+            missile_alerted || has_los,
+            dt,
+            &mut rand::thread_rng(),
+        );
+    }
+}
+
+fn random_wander_target(origin: Vec2, rng: &mut impl rand::Rng) -> Vec2 {
+    let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+    let dist = rng.gen_range(50.0..MONSTER_WANDER_RANGE);
+    origin + Vec2::new(angle.cos(), angle.sin()) * dist
+}
