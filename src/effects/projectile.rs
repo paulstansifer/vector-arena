@@ -12,8 +12,9 @@ use std::{collections::HashSet, time::Duration};
 use crate::{
     AGENT_RADIUS, GameLayer, GameState,
     fov::MOVABLE_Z,
-    monster::Monster,
+    monster::{Monster, Stats},
     player::{MoveTarget, Player},
+    ui::MessageLog,
 };
 
 pub const MISSILE_SPEED: f32 = 3500.0;
@@ -22,6 +23,8 @@ pub const MONSTER_FIRE_RANGE: f32 = 100.0;
 const TIME_SCALE_MISSILE: f32 = 0.5;
 const KNOCKBACK_SPEED: f32 = 600.0;
 const KNOCKBACK_COOLDOWN: f32 = 0.15; // virtual seconds; prevents double-hits per pass
+const MISSILE_DAMAGE: f32 = 5.0;
+const HIT_FLASH_DURATION: f32 = 0.2; // virtual seconds
 const TRAIL_CORE_HEIGHT: f32 = 1.0;
 const TRAIL_GLOW_HEIGHT: f32 = 4.0;
 
@@ -59,6 +62,13 @@ pub struct MagicMissile {
 
 #[derive(Component)]
 pub struct KnockbackCooldown(f32);
+
+#[derive(Component)]
+pub struct HitFlash {
+    timer: f32,
+    duration: f32,
+    base_color: Color,
+}
 
 #[derive(Component)]
 pub struct MonsterShootTimer(pub f32);
@@ -177,24 +187,33 @@ pub fn update_missiles(
     }
 }
 
-/// For each missile, find overlapping Dynamic-layer entities and apply a velocity push.
-/// Missiles don't physically interact with Dynamic entities (collision layers exclude this),
-/// so we handle knockback manually. A short per-entity cooldown prevents double-hits from
-/// simultaneous missiles while allowing a bounced missile to knock back again on a later pass.
+/// For each missile, find overlapping Dynamic-layer entities and apply knockback, damage, and a
+/// white flash. A short per-entity cooldown prevents double-hits from simultaneous missiles
+/// while allowing a bounced missile to hit again on a later pass.
 pub fn apply_missile_knockback(
     mut commands: Commands,
     spatial_query: SpatialQuery,
     missiles: Query<(&Transform, &LinearVelocity), With<MagicMissile>>,
     mut dynamic_query: Query<
-        (&mut LinearVelocity, Option<&KnockbackCooldown>),
+        (
+            &mut LinearVelocity,
+            Option<&KnockbackCooldown>,
+            Option<&mut Stats>,
+            Option<&MeshMaterial2d<ColorMaterial>>,
+            Option<&HitFlash>,
+            Has<Player>,
+            Has<Monster>,
+        ),
         (Without<MagicMissile>, With<RigidBody>),
     >,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut message_log: ResMut<MessageLog>,
 ) {
     for (transform, missile_vel) in missiles.iter() {
         let pos = transform.translation.truncate();
         let knockback_dir = missile_vel.0.normalize_or_zero();
 
-        let hits = spatial_query.shape_intersections(
+        let hits: Vec<Entity> = spatial_query.shape_intersections(
             &Collider::circle(4.0),
             pos,
             0.0,
@@ -202,12 +221,53 @@ pub fn apply_missile_knockback(
         );
 
         for hit in hits {
-            if let Ok((mut vel, cooldown)) = dynamic_query.get_mut(hit) {
-                if cooldown.is_some_and(|c| c.0 > 0.0) {
-                    continue;
+            let Ok((
+                mut vel,
+                cooldown,
+                mut stats_opt,
+                mat_opt,
+                existing_flash,
+                is_player,
+                is_monster,
+            )) = dynamic_query.get_mut(hit)
+            else {
+                continue;
+            };
+            if cooldown.is_some_and(|c| c.0 > 0.0) {
+                continue;
+            }
+            vel.0 += knockback_dir * KNOCKBACK_SPEED;
+            commands.entity(hit).insert(KnockbackCooldown(KNOCKBACK_COOLDOWN));
+
+            let Some(ref mut stats) = stats_opt else { continue };
+
+            // Flash white, preserving the resting color across rapid re-hits.
+            if let Some(mh) = mat_opt {
+                let base_color = existing_flash
+                    .map(|f| f.base_color)
+                    .or_else(|| materials.get(&mh.0).map(|m| m.color));
+                if let Some(base) = base_color {
+                    if let Some(mat) = materials.get_mut(&mh.0) {
+                        mat.color = Color::WHITE;
+                    }
+                    commands.entity(hit).insert(HitFlash {
+                        timer: HIT_FLASH_DURATION,
+                        duration: HIT_FLASH_DURATION,
+                        base_color: base,
+                    });
                 }
-                vel.0 += knockback_dir * KNOCKBACK_SPEED;
-                commands.entity(hit).insert(KnockbackCooldown(KNOCKBACK_COOLDOWN));
+            }
+
+            let was_alive = stats.hp > 0.0;
+            stats.hp -= MISSILE_DAMAGE;
+
+            if is_monster && stats.hp <= 0.0 {
+                commands.entity(hit).despawn();
+            } else if is_player {
+                if was_alive && stats.hp <= 0.0 {
+                    message_log.push("Ouch!");
+                }
+                stats.hp = stats.hp.max(0.0);
             }
         }
     }
@@ -216,6 +276,36 @@ pub fn apply_missile_knockback(
 pub fn tick_knockback_cooldowns(time: Res<Time>, mut query: Query<&mut KnockbackCooldown>) {
     for mut cooldown in query.iter_mut() {
         cooldown.0 -= time.delta_secs();
+    }
+}
+
+pub fn update_hit_flash(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    mut query: Query<(Entity, &mut HitFlash, &MeshMaterial2d<ColorMaterial>)>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    for (entity, mut flash, mat_handle) in query.iter_mut() {
+        flash.timer -= time.delta_secs();
+        if flash.timer <= 0.0 {
+            if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                mat.color = flash.base_color;
+            }
+            commands.entity(entity).remove::<HitFlash>();
+        } else {
+            // t=1 at the moment of impact (white), t=0 when done (base_color)
+            let t = flash.timer / flash.duration;
+            let base = flash.base_color.to_srgba();
+            let color = Color::srgba(
+                base.red + t * (1.0 - base.red),
+                base.green + t * (1.0 - base.green),
+                base.blue + t * (1.0 - base.blue),
+                base.alpha,
+            );
+            if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                mat.color = color;
+            }
+        }
     }
 }
 

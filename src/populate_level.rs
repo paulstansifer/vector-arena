@@ -85,7 +85,6 @@ pub fn populate(
         ))
         .id();
 
-    let monster_material = materials.add(ColorMaterial::from(Color::srgb(0.85, 0.12, 0.12)));
     let monster_mesh = meshes.add(Circle::new(AGENT_RADIUS));
 
     let monster_positions: Vec<Vec2> = rooms
@@ -108,7 +107,7 @@ pub fn populate(
             WorldTooltip::default(),
             MonsterShootTimer::new(),
             Mesh2d(monster_mesh.clone()),
-            MeshMaterial2d(monster_material.clone()),
+            MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.85, 0.12, 0.12)))),
             Transform::from_translation(position.extend(fov::MOVABLE_Z)),
             RigidBody::Dynamic,
             Collider::circle(AGENT_RADIUS),
