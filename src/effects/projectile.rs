@@ -13,10 +13,10 @@ use crate::{
     AGENT_RADIUS, GameLayer, GameState,
     fov::MOVABLE_Z,
     monster::Monster,
-    player::{MoveTarget, PLAYER_SPEED, Player},
+    player::{MoveTarget, Player},
 };
 
-pub const MISSILE_SPEED: f32 = PLAYER_SPEED * 10.0;
+pub const MISSILE_SPEED: f32 = 3500.0;
 pub const MISSILE_MAX_DISTANCE: f32 = 1000.0;
 pub const MONSTER_FIRE_RANGE: f32 = 100.0;
 const TIME_SCALE_MISSILE: f32 = 0.5;

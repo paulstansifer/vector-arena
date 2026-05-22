@@ -68,6 +68,7 @@ pub fn populate(
             Transform::from_translation(player_position.extend(fov::MOVABLE_Z)),
             RigidBody::Dynamic,
             Collider::circle(AGENT_RADIUS),
+            ColliderDensity(8.0),
             CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
             LockedAxes::ROTATION_LOCKED,
             MoveTarget::default(),
@@ -205,7 +206,12 @@ fn spawn_staircase(
         .id();
 
     let bg_child = commands
-        .spawn((DespawnOnExit(GameState::InLevel), Mesh2d(bg_mesh), MeshMaterial2d(bg_mat), Transform::default()))
+        .spawn((
+            DespawnOnExit(GameState::InLevel),
+            Mesh2d(bg_mesh),
+            MeshMaterial2d(bg_mat),
+            Transform::default(),
+        ))
         .id();
     commands.entity(staircase).add_child(bg_child);
 
