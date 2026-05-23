@@ -11,10 +11,11 @@ use std::{collections::HashSet, time::Duration};
 
 use crate::{
     AGENT_RADIUS, GameLayer, GameState,
-    fov::MOVABLE_Z,
-    monster::{AlertedByMissile, Monster, Stats},
+    fov,
+    item::{Item, ItemKind, item_display_name},
+    monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
     player::{MoveTarget, Player},
-    ui::MessageLog,
+    ui::{MessageLog, WorldTooltip},
 };
 
 pub const MISSILE_SPEED: f32 = 3500.0;
@@ -102,7 +103,7 @@ fn spawn_missile(
         },
         Mesh2d(meshes.add(Circle::new(4.0))),
         MeshMaterial2d(materials.add(ColorMaterial::from(color))),
-        Transform::from_translation(spawn_pos.extend(MOVABLE_Z + 1.0)),
+        Transform::from_translation(spawn_pos.extend(fov::MOVABLE_Z + 1.0)),
         RigidBody::Dynamic,
         Collider::circle(4.0),
         CollisionLayers::new(GameLayer::Missile, GameLayer::Wall),
@@ -203,10 +204,13 @@ pub fn apply_missile_knockback(
             Option<&HitFlash>,
             Has<Player>,
             Has<Monster>,
+            &Transform,
+            Option<&MonsterDrop>,
         ),
         (Without<MagicMissile>, With<RigidBody>),
     >,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut message_log: ResMut<MessageLog>,
 ) {
     for (transform, missile_vel, missile) in missiles.iter() {
@@ -230,6 +234,8 @@ pub fn apply_missile_knockback(
                 existing_flash,
                 is_player,
                 is_monster,
+                transform,
+                drop_opt,
             )) = dynamic_query.get_mut(hit)
             else {
                 continue;
@@ -276,6 +282,32 @@ pub fn apply_missile_knockback(
                     },
                 );
                 if stats.hp <= 0.0 {
+                    if let Some(drop) = drop_opt {
+                        let kind = drop.0;
+                        let pos = transform.translation.truncate().extend(fov::ON_FLOOR_Z);
+                        match kind {
+                            ItemKind::Potion(_) => {
+                                commands.spawn((
+                                    DespawnOnExit(GameState::InLevel),
+                                    Item(kind),
+                                    WorldTooltip(item_display_name(kind).to_string()),
+                                    Mesh2d(meshes.add(RegularPolygon::new(7.0, 3))),
+                                    MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.2, 0.85, 0.3)))),
+                                    Transform::from_translation(pos),
+                                ));
+                            }
+                            ItemKind::Scroll(_) => {
+                                commands.spawn((
+                                    DespawnOnExit(GameState::InLevel),
+                                    Item(kind),
+                                    WorldTooltip(item_display_name(kind).to_string()),
+                                    Mesh2d(meshes.add(Rectangle::new(12.0, 12.0))),
+                                    MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.8, 0.8, 0.75)))),
+                                    Transform::from_translation(pos),
+                                ));
+                            }
+                        }
+                    }
                     commands.entity(hit).despawn();
                 }
             } else if is_player {
@@ -386,7 +418,7 @@ fn spawn_trail_segment(
         },
         Mesh2d(trail_meshes.core.clone()),
         MeshMaterial2d(materials.add(ColorMaterial::from(core_color))),
-        Transform::from_translation(midpoint.extend(MOVABLE_Z + 0.6))
+        Transform::from_translation(midpoint.extend(fov::MOVABLE_Z + 0.6))
             .with_rotation(rotation)
             .with_scale(Vec3::new(segment_len, 1.0, 1.0)),
     ));
@@ -401,7 +433,7 @@ fn spawn_trail_segment(
         },
         Mesh2d(trail_meshes.glow.clone()),
         MeshMaterial2d(materials.add(ColorMaterial::from(glow_color))),
-        Transform::from_translation(midpoint.extend(MOVABLE_Z + 0.5))
+        Transform::from_translation(midpoint.extend(fov::MOVABLE_Z + 0.5))
             .with_rotation(rotation)
             .with_scale(Vec3::new(segment_len, 1.0, 1.0)),
     ));

@@ -12,7 +12,7 @@ use crate::{
     effects::projectile::MonsterShootTimer,
     fov,
     item::{Inventory, Item, ItemKind, PotionColor, ScrollName, item_display_name},
-    monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterState, Stats},
+    monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterDrop, MonsterState, Stats},
     player::{MoveTarget, PLAYER_SPEED, Player},
     ui::WorldTooltip,
 };
@@ -96,10 +96,20 @@ pub fn populate(
         })
         .collect();
 
+    let all_item_kinds = [
+        ItemKind::Potion(PotionColor::Red),
+        ItemKind::Potion(PotionColor::Green),
+        ItemKind::Potion(PotionColor::Blue),
+        ItemKind::Scroll(ScrollName::Readme),
+        ItemKind::Scroll(ScrollName::Agents),
+        ItemKind::Scroll(ScrollName::License),
+    ];
+
     // One more monster per depth level (2 at depth 1, 3 at depth 2, …).
     let monster_count = (depth as usize + 1).min(monster_positions.len());
     for position in monster_positions.into_iter().take(monster_count) {
-        commands.spawn((
+        let drop = if rng.gen_bool(0.6) { all_item_kinds.choose(&mut rng).copied() } else { None };
+        let monster = commands.spawn((
             DespawnOnExit(GameState::InLevel),
             Monster,
             MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
@@ -123,17 +133,12 @@ pub fn populate(
                 archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
             },
             AgentTarget2d::None,
-        ));
+        )).id();
+        if let Some(kind) = drop {
+            commands.entity(monster).insert(MonsterDrop(kind));
+        }
     }
 
-    let all_item_kinds = [
-        ItemKind::Potion(PotionColor::Red),
-        ItemKind::Potion(PotionColor::Green),
-        ItemKind::Potion(PotionColor::Blue),
-        ItemKind::Scroll(ScrollName::Readme),
-        ItemKind::Scroll(ScrollName::Agents),
-        ItemKind::Scroll(ScrollName::License),
-    ];
     let item_count = rng.gen_range(4..=5);
     let chosen_kinds: Vec<ItemKind> =
         all_item_kinds.choose_multiple(&mut rng, item_count).copied().collect();

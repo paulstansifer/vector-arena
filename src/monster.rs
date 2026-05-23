@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use geo::Intersects;
 
-use crate::{dungeon::terrain::DungeonState, player::Player};
+use crate::{dungeon::terrain::DungeonState, item::ItemKind, player::Player};
 
 pub const MONSTER_SPEED: f32 = 80.0;
 pub const MONSTER_MAX_HP: f32 = 20.0;
@@ -31,6 +31,10 @@ pub struct Monster;
 /// The AI system reads and removes this each frame to trigger a Seeking transition.
 #[derive(Component)]
 pub struct AlertedByMissile;
+
+/// Item this monster will drop when killed. If absent, the monster drops nothing.
+#[derive(Component)]
+pub struct MonsterDrop(pub ItemKind);
 
 #[derive(Component, Clone)]
 pub enum MonsterState {
