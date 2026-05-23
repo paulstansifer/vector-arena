@@ -12,7 +12,7 @@ use rand::prelude::*;
 /// Space around the edge of the map
 pub const MARGIN: f32 = 10.0;
 /// Minimum thickness around a room
-pub const PADDING: f32 = 20.0;
+pub const PADDING: f32 = 10.0;
 pub const CORRIDOR_WIDTH: f32 = 35.0;
 const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
 

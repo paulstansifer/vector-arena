@@ -219,7 +219,6 @@ fn spawn_game_world(
             .spawn((
                 DespawnOnExit(GameState::InLevel),
                 Fragile,
-                Opaque,
                 OpaqueVertices(door.disp_corners()),
                 Mesh2d(meshes.add(Rectangle::new(disp.x, disp.y))),
                 MeshMaterial2d(door_material.clone()),

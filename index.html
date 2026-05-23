@@ -223,35 +223,18 @@
         </div>
     </div>
 
-    <script type="module">
-        import init from './vector_arena.js';
-
-        // Wait for WASM to initialize and Bevy to start
-        async function start() {
-            try {
-                // Initialize the WASM module
-                await init();
-                console.log("Vector Arena: WASM Initialized successfully");
-
-                // Keep the loader visible for a tiny fraction of a second to ensure Bevy has rendered the first frame,
-                // then fade it out.
-                setTimeout(() => {
-                    const loader = document.getElementById('loader');
-                    loader.classList.add('fade-out');
-                }, 500);
-            } catch (error) {
-                console.error("Failed to load Vector Arena:", error);
-                document.querySelector('.loading-text').textContent = "Initialization Failed. Please refresh.";
-                document.querySelector('.loading-text').style.color = "#ff3f3f";
-            }
-        }
-
-        // Prevent right-click context menu so Right Click excavation feels native
+    <!-- Prevent right-click context menu so Right Click excavation feels native -->
+    <script>
         window.addEventListener('contextmenu', (e) => {
             e.preventDefault();
         });
 
-        start();
+        window.addEventListener('TrunkApplicationStarted', () => {
+            setTimeout(() => {
+                const loader = document.getElementById('loader');
+                if (loader) loader.classList.add('fade-out');
+            }, 500);
+        });
     </script>
 
     <div class="controls-overlay">
