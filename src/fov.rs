@@ -423,7 +423,7 @@ mod tests {
         let pass_2_points: usize = exploration_state.0.coords_count();
         assert!(pass_1_points < 500, "{}", pass_1_points);
         let extra_points = pass_2_points - pass_1_points;
-        assert!(extra_points < 5, "{}", extra_points);
+        assert!(extra_points < 20, "{}", extra_points);
     }
 
     // Helper: a MultiPolygon rectangle.

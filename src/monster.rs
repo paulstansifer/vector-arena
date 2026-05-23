@@ -14,7 +14,8 @@ pub const MONSTER_SEEK_RANGE: f32 = 150.0;
 const MONSTER_WANDER_SPEED: f32 = MONSTER_SPEED * 0.5;
 const MONSTER_WANDER_RANGE: f32 = 200.0;
 const WANDER_ARRIVE_DIST: f32 = 30.0;
-const FOCUS_DIST: f32 = 200.0;  /// Don't get tired if the player is this close.
+const FOCUS_DIST: f32 = 200.0;
+/// Don't get tired if the player is this close.
 
 #[derive(Component, Default, Clone, Copy)]
 pub struct Stats {
@@ -88,7 +89,7 @@ fn tick_state(
             settings.desired_speed = 0.0;
             *timer -= dt;
             if *timer <= 0.0 {
-                *state = MonsterState::Wandering { target: random_wander_target(monster_pos, rng) };                    
+                *state = MonsterState::Wandering { target: random_wander_target(monster_pos, rng) };
             }
         }
         MonsterState::Wandering { target: wander_pos } => {
@@ -138,8 +139,7 @@ pub fn refresh_monster_tooltips(
     mut query: Query<(&Stats, &MonsterState, &mut crate::ui::WorldTooltip), With<Monster>>,
 ) {
     for (stats, state, mut tooltip) in query.iter_mut() {
-        tooltip.0 =
-            format!("HP: {}/{} [{}]", stats.hp as i32, stats.max_hp as i32, state.label());
+        tooltip.0 = format!("HP: {}/{} [{}]", stats.hp as i32, stats.max_hp as i32, state.label());
     }
 }
 
@@ -177,10 +177,11 @@ pub fn update_monster_ai(
 
         let dist_to_player = monster_pos.distance(player_pos);
         let has_los = dist_to_player < MONSTER_SEEK_RANGE && {
-            let seg = geo::Line::new(
-                geo::Coord { x: monster_pos.x, y: monster_pos.y },
-                geo::Coord { x: player_pos.x, y: player_pos.y },
-            );
+            let seg =
+                geo::Line::new(geo::Coord { x: monster_pos.x, y: monster_pos.y }, geo::Coord {
+                    x: player_pos.x,
+                    y: player_pos.y,
+                });
             !solid_rock.intersects(&seg)
         };
 

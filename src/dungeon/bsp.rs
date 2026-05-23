@@ -331,4 +331,107 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_interior_positions_degenerate_range_returns_empty() {
+        // With PADDING on each side, a range of exactly 2*PADDING has no interior space.
+        assert_eq!(interior_positions((0.0, PADDING * 2.0), 1), vec![]);
+    }
+
+    #[test]
+    fn test_interior_positions_single_returns_midpoint() {
+        // Range (0, 100), PADDING=10 → interior [10, 90], single position at midpoint 50.
+        let result = interior_positions((0.0, 100.0), 1);
+        assert_eq!(result.len(), 1);
+        assert!((result[0] - 50.0).abs() < 0.001, "expected 50.0, got {}", result[0]);
+    }
+
+    #[test]
+    fn test_interior_positions_count_matches() {
+        for count in 1..=5 {
+            let result = interior_positions((0.0, 300.0), count);
+            assert_eq!(result.len(), count, "expected {} positions, got {}", count, result.len());
+        }
+    }
+
+    #[test]
+    fn test_interior_positions_strictly_inside_range() {
+        let result = interior_positions((0.0, 200.0), 4);
+        let min = 0.0 + PADDING;
+        let max = 200.0 - PADDING;
+        for &pos in &result {
+            assert!(
+                pos > min && pos < max,
+                "position {} is outside interior [{}, {}]",
+                pos,
+                min,
+                max
+            );
+        }
+    }
+
+    #[test]
+    fn test_interior_positions_evenly_spaced() {
+        let result = interior_positions((0.0, 100.0), 3);
+        assert_eq!(result.len(), 3);
+        let gap_01 = result[1] - result[0];
+        let gap_12 = result[2] - result[1];
+        assert!((gap_01 - gap_12).abs() < 0.001, "gaps unequal: {} vs {}", gap_01, gap_12);
+    }
+
+    #[test]
+    fn test_allocate_coords_filters_to_range() {
+        let coords = vec![10.0, 20.0, 30.0, 40.0, 50.0];
+        let result = allocate_coords(&coords, (20.0, 40.0));
+        assert_eq!(result, vec![20.0, 30.0]);
+    }
+
+    #[test]
+    fn test_allocate_coords_excludes_upper_bound() {
+        // Upper bound is exclusive: coord < range.1
+        let result = allocate_coords(&[10.0, 40.0], (10.0, 40.0));
+        assert_eq!(result, vec![10.0]);
+    }
+
+    #[test]
+    fn test_allocate_coords_empty_input() {
+        assert!(allocate_coords(&[], (0.0, 100.0)).is_empty());
+    }
+
+    #[test]
+    fn test_internal_connection_count_below_uncertain_is_one() {
+        let mut rng = rand::thread_rng();
+        // Any length below DOUBLE_CONNECTION_UNCERTAIN.start (500.0) always yields 1.
+        for _ in 0..20 {
+            assert_eq!(
+                internal_connection_count(DOUBLE_CONNECTION_UNCERTAIN.start - 1.0, &mut rng),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn test_internal_connection_count_above_uncertain_is_two() {
+        let mut rng = rand::thread_rng();
+        // Any length at or above DOUBLE_CONNECTION_UNCERTAIN.end (750.0) always yields 2.
+        for _ in 0..20 {
+            assert_eq!(internal_connection_count(DOUBLE_CONNECTION_UNCERTAIN.end, &mut rng), 2);
+        }
+    }
+
+    #[test]
+    fn test_internal_connection_count_uncertain_range_gives_both() {
+        use rand::{SeedableRng, rngs::StdRng};
+        let mut rng = StdRng::seed_from_u64(0);
+        let mid = (DOUBLE_CONNECTION_UNCERTAIN.start + DOUBLE_CONNECTION_UNCERTAIN.end) / 2.0;
+        let (mut saw_one, mut saw_two) = (false, false);
+        for _ in 0..200 {
+            match internal_connection_count(mid, &mut rng) {
+                1 => saw_one = true,
+                2 => saw_two = true,
+                n => panic!("unexpected count {}", n),
+            }
+        }
+        assert!(saw_one && saw_two, "expected both 1 and 2 in uncertain range");
+    }
 }

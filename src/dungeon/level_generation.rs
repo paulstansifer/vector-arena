@@ -524,6 +524,7 @@ fn rect_for_segment(a: (f32, f32), b: (f32, f32), width: f32) -> geo::Polygon<f3
 #[cfg(test)]
 mod tests {
     use super::*;
+    use geo::BoundingRect;
 
     #[test]
     fn partition_space_large_space_has_multiple_partitions_and_connections() {
@@ -547,5 +548,120 @@ mod tests {
             connection_total,
             partitions.len(),
         );
+    }
+
+    fn large_partition() -> Partition {
+        Partition {
+            x: (100.0, 500.0),
+            y: (100.0, 400.0),
+            horz_conn: (vec![], vec![]),
+            vert_conn: (vec![], vec![]),
+        }
+    }
+
+    #[test]
+    fn test_shrink_room_large_partition_has_padding() {
+        let p = large_partition();
+        let room = shrink_room(&p);
+        assert!(room.min().x >= p.x.0 + PADDING - f32::EPSILON);
+        assert!(room.min().y >= p.y.0 + PADDING - f32::EPSILON);
+        assert!(room.max().x <= p.x.1 - PADDING + f32::EPSILON);
+        assert!(room.max().y <= p.y.1 - PADDING + f32::EPSILON);
+    }
+
+    #[test]
+    fn test_shrink_room_minimum_size_on_tiny_partition() {
+        // Partition too small to fit padding — room must still meet MIN_ROOM_SIZE.
+        let p = Partition {
+            x: (0.0, 20.0),
+            y: (0.0, 20.0),
+            horz_conn: (vec![], vec![]),
+            vert_conn: (vec![], vec![]),
+        };
+        let room = shrink_room(&p);
+        assert!(room.width() >= MIN_ROOM_SIZE - f32::EPSILON);
+        assert!(room.height() >= MIN_ROOM_SIZE - f32::EPSILON);
+    }
+
+    #[test]
+    fn test_partition_connections_left_side() {
+        let p = Partition {
+            x: (100.0, 300.0),
+            y: (200.0, 400.0),
+            horz_conn: (vec![250.0], vec![]),
+            vert_conn: (vec![], vec![]),
+        };
+        let conns = partition_connections(&p);
+        assert_eq!(conns.len(), 1);
+        assert_eq!(conns[0].x, 100.0);
+        assert_eq!(conns[0].y, 250.0);
+        assert!(matches!(conns[0].side, ConnectionSide::Left));
+    }
+
+    #[test]
+    fn test_partition_connections_all_sides() {
+        let p = Partition {
+            x: (100.0, 300.0),
+            y: (200.0, 400.0),
+            horz_conn: (vec![250.0], vec![350.0]),
+            vert_conn: (vec![150.0], vec![200.0]),
+        };
+        assert_eq!(partition_connections(&p).len(), 4);
+    }
+
+    #[test]
+    fn test_rect_for_segment_vertical() {
+        // Vertical segment (same x): result rect spans the y range, width = corridor width.
+        let poly = rect_for_segment((50.0, 100.0), (50.0, 200.0), 40.0);
+        let bbox = poly.bounding_rect().unwrap();
+        assert!((bbox.width() - 40.0).abs() < f32::EPSILON);
+        assert!((bbox.height() - 100.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_rect_for_segment_horizontal() {
+        // Horizontal segment (same y): result rect spans the x range, height = corridor width.
+        let poly = rect_for_segment((0.0, 75.0), (120.0, 75.0), 30.0);
+        let bbox = poly.bounding_rect().unwrap();
+        assert!((bbox.width() - 120.0).abs() < f32::EPSILON);
+        assert!((bbox.height() - 30.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_bevel_at_point_has_8_exterior_vertices() {
+        let poly = bevel_at_point((0.0, 0.0), 40.0);
+        // LineString is closed: first == last, so 9 coords for 8 distinct vertices.
+        assert_eq!(poly.exterior().0.len(), 9);
+    }
+
+    #[test]
+    fn test_bevel_at_point_all_vertices_within_radius() {
+        let width = 40.0;
+        let poly = bevel_at_point((10.0, 20.0), width);
+        for coord in &poly.exterior().0 {
+            let dx = coord.x - 10.0;
+            let dy = coord.y - 20.0;
+            let dist = (dx * dx + dy * dy).sqrt();
+            assert!(dist <= width, "vertex at distance {dist} exceeds width {width}");
+        }
+    }
+
+    #[test]
+    fn test_door_geometry_disp_corners_symmetric() {
+        let door = create_door(ConnectionSide::Left, (100.0, 200.0));
+        let corners = door.disp_corners();
+        assert_eq!(corners.len(), 4);
+        // Corners are centered at origin, so opposite corners should sum to zero.
+        assert!((corners[0] + corners[2]).length() < f32::EPSILON);
+        assert!((corners[1] + corners[3]).length() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_door_geometry_center_matches_phys_rect() {
+        let door = create_door(ConnectionSide::Right, (300.0, 150.0));
+        let c = door.center();
+        let rect_center = door.phys_rect.center();
+        assert!((c.x - rect_center.x).abs() < f32::EPSILON);
+        assert!((c.y - rect_center.y).abs() < f32::EPSILON);
     }
 }

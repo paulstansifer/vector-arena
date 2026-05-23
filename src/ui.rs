@@ -396,3 +396,64 @@ fn make_egui_tooltop(
             egui::Frame::popup(&ctx.style()).show(ui, add_contents);
         });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::prelude::Entity;
+
+    fn entity(n: u32) -> Entity { Entity::from_raw_u32(n).unwrap() }
+
+    #[test]
+    fn test_push_repeating_first_call_no_count() {
+        let mut log = MessageLog::default();
+        let e = entity(1);
+        log.push_repeating("hit", e, " for 5");
+        let msgs: Vec<&str> = log.iter().collect();
+        assert_eq!(msgs, vec!["hit for 5"]);
+    }
+
+    #[test]
+    fn test_push_repeating_second_call_shows_count() {
+        let mut log = MessageLog::default();
+        let e = entity(1);
+        log.push_repeating("hit", e, " for 5");
+        log.push_repeating("hit", e, " for 5");
+        let msgs: Vec<&str> = log.iter().collect();
+        assert_eq!(msgs, vec!["hit (2x) for 5"]);
+    }
+
+    #[test]
+    fn test_push_repeating_moves_entry_to_end() {
+        let mut log = MessageLog::default();
+        let e = entity(1);
+        log.push("first");
+        log.push_repeating("hit", e, "!");
+        log.push("middle");
+        log.push_repeating("hit", e, "!");
+        let msgs: Vec<&str> = log.iter().collect();
+        assert_eq!(msgs, vec!["first", "middle", "hit (2x)!"]);
+    }
+
+    #[test]
+    fn test_push_repeating_different_entities_not_collapsed() {
+        let mut log = MessageLog::default();
+        let e1 = entity(1);
+        let e2 = entity(2);
+        log.push_repeating("hit", e1, "!");
+        log.push_repeating("hit", e2, "!");
+        assert_eq!(log.iter().count(), 2);
+    }
+
+    #[test]
+    fn test_iter_skips_tombstones() {
+        let mut log = MessageLog::default();
+        let e = entity(1);
+        log.push("a");
+        log.push_repeating("x", e, "");
+        log.push("b");
+        log.push_repeating("x", e, ""); // creates tombstone at index 1
+        // "a", tombstone, "b", "x (2x)" → iter should yield 3 live entries
+        assert_eq!(log.iter().count(), 3);
+    }
+}
