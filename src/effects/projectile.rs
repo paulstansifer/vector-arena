@@ -10,8 +10,7 @@ use rand::Rng;
 use std::{collections::HashSet, time::Duration};
 
 use crate::{
-    AGENT_RADIUS, GameLayer, GameState,
-    fov,
+    AGENT_RADIUS, GameLayer, GameState, fov,
     item::{Item, ItemKind, item_display_name},
     monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
     player::{MoveTarget, Player},
@@ -292,7 +291,10 @@ pub fn apply_missile_knockback(
                                     Item(kind),
                                     WorldTooltip(item_display_name(kind).to_string()),
                                     Mesh2d(meshes.add(RegularPolygon::new(7.0, 3))),
-                                    MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.2, 0.85, 0.3)))),
+                                    MeshMaterial2d(
+                                        materials
+                                            .add(ColorMaterial::from(Color::srgb(0.2, 0.85, 0.3))),
+                                    ),
                                     Transform::from_translation(pos),
                                 ));
                             }
@@ -302,7 +304,10 @@ pub fn apply_missile_knockback(
                                     Item(kind),
                                     WorldTooltip(item_display_name(kind).to_string()),
                                     Mesh2d(meshes.add(Rectangle::new(12.0, 12.0))),
-                                    MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.8, 0.8, 0.75)))),
+                                    MeshMaterial2d(
+                                        materials
+                                            .add(ColorMaterial::from(Color::srgb(0.8, 0.8, 0.75))),
+                                    ),
                                     Transform::from_translation(pos),
                                 ));
                             }

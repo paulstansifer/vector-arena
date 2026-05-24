@@ -9,7 +9,7 @@ use geo::Contains;
 use crate::{
     DungeonDepth, GameState,
     fov::ExplorationState,
-    item::{Inventory, ItemKind, item_display_name},
+    item::{Inventory, ItemDialogKind, ItemKind, ItemUseDialog, item_display_name},
     player::Player,
 };
 
@@ -91,6 +91,7 @@ impl Plugin for UiPlugin {
 fn ui_system(
     mut contexts: EguiContexts,
     mut ui_state: ResMut<UiState>,
+    mut item_dialog: ResMut<ItemUseDialog>,
     player_query: Query<(&crate::monster::Stats, &Inventory, &Transform), With<Player>>,
     staircase_q: Query<&Transform, With<crate::Staircase>>,
     message_log: Res<MessageLog>,
@@ -254,6 +255,61 @@ fn ui_system(
 
     if do_descend {
         next_state.set(GameState::Descend);
+    }
+
+    // --- Item use dialog (quaff / read) ---
+    if let Some(dialog_kind) = item_dialog.open {
+        let title = match dialog_kind {
+            ItemDialogKind::Potions => "Quaff a Potion",
+            ItemDialogKind::Scrolls => "Read a Scroll",
+        };
+
+        let relevant_items: Vec<(ItemKind, usize)> = item_counts
+            .iter()
+            .filter(|(k, _)| match dialog_kind {
+                ItemDialogKind::Potions => matches!(k, ItemKind::Potion(_)),
+                ItemDialogKind::Scrolls => matches!(k, ItemKind::Scroll(_)),
+            })
+            .copied()
+            .collect();
+
+        let mut cancel_clicked = false;
+        let mut item_to_use: Option<ItemKind> = None;
+
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_min_width(200.0);
+
+                if relevant_items.is_empty() {
+                    ui.label("You have none.");
+                } else {
+                    for (item, count) in &relevant_items {
+                        ui.horizontal(|ui| {
+                            draw_item_icon(ui, *item, *count);
+                            let label = format!("{} (x{})", item_display_name(*item), count);
+                            if ui.button(label).clicked() {
+                                item_to_use = Some(*item);
+                            }
+                        });
+                    }
+                }
+
+                ui.add_space(4.0);
+                if ui.button("Cancel").clicked() {
+                    cancel_clicked = true;
+                }
+            });
+
+        if let Some(item) = item_to_use {
+            item_dialog.pending_use = Some(item);
+        }
+        if cancel_clicked {
+            item_dialog.open = None;
+            item_dialog.pending_use = None;
+        }
     }
 
     Ok(())

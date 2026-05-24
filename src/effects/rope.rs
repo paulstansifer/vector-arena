@@ -1,5 +1,5 @@
 // Drag-to-draw rope with segment physics.
-// Press R and drag to place a rope.  `spawn_rope` subdivides the line into
+// Press O and drag to place a rope.  `spawn_rope` subdivides the line into
 // SEGMENT_TARGET_LEN capsule segments connected by RevoluteJoints with slight
 // compliance, anchoring endpoints to whatever entity (or terrain) is within
 // 3 units.  Segments collide with Wall only.
@@ -52,11 +52,11 @@ fn handle_rope_drag(
     let (cam, cam_tf) = *camera;
     let Ok(world_pos) = cam.viewport_to_world_2d(cam_tf, cursor_pos) else { return };
 
-    if keyboard.just_pressed(KeyCode::KeyR) {
+    if keyboard.just_pressed(KeyCode::KeyO) {
         drag_state.start = Some(world_pos);
     }
 
-    if keyboard.just_released(KeyCode::KeyR) {
+    if keyboard.just_released(KeyCode::KeyO) {
         let Some(start) = drag_state.start.take() else { return };
         spawn_rope(
             &mut commands,

@@ -57,32 +57,31 @@ pub fn populate(
         Inventory::default(),
     ));
 
-    commands
-        .spawn((
-            DespawnOnExit(GameState::InLevel),
-            Player,
-            initial_inventory,
-            initial_stats,
-            Mesh2d(meshes.add(Circle::new(AGENT_RADIUS))),
-            MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
-            Transform::from_translation(player_position.extend(fov::MOVABLE_Z)),
-            RigidBody::Dynamic,
-            Collider::circle(AGENT_RADIUS),
-            ColliderDensity(8.0),
-            CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
-            LockedAxes::ROTATION_LOCKED,
-            MoveTarget::default(),
-            Agent2dBundle {
-                agent: Default::default(),
-                settings: AgentSettings {
-                    radius: AGENT_RADIUS,
-                    desired_speed: PLAYER_SPEED,
-                    max_speed: PLAYER_SPEED * 1.2,
-                },
-                archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
+    commands.spawn((
+        DespawnOnExit(GameState::InLevel),
+        Player,
+        initial_inventory,
+        initial_stats,
+        Mesh2d(meshes.add(Circle::new(AGENT_RADIUS))),
+        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
+        Transform::from_translation(player_position.extend(fov::MOVABLE_Z)),
+        RigidBody::Dynamic,
+        Collider::circle(AGENT_RADIUS),
+        ColliderDensity(8.0),
+        CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
+        LockedAxes::ROTATION_LOCKED,
+        MoveTarget::default(),
+        Agent2dBundle {
+            agent: Default::default(),
+            settings: AgentSettings {
+                radius: AGENT_RADIUS,
+                desired_speed: PLAYER_SPEED,
+                max_speed: PLAYER_SPEED * 1.2,
             },
-            AgentTarget2d::None,
-        ));
+            archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
+        },
+        AgentTarget2d::None,
+    ));
 
     let monster_mesh = meshes.add(Circle::new(AGENT_RADIUS));
 
@@ -109,31 +108,33 @@ pub fn populate(
     let monster_count = (depth as usize + 1).min(monster_positions.len());
     for position in monster_positions.into_iter().take(monster_count) {
         let drop = if rng.gen_bool(0.6) { all_item_kinds.choose(&mut rng).copied() } else { None };
-        let monster = commands.spawn((
-            DespawnOnExit(GameState::InLevel),
-            Monster,
-            MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
-            Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
-            WorldTooltip::default(),
-            MonsterShootTimer::new(),
-            Mesh2d(monster_mesh.clone()),
-            MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.85, 0.12, 0.12)))),
-            Transform::from_translation(position.extend(fov::MOVABLE_Z)),
-            RigidBody::Dynamic,
-            Collider::circle(AGENT_RADIUS),
-            CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
-            LockedAxes::ROTATION_LOCKED,
-            Agent2dBundle {
-                agent: Default::default(),
-                settings: AgentSettings {
-                    radius: AGENT_RADIUS,
-                    desired_speed: MONSTER_SPEED,
-                    max_speed: MONSTER_SPEED * 1.2,
+        let monster = commands
+            .spawn((
+                DespawnOnExit(GameState::InLevel),
+                Monster,
+                MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
+                Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
+                WorldTooltip::default(),
+                MonsterShootTimer::new(),
+                Mesh2d(monster_mesh.clone()),
+                MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.85, 0.12, 0.12)))),
+                Transform::from_translation(position.extend(fov::MOVABLE_Z)),
+                RigidBody::Dynamic,
+                Collider::circle(AGENT_RADIUS),
+                CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
+                LockedAxes::ROTATION_LOCKED,
+                Agent2dBundle {
+                    agent: Default::default(),
+                    settings: AgentSettings {
+                        radius: AGENT_RADIUS,
+                        desired_speed: MONSTER_SPEED,
+                        max_speed: MONSTER_SPEED * 1.2,
+                    },
+                    archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
                 },
-                archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
-            },
-            AgentTarget2d::None,
-        )).id();
+                AgentTarget2d::None,
+            ))
+            .id();
         if let Some(kind) = drop {
             commands.entity(monster).insert(MonsterDrop(kind));
         }
