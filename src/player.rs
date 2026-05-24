@@ -34,6 +34,15 @@ pub struct MoveTarget {
     pub time_set: Duration,
 }
 
+impl MoveTarget {
+    fn set(&mut self, destination: Vec2, origin: Vec2, now: Duration) {
+        self.destination = destination;
+        self.origin = origin;
+        self.active = true;
+        self.time_set = now;
+    }
+}
+
 fn lerp(start: f32, end: f32, t: f32) -> f32 { start + (end - start) * t }
 
 pub fn set_target_on_click(
@@ -85,20 +94,14 @@ pub fn set_target_on_click(
                 &known_blockers,
                 &dungeon_state.playable_area,
             ) {
-                move_target.destination = waypoint;
-                move_target.origin = current_position;
-                move_target.active = true;
-                move_target.time_set = time.elapsed();
+                move_target.set(waypoint, current_position, time.elapsed());
                 *agent_target = AgentTarget2d::Point(waypoint);
                 commands.entity(entity).insert(ExplorationGoal(goal_position));
             }
             // If no frontier waypoint exists, ignore the click.
         } else {
             // Normal click in explored territory: path directly.
-            move_target.destination = goal_position;
-            move_target.origin = current_position;
-            move_target.active = true;
-            move_target.time_set = time.elapsed();
+            move_target.set(goal_position, current_position, time.elapsed());
             *agent_target = AgentTarget2d::Point(goal_position);
             commands.entity(entity).remove::<ExplorationGoal>();
         }
@@ -132,10 +135,7 @@ pub fn advance_exploration(
 
     if !exploration_state.0.contains(&geo::Point::new(goal.x, goal.y)) {
         // Goal is now in explored territory — path directly to it.
-        move_target.destination = goal;
-        move_target.origin = current;
-        move_target.active = true;
-        move_target.time_set = time.elapsed();
+        move_target.set(goal, current, time.elapsed());
         *agent_target = AgentTarget2d::Point(goal);
         commands.entity(entity).remove::<ExplorationGoal>();
     } else {
@@ -147,10 +147,7 @@ pub fn advance_exploration(
             &dungeon_state.playable_area,
         ) {
             Some(waypoint) if waypoint.distance(current) > STOP_THRESHOLD => {
-                move_target.destination = waypoint;
-                move_target.origin = current;
-                move_target.active = true;
-                move_target.time_set = time.elapsed();
+                move_target.set(waypoint, current, time.elapsed());
                 *agent_target = AgentTarget2d::Point(waypoint);
             }
             // Waypoint is within stop threshold (already there) or None — give up.

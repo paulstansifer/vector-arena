@@ -20,6 +20,17 @@ use geo::{
 };
 use rand::Rng;
 
+/// Radius (world units) of the circle subtracted from solid rock per right-click.
+const EXCAVATION_RADIUS: f32 = 40.0;
+/// Polygon points used to approximate the excavation circle.
+const EXCAVATION_CIRCLE_POINTS: usize = 16;
+/// Rubble pieces larger than this (half of the bounding-box's longer side) keep getting sliced.
+const RUBBLE_MAX_RADIUS: f32 = 18.0;
+/// Rubble pieces narrower than this on their shorter axis are discarded as too-tiny shards.
+const RUBBLE_MIN_DIMENSION: f32 = 7.0;
+/// Inward buffer (world units) applied to each rubble piece — gives a gap and rounds corners.
+const RUBBLE_SHRINK: f32 = 4.0;
+
 #[derive(Component)]
 pub struct Rubble;
 
@@ -60,29 +71,29 @@ pub fn subtract_polygon_from_terrain(
     nav_meshes: &mut Assets<NavMesh2d>,
     rubble_material: &Handle<ColorMaterial>,
 ) {
-    // 1. Calculate the intersection of the input polygon and the current terrain walls
+    // Calculate the intersection of the input polygon and the current terrain walls
     let intersection = dungeon_state.solid_rock.intersection(input_polygon);
 
-    // 2. Subtract the input polygon from the terrain walls
+    // Subtract the input polygon from the terrain walls
     let new_terrain = dungeon_state.solid_rock.difference(input_polygon);
     dungeon_state.solid_rock = new_terrain.clone();
 
-    // 3. Expand the playable area by the intersection
+    // Expand the playable area by the intersection
     let new_playable_area = dungeon_state.playable_area.union(&intersection);
     dungeon_state.playable_area = new_playable_area.clone();
 
-    // 4. Update the terrain visual mesh Resource
+    // Update the terrain visual mesh Resource
     let new_mesh = geometry_to_mesh(&new_terrain);
     dungeon_visuals.0 = meshes.add(new_mesh);
 
-    // 5. Update the terrain collider Resource
+    // Update the terrain collider Resource
     dungeon_collider.0 = geometry_to_collider(&new_terrain);
 
-    // 6. Update the navmesh Resource
+    // Update the navmesh Resource
     let valid_nav_mesh = playable_area_to_nav_mesh(&new_playable_area);
     dungeon_nav_mesh.0 = nav_meshes.add(NavMesh2d { nav_mesh: valid_nav_mesh });
 
-    // 7. Break up the rubble before shrinking
+    // Break up the rubble before shrinking
     let mut rubble_polygons: Vec<Polygon<f32>> = intersection.iter().cloned().collect();
 
     loop {
@@ -100,8 +111,7 @@ pub fn subtract_polygon_from_terrain(
             }
         }
 
-        // If the largest radius is smaller than 18.0, we are done breaking up!
-        if largest_radius < 18.0 {
+        if largest_radius < RUBBLE_MAX_RADIUS {
             break;
         }
         let idx = match largest_idx {
@@ -161,23 +171,23 @@ pub fn subtract_polygon_from_terrain(
         }
     }
 
-    // 7. Delete any pieces whose smaller dimension is less than 7.0
+    // Discard slivers whose shorter dimension is too small to be visible rubble.
     rubble_polygons.retain(|poly| {
         if let Some(rect) = poly.bounding_rect() {
             let smaller_dim = rect.width().min(rect.height());
-            smaller_dim >= 7.0
+            smaller_dim >= RUBBLE_MIN_DIMENSION
         } else {
             false
         }
     });
 
-    // 8. Shrink the rubble pieces by 4.0 and round off sharp corners
+    // Shrink the rubble pieces and round off sharp corners.
     use geo::{
         algorithm::buffer::BufferStyle,
         buffer::{LineCap, LineJoin},
     };
 
-    let style = BufferStyle::new(-4.0)
+    let style = BufferStyle::new(-RUBBLE_SHRINK)
         .line_cap(LineCap::Round(PI / 4.0))
         .line_join(LineJoin::Round(PI / 4.0));
 
@@ -261,7 +271,8 @@ pub fn handle_right_click_excavation(
         };
 
     // Create a circular polygon approximating the excavation area
-    let input_polygon = create_circle_polygon(world_position, 40.0, 16);
+    let input_polygon =
+        create_circle_polygon(world_position, EXCAVATION_RADIUS, EXCAVATION_CIRCLE_POINTS);
     let input_multipolygon = MultiPolygon::new(vec![input_polygon]);
 
     for (entity, aabb) in &fragile_query {

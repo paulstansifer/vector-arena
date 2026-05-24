@@ -1,26 +1,24 @@
-// Magic missiles, trails, knockback, and bullet-time.
+// Magic missiles, trails, and knockback.
 // Missiles use the Missile physics layer (collides with Wall only); knockback
 // against Dynamic bodies is applied manually by querying overlaps rather than
-// via collision events.  `manage_time_scale` sets Time<Virtual> to 0.25× while
-// any missile exists and adjusts the fixed-timestep period to keep physics at
-// ~64 Hz real-time regardless of scale.
+// via collision events.  Global time dilation while missiles are in flight is
+// handled separately in `crate::time_scale`.
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use rand::Rng;
-use std::{collections::HashSet, time::Duration};
+use std::collections::HashSet;
 
 use crate::{
     AGENT_RADIUS, GameLayer, GameState, fov,
     item::{Item, ItemKind, item_display_name},
     monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
-    player::{MoveTarget, Player},
+    player::Player,
     ui::{MessageLog, WorldTooltip},
 };
 
 pub const MISSILE_SPEED: f32 = 3500.0;
 pub const MISSILE_MAX_DISTANCE: f32 = 1000.0;
 pub const MONSTER_FIRE_RANGE: f32 = 100.0;
-const TIME_SCALE_MISSILE: f32 = 0.5;
 const KNOCKBACK_SPEED: f32 = 600.0;
 const KNOCKBACK_COOLDOWN: f32 = 0.15; // virtual seconds; prevents double-hits per pass
 const MISSILE_DAMAGE: f32 = 5.0;
@@ -361,6 +359,15 @@ pub fn update_hit_flash(
     }
 }
 
+fn trail_color(fired_by_player: bool, is_glow: bool, alpha: f32) -> Color {
+    match (fired_by_player, is_glow) {
+        (true, false) => Color::srgba(0.6, 0.8, 1.0, alpha),
+        (true, true) => Color::srgba(0.3, 0.5, 1.0, alpha * 0.4),
+        (false, false) => Color::srgba(1.0, 0.6, 0.4, alpha),
+        (false, true) => Color::srgba(1.0, 0.3, 0.1, alpha * 0.4),
+    }
+}
+
 /// Returns the approximate bounce contact point if the missile's direction changed enough
 /// between last_pos/last_dir and current_pos/current_dir to indicate a wall bounce.
 /// Uses ray-ray intersection: the contact lies on both the forward ray from last_pos
@@ -406,11 +413,8 @@ fn spawn_trail_segment(
     let midpoint = from + delta * 0.5;
     let rotation = Quat::from_rotation_z(delta.y.atan2(delta.x));
 
-    let (core_color, glow_color) = if fired_by_player {
-        (Color::srgba(0.6, 0.8, 1.0, 1.0), Color::srgba(0.3, 0.5, 1.0, 0.4))
-    } else {
-        (Color::srgba(1.0, 0.6, 0.4, 1.0), Color::srgba(1.0, 0.3, 0.1, 0.4))
-    };
+    let core_color = trail_color(fired_by_player, false, 1.0);
+    let glow_color = trail_color(fired_by_player, true, 1.0);
 
     commands.spawn((
         DespawnOnExit(GameState::InLevel),
@@ -536,42 +540,10 @@ pub fn update_missile_trails(
 
         // Fade linearly from opaque to transparent over this segment's extra_lifetime.
         let fade = if trail.extra_lifetime > 0.0 { remaining / trail.extra_lifetime } else { 0.0 };
-        let color = match (trail.fired_by_player, trail.is_glow) {
-            (true, false) => Color::srgba(0.6, 0.8, 1.0, fade),
-            (true, true) => Color::srgba(0.3, 0.5, 1.0, fade * 0.4),
-            (false, false) => Color::srgba(1.0, 0.6, 0.4, fade),
-            (false, true) => Color::srgba(1.0, 0.3, 0.1, fade * 0.4),
-        };
+        let color = trail_color(trail.fired_by_player, trail.is_glow, fade);
         if let Some(mat) = materials.get_mut(&mat_handle.0) {
             mat.color = color;
         }
     }
 }
 
-/// TODO: move this to another file!
-/// Single source of truth for virtual time scale and physics step rate.
-/// Replaces the time-setting code that used to live in player.rs.
-pub fn manage_time_scale(
-    mut time: ResMut<Time<Virtual>>,
-    mut fixed_time: ResMut<Time<Fixed>>,
-    missile_query: Query<&MagicMissile>,
-    move_target: Single<&MoveTarget, With<Player>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-) {
-    let any_missile = missile_query.iter().next().is_some();
-    let spacebar_held = keyboard.pressed(KeyCode::Space);
-
-    if any_missile {
-        time.set_relative_speed(TIME_SCALE_MISSILE);
-        // Physics would normally slow down for the time dialation, but the magic missles are so fast
-        // that we need it to speed up in order for the bounces to work right.
-        fixed_time.set_timestep(Duration::from_secs_f64(1.0 / (256.0 / TIME_SCALE_MISSILE as f64)));
-    } else {
-        fixed_time.set_timestep(Duration::from_secs_f64(1.0 / 64.0));
-        if move_target.active || spacebar_held {
-            time.set_relative_speed(1.0);
-        } else {
-            time.set_relative_speed(0.0);
-        }
-    }
-}

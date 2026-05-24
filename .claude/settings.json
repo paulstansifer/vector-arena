@@ -10,7 +10,8 @@
       "Bash(rg *)",
       "Bash(ls *)",
       "Bash(head *)",
-      "Bash(tail *)"
+      "Bash(tail *)",
+      "Bash(cargo clippy *)"
     ],
     "additionalDirectories": [
       "/tmp"

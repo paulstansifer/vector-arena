@@ -4,27 +4,7 @@ use bevy_egui::input::egui_wants_any_pointer_input;
 use bevy_landmass::{NavMeshHandle, prelude::*};
 
 use vector_arena::{
-    AGENT_RADIUS, DungeonDepth, GameState, WorldBounds,
-    effects::{projectile, rope},
-    fov, item,
-    monster::{self, Stats},
-    nav, player,
-    ui::{self, enable_ui_input_absorption},
-};
-
-use fov::OpaqueVertices;
-use item::{
-    Inventory, ItemUseDialog, animate_pickup, apply_item_use, open_item_dialog, pickup_items,
-};
-use player::{Player, advance_exploration, move_player, set_target_on_click};
-use projectile::{
-    apply_missile_knockback, init_trail_meshes, manage_time_scale, monster_fire_missiles,
-    player_fire_missile, spawn_missile_trails, tick_knockback_cooldowns, update_hit_flash,
-    update_missile_trails, update_missiles,
-};
-use ui::{MessageLog, UiPlugin};
-use vector_arena::{
-    GameLayer,
+    AGENT_RADIUS, DungeonDepth, GameLayer, GameState, WorldBounds,
     dungeon::{
         level_generation::TerrainGeometry,
         terrain::{
@@ -32,9 +12,25 @@ use vector_arena::{
             geometry_to_mesh, sync_dungeon_to_entities,
         },
     },
-    effects::crumble_terrain::{Fragile, handle_right_click_excavation},
-    nav::{DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
+    effects::{
+        crumble_terrain::{Fragile, handle_right_click_excavation},
+        projectile::{
+            apply_missile_knockback, init_trail_meshes, monster_fire_missiles,
+            player_fire_missile, spawn_missile_trails, tick_knockback_cooldowns,
+            update_hit_flash, update_missile_trails, update_missiles,
+        },
+        rope,
+    },
+    fov::{self, OpaqueVertices},
+    item::{
+        Inventory, ItemUseDialog, animate_pickup, apply_item_use, open_item_dialog, pickup_items,
+    },
+    monster::{self, Stats},
+    nav::{self, DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
+    player::{Player, advance_exploration, move_player, set_target_on_click},
     populate_level,
+    time_scale::manage_time_scale,
+    ui::{MessageLog, UiPlugin, enable_ui_input_absorption},
 };
 
 #[derive(Resource, Default)]

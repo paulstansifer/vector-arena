@@ -111,15 +111,60 @@ fn ui_system(
         return Ok(());
     };
 
-    let messages_expanded = ui_state.messages_expanded;
-    let menu_open = ui_state.menu_open;
+    if render_message_bar(ctx, &message_log, ui_state.messages_expanded) {
+        ui_state.messages_expanded = !ui_state.messages_expanded;
+    }
 
-    // --- Top bar: most-recent message; full-width click expands log ---
-    let top_clicked = egui::TopBottomPanel::top("message_bar")
+    let item_counts = collect_item_counts(inventory);
+
+    let near_staircase = if let Ok(stair_tf) = staircase_q.single() {
+        player_tf.translation.truncate().distance(stair_tf.translation.truncate()) < 20.0
+    } else {
+        false
+    };
+
+    let hud = render_hud(ctx, stats, &item_counts, depth.0, near_staircase);
+    if hud.toggle_menu {
+        ui_state.menu_open = !ui_state.menu_open;
+    }
+    if hud.descend {
+        next_state.set(GameState::Descend);
+    }
+
+    if ui_state.menu_open {
+        let menu = render_menu(ctx);
+        if menu.close {
+            ui_state.menu_open = false;
+        }
+        if menu.quit {
+            app_exit.write(AppExit::Success);
+        }
+        if menu.restart {
+            next_state.set(GameState::Restart);
+            ui_state.menu_open = false;
+        }
+    }
+
+    if let Some(dialog_kind) = item_dialog.open {
+        let result = render_item_dialog(ctx, dialog_kind, &item_counts);
+        if let Some(item) = result.use_item {
+            item_dialog.pending_use = Some(item);
+        }
+        if result.cancel {
+            item_dialog.open = None;
+            item_dialog.pending_use = None;
+        }
+    }
+
+    Ok(())
+}
+
+/// Top bar: latest message with optional expanded log. Returns true if the row was clicked.
+fn render_message_bar(ctx: &egui::Context, log: &MessageLog, expanded: bool) -> bool {
+    egui::TopBottomPanel::top("message_bar")
         .show(ctx, |ui| {
-            let latest = message_log.iter().next_back().unwrap_or("—");
+            let latest = log.iter().next_back().unwrap_or("—");
 
-            // Full-width clickable row for the summary line.
             let row_height = ui.spacing().interact_size.y;
             let (rect, response) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width(), row_height),
@@ -133,13 +178,12 @@ fn ui_system(
                 ui.visuals().text_color(),
             );
 
-            // Expanded log: chronological order, newest at the bottom.
-            if messages_expanded {
+            if expanded {
                 egui::ScrollArea::vertical().max_height(200.0).stick_to_bottom(true).show(
                     ui,
                     |ui| {
                         ui.set_min_width(ui.available_width());
-                        for msg in message_log.iter() {
+                        for msg in log.iter() {
                             ui.label(msg);
                         }
                     },
@@ -148,171 +192,159 @@ fn ui_system(
 
             response.clicked()
         })
-        .inner;
+        .inner
+}
 
-    if top_clicked {
-        ui_state.messages_expanded = !messages_expanded;
-    }
-
-    // Pre-compute inventory counts outside the closure.
-    let mut item_counts: Vec<(ItemKind, usize)> = Vec::new();
+fn collect_item_counts(inventory: &Inventory) -> Vec<(ItemKind, usize)> {
+    let mut counts: Vec<(ItemKind, usize)> = Vec::new();
     for &item in &inventory.0 {
-        if let Some(entry) = item_counts.iter_mut().find(|(k, _)| *k == item) {
+        if let Some(entry) = counts.iter_mut().find(|(k, _)| *k == item) {
             entry.1 += 1;
         } else {
-            item_counts.push((item, 1));
+            counts.push((item, 1));
         }
     }
+    counts
+}
 
-    let (hp, max_hp, mana, max_mana) = (stats.hp, stats.max_hp, stats.mana, stats.max_mana);
+#[derive(Default)]
+struct HudActions {
+    toggle_menu: bool,
+    descend: bool,
+}
 
-    let near_staircase = if let Ok(stair_tf) = staircase_q.single() {
-        player_tf.translation.truncate().distance(stair_tf.translation.truncate()) < 20.0
-    } else {
-        false
-    };
-
-    // --- Bottom bar: HP/mana bars, inventory icons, hamburger ---
-    let mut toggle_menu = false;
-    let mut do_descend = false;
+/// Bottom bar: HP/MP bars, inventory icons, depth, descend button, hamburger.
+fn render_hud(
+    ctx: &egui::Context,
+    stats: &crate::monster::Stats,
+    item_counts: &[(ItemKind, usize)],
+    depth: u32,
+    near_staircase: bool,
+) -> HudActions {
+    let mut actions = HudActions::default();
     egui::TopBottomPanel::bottom("hud").show(ctx, |ui| {
         ui.horizontal(|ui| {
             draw_stat_bar(
                 ui,
-                hp / max_hp,
+                stats.hp / stats.max_hp,
                 egui::Color32::from_rgb(180, 40, 40),
-                &format!("HP {}/{}", hp as i32, max_hp as i32),
+                &format!("HP {}/{}", stats.hp as i32, stats.max_hp as i32),
             );
 
             ui.separator();
 
             draw_stat_bar(
                 ui,
-                mana / max_mana,
+                stats.mana / stats.max_mana,
                 egui::Color32::from_rgb(40, 80, 200),
-                &format!("MP {}/{}", mana as i32, max_mana as i32),
+                &format!("MP {}/{}", stats.mana as i32, stats.max_mana as i32),
             );
 
             ui.separator();
 
-            for (item, count) in &item_counts {
+            for (item, count) in item_counts {
                 draw_item_icon(ui, *item, *count);
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("☰").clicked() {
-                    toggle_menu = true;
+                    actions.toggle_menu = true;
                 }
                 ui.separator();
-                ui.label(format!("Depth {}", depth.0));
+                ui.label(format!("Depth {}", depth));
                 ui.separator();
                 if ui.add_visible(near_staircase, egui::Button::new("Descend")).clicked() {
-                    do_descend = true;
+                    actions.descend = true;
                 }
             });
         });
     });
+    actions
+}
 
-    if toggle_menu {
-        ui_state.menu_open = !menu_open;
-    }
+#[derive(Default)]
+struct MenuActions {
+    close: bool,
+    quit: bool,
+    restart: bool,
+}
 
-    // --- Game menu modal ---
-    let mut close_menu = false;
-    let mut quit = false;
-    let mut restart = false;
-    if menu_open {
-        egui::Window::new("Menu")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.set_min_width(120.0);
-                if ui.button("Restart").clicked() {
-                    restart = true;
+fn render_menu(ctx: &egui::Context) -> MenuActions {
+    let mut actions = MenuActions::default();
+    egui::Window::new("Menu")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(120.0);
+            if ui.button("Restart").clicked() {
+                actions.restart = true;
+            }
+            ui.add_space(4.0);
+            if ui.button("Quit").clicked() {
+                actions.quit = true;
+            }
+            ui.add_space(4.0);
+            if ui.button("Close").clicked() {
+                actions.close = true;
+            }
+        });
+    actions
+}
+
+#[derive(Default)]
+struct ItemDialogResult {
+    cancel: bool,
+    use_item: Option<ItemKind>,
+}
+
+fn render_item_dialog(
+    ctx: &egui::Context,
+    dialog_kind: ItemDialogKind,
+    item_counts: &[(ItemKind, usize)],
+) -> ItemDialogResult {
+    let title = match dialog_kind {
+        ItemDialogKind::Potions => "Quaff a Potion",
+        ItemDialogKind::Scrolls => "Read a Scroll",
+    };
+
+    let relevant_items: Vec<(ItemKind, usize)> = item_counts
+        .iter()
+        .filter(|(k, _)| match dialog_kind {
+            ItemDialogKind::Potions => matches!(k, ItemKind::Potion(_)),
+            ItemDialogKind::Scrolls => matches!(k, ItemKind::Scroll(_)),
+        })
+        .copied()
+        .collect();
+
+    let mut result = ItemDialogResult::default();
+    egui::Window::new(title)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(200.0);
+
+            if relevant_items.is_empty() {
+                ui.label("You have none.");
+            } else {
+                for (item, count) in &relevant_items {
+                    ui.horizontal(|ui| {
+                        draw_item_icon(ui, *item, *count);
+                        let label = format!("{} (x{})", item_display_name(*item), count);
+                        if ui.button(label).clicked() {
+                            result.use_item = Some(*item);
+                        }
+                    });
                 }
-                ui.add_space(4.0);
-                if ui.button("Quit").clicked() {
-                    quit = true;
-                }
-                ui.add_space(4.0);
-                if ui.button("Close").clicked() {
-                    close_menu = true;
-                }
-            });
-    }
+            }
 
-    if close_menu {
-        ui_state.menu_open = false;
-    }
-    if quit {
-        app_exit.write(AppExit::Success);
-    }
-    if restart {
-        next_state.set(GameState::Restart);
-        ui_state.menu_open = false;
-    }
-
-    if do_descend {
-        next_state.set(GameState::Descend);
-    }
-
-    // --- Item use dialog (quaff / read) ---
-    if let Some(dialog_kind) = item_dialog.open {
-        let title = match dialog_kind {
-            ItemDialogKind::Potions => "Quaff a Potion",
-            ItemDialogKind::Scrolls => "Read a Scroll",
-        };
-
-        let relevant_items: Vec<(ItemKind, usize)> = item_counts
-            .iter()
-            .filter(|(k, _)| match dialog_kind {
-                ItemDialogKind::Potions => matches!(k, ItemKind::Potion(_)),
-                ItemDialogKind::Scrolls => matches!(k, ItemKind::Scroll(_)),
-            })
-            .copied()
-            .collect();
-
-        let mut cancel_clicked = false;
-        let mut item_to_use: Option<ItemKind> = None;
-
-        egui::Window::new(title)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.set_min_width(200.0);
-
-                if relevant_items.is_empty() {
-                    ui.label("You have none.");
-                } else {
-                    for (item, count) in &relevant_items {
-                        ui.horizontal(|ui| {
-                            draw_item_icon(ui, *item, *count);
-                            let label = format!("{} (x{})", item_display_name(*item), count);
-                            if ui.button(label).clicked() {
-                                item_to_use = Some(*item);
-                            }
-                        });
-                    }
-                }
-
-                ui.add_space(4.0);
-                if ui.button("Cancel").clicked() {
-                    cancel_clicked = true;
-                }
-            });
-
-        if let Some(item) = item_to_use {
-            item_dialog.pending_use = Some(item);
-        }
-        if cancel_clicked {
-            item_dialog.open = None;
-            item_dialog.pending_use = None;
-        }
-    }
-
-    Ok(())
+            ui.add_space(4.0);
+            if ui.button("Cancel").clicked() {
+                result.cancel = true;
+            }
+        });
+    result
 }
 
 fn draw_stat_bar(ui: &mut egui::Ui, ratio: f32, color: egui::Color32, label: &str) {
@@ -425,7 +457,7 @@ fn show_world_entity_tooltip(
             }
         }
         if pos.distance(world_pos) < hover_distance {
-            make_egui_tooltop(ctx, egui::Id::new("world_tooltip"), mouse_pos, |ui| {
+            make_egui_tooltip(ctx, egui::Id::new("world_tooltip"), mouse_pos, |ui| {
                 ui.label(&tooltip.0);
             });
             return Ok(());
@@ -435,7 +467,7 @@ fn show_world_entity_tooltip(
     Ok(())
 }
 
-fn make_egui_tooltop(
+fn make_egui_tooltip(
     ctx: &egui::Context,
     id: egui::Id,
     cursor_pos: Vec2,

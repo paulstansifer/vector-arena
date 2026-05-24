@@ -7,6 +7,7 @@ pub mod monster;
 pub mod nav;
 pub mod player;
 pub mod populate_level;
+pub mod time_scale;
 pub mod ui;
 
 // TODO: move all these things out!
