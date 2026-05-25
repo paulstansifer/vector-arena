@@ -38,30 +38,23 @@ pub fn geometry_to_mesh(geometry: &MultiPolygon<f32>) -> Mesh {
     mesh
 }
 
-/// Convert the terrain geometry to a Rapier2D polyline collider.
+/// Convert the terrain geometry to a solid triangle-mesh collider.
 pub fn geometry_to_collider(geometry: &MultiPolygon<f32>) -> Collider {
-    let mut vertices: Vec<Vec2> = Vec::new();
-    let mut indices = Vec::new();
+    let mut shapes = Vec::new();
 
     for polygon in geometry.iter() {
-        for ring in polygon.rings() {
-            let start_index = vertices.len() as u32;
-            let coords: Vec<_> = ring.coords().collect();
-            // geo rings are closed: the last coordinate is a duplicate of the first.
-            // Skip it so we don't add a zero-length degenerate edge at the seam.
-            let n = coords.len().saturating_sub(1);
-            for coord in &coords[..n] {
-                vertices.push(Vec2::new(coord.x, coord.y));
-            }
-            let num_vertices = n as u32;
-            for i in 0..num_vertices {
-                let next = (i + 1) % num_vertices;
-                indices.push([start_index + i, start_index + next]);
-            }
+        let triangulation = polygon
+            .constrained_triangulation(DelaunayTriangulationConfig::default())
+            .expect("generating terrain collider");
+        for triangle in &triangulation {
+            let a = Vec2::new(triangle.v1().x, triangle.v1().y);
+            let b = Vec2::new(triangle.v2().x, triangle.v2().y);
+            let c = Vec2::new(triangle.v3().x, triangle.v3().y);
+            shapes.push((Vec2::ZERO, 0.0_f32, Collider::triangle(a, b, c)));
         }
     }
 
-    Collider::polyline(vertices, Some(indices))
+    Collider::compound(shapes)
 }
 
 #[derive(Component)]
