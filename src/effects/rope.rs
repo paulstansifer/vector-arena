@@ -1,15 +1,19 @@
 // Drag-to-draw rope with segment physics.
-// Press O and drag to place a rope.  `spawn_rope` subdivides the line into
-// SEGMENT_TARGET_LEN capsule segments connected by RevoluteJoints with slight
-// compliance, anchoring endpoints to whatever entity (or terrain) is within
-// 3 units.  Segments collide with Wall only.
+// Press O once to mark the start, once more to mark the end.  `spawn_rope` subdivides
+// the line into SEGMENT_TARGET_LEN capsule segments connected by RevoluteJoints.
+// Endpoints are anchored to the nearest collider surface within ANCHOR_RADIUS units;
+// `project_point` is used so clicking anywhere inside solid rock finds the wall edge.
 use avian2d::prelude::*;
 use bevy::prelude::*;
 
 use crate::{GameLayer, GameState, fov::MOVABLE_Z};
 
 const SEGMENT_TARGET_LEN: f32 = 10.0;
-const ROPE_RADIUS: f32 = 1.0;
+const ROPE_RADIUS: f32 = 2.5;
+const ROPE_VISUAL_RADIUS: f32 = 1.0;
+// How far from any collider surface a click can be and still anchor.
+// Generous so clicking anywhere inside thick solid rock works.
+const ANCHOR_RADIUS: f32 = 60.0;
 // Small but visible compliance: joints stretch a few pixels under load.
 const ROPE_COMPLIANCE: f32 = 0.0002 * 0.0001;
 // cos(~14°): adjacent free segments must be this close to collinear to count as taut.
@@ -53,20 +57,20 @@ fn handle_rope_drag(
     let Ok(world_pos) = cam.viewport_to_world_2d(cam_tf, cursor_pos) else { return };
 
     if keyboard.just_pressed(KeyCode::KeyO) {
-        drag_state.start = Some(world_pos);
-    }
-
-    if keyboard.just_released(KeyCode::KeyO) {
-        let Some(start) = drag_state.start.take() else { return };
-        spawn_rope(
-            &mut commands,
-            start,
-            world_pos,
-            &spatial_query,
-            &anchor_query,
-            &mut meshes,
-            &mut materials,
-        );
+        if drag_state.start.is_none() {
+            drag_state.start = Some(world_pos);
+        } else {
+            let start = drag_state.start.take().unwrap();
+            spawn_rope(
+                &mut commands,
+                start,
+                world_pos,
+                &spatial_query,
+                &anchor_query,
+                &mut meshes,
+                &mut materials,
+            );
+        }
     }
 }
 
@@ -93,7 +97,7 @@ fn spawn_rope(
     let angle = dir.y.atan2(dir.x);
 
     // Overlap a little bit so the rope doesn't become a dashed line.
-    let seg_mesh = meshes.add(Rectangle::new(spacing * 1.1, ROPE_RADIUS * 2.0));
+    let seg_mesh = meshes.add(Rectangle::new(spacing * 1.1, ROPE_VISUAL_RADIUS * 2.0));
     let seg_mat = materials.add(Color::srgb(0.65, 0.45, 0.25));
 
     let mut segments = Vec::with_capacity(n);
@@ -120,10 +124,17 @@ fn spawn_rope(
                 // Don't bounce:
                 Restitution { coefficient: 0.0, combine_rule: CoefficientCombine::Min },
                 Mass(0.5),
+                // SweptCcd::default(),  // TODO: not enough to fix everything yet
             ))
             .id();
         segments.push(seg);
     }
+
+    // The joint attaches at each segment's physical tip: half_inner (hemisphere centre)
+    // + ROPE_RADIUS (hemisphere radius) = spacing/2.  This places the joint exactly
+    // where adjacent capsules are touching in their spawn layout, so there is zero
+    // initial constraint violation and the rope doesn't snap on the first frame.
+    let tip = spacing / 2.0;
 
     // Hinge joints between adjacent segments, with compliance for elasticity.
     for i in 0..n - 1 {
@@ -131,52 +142,58 @@ fn spawn_rope(
         commands.spawn((
             DespawnOnExit(GameState::InLevel),
             RevoluteJoint::new(a, b)
-                .with_local_anchor1(Vec2::new(half_inner, 0.0))
-                .with_local_anchor2(Vec2::new(-half_inner, 0.0))
+                .with_local_anchor1(Vec2::new(tip, 0.0))
+                .with_local_anchor2(Vec2::new(-tip, 0.0))
                 .with_point_compliance(ROPE_COMPLIANCE),
             // TODO: This needs more tuning to make the rope less jiggly.
             JointDamping { linear: 15.0, angular: 10.0 },
         ));
     }
 
-    // TODO: anchoring to terrain doesn't actually work
-
     // Pin the start of the rope to whatever is at the drag origin.
-    if let Some(anchor) = find_anchor(spatial_query, start) {
-        let local = world_to_local(anchor, start, anchor_query);
+    if let Some((anchor, anchor_pos)) = find_anchor(spatial_query, start) {
+        let local = world_to_local(anchor, anchor_pos, anchor_query);
         commands.spawn((
             DespawnOnExit(GameState::InLevel),
             RevoluteJoint::new(anchor, segments[0])
                 .with_local_anchor1(local)
-                .with_local_anchor2(Vec2::new(-half_inner, 0.0)),
+                .with_local_anchor2(Vec2::new(-tip, 0.0)),
         ));
+        // Wall collision would eject the segment while the joint tries to hold it.
+        commands
+            .entity(segments[0])
+            .insert(CollisionLayers::new(GameLayer::Rope, [GameLayer::Rope; 0]));
     }
 
     // Pin the end.
-    if let Some(anchor) = find_anchor(spatial_query, end) {
-        let local = world_to_local(anchor, end, anchor_query);
+    if let Some((anchor, anchor_pos)) = find_anchor(spatial_query, end) {
+        let local = world_to_local(anchor, anchor_pos, anchor_query);
         let last = *segments.last().unwrap();
         commands.spawn((
             DespawnOnExit(GameState::InLevel),
             RevoluteJoint::new(anchor, last)
                 .with_local_anchor1(local)
-                .with_local_anchor2(Vec2::new(half_inner, 0.0)),
+                .with_local_anchor2(Vec2::new(tip, 0.0)),
         ));
+        commands.entity(last).insert(CollisionLayers::new(GameLayer::Rope, [GameLayer::Rope; 0]));
     }
 
     commands.spawn(Rope { segments });
 }
 
-fn find_anchor(spatial_query: &SpatialQuery, pos: Vec2) -> Option<Entity> {
-    spatial_query
-        .shape_intersections(
-            &Collider::circle(3.0),
-            pos,
-            0.0,
-            &SpatialQueryFilter::from_mask([GameLayer::Wall, GameLayer::Dynamic]),
-        )
-        .first()
-        .copied()
+// Returns the nearest collider entity and the projected surface point.
+// Uses project_point so a click anywhere inside solid rock (whose collider is a polyline
+// boundary, not a filled shape) still finds the wall and snaps to its surface.
+fn find_anchor(spatial_query: &SpatialQuery, pos: Vec2) -> Option<(Entity, Vec2)> {
+    let filter = SpatialQueryFilter::from_mask([GameLayer::Wall, GameLayer::Dynamic]);
+    let proj = spatial_query.project_point(pos, false, &filter)?;
+    // is_inside is true for solid bodies; for polyline terrain it's always false,
+    // so fall back to a distance check generous enough to cover thick rock walls.
+    if proj.is_inside || proj.point.distance(pos) <= ANCHOR_RADIUS {
+        Some((proj.entity, proj.point))
+    } else {
+        None
+    }
 }
 
 fn world_to_local(
@@ -188,6 +205,207 @@ fn world_to_local(
         .get(entity)
         .map(|gtf| gtf.affine().inverse().transform_point3(world_pos.extend(0.0)).truncate())
         .unwrap_or(world_pos)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SEGMENT_TARGET_LEN;
+    use crate::GameLayer;
+    use avian2d::prelude::*;
+    use bevy::prelude::*;
+    use std::time::Duration;
+
+    fn physics_app(gravity: Vec2) -> App {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            TransformPlugin,
+            AssetPlugin::default(),
+            bevy::scene::ScenePlugin,
+            PhysicsPlugins::default(),
+        ))
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+            1.0 / 60.0,
+        )))
+        .insert_resource(Time::<Virtual>::default())
+        .insert_resource(Gravity(gravity));
+        app.finish();
+        app
+    }
+
+    fn tick(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<Time<Virtual>>()
+            .advance_by(Duration::from_secs_f32(1.0 / 60.0));
+        app.update();
+    }
+
+    fn loc(app: &App, entity: Entity) -> Vec3 {
+        app.world().entity(entity).get::<Transform>().unwrap().translation
+    }
+
+    #[test]
+    fn rope_rests_on_rock_obstacle() {
+        use bevy::ecs::system::SystemState;
+
+        // Layout (Y up):
+        //
+        //   anchor(0,0) ===== rope ===== ball(100,0)
+        //                    rock(50,-15)
+        //                    (top at Y=-10)
+        //
+        // Under gravity the rope should sag onto the rock.  If segments pass
+        // through the rock the midpoint will be well below -10.
+
+        const N: usize = 10; // 10 segments × SEGMENT_TARGET_LEN = 100 unit rope
+        const ROCK_X: f32 = 50.0;
+        const ROCK_Y: f32 = -15.0;
+        const ROCK_H: f32 = 10.0;
+        const ROCK_TOP: f32 = ROCK_Y + ROCK_H / 2.0; // -10.0
+
+        let mut app = physics_app(Vec2::new(0.0, -200.0));
+
+        // spawn_rope creates Mesh2d/MeshMaterial2d assets; register the types headlessly.
+        app.init_asset::<Mesh>();
+        app.init_asset::<ColorMaterial>();
+
+        // Static pin at rope start — needs a Wall-layer collider for find_anchor's project_point.
+        app.world_mut().spawn((
+            RigidBody::Static,
+            Collider::circle(3.0),
+            CollisionLayers::new(GameLayer::Wall, [
+                GameLayer::Wall,
+                GameLayer::Dynamic,
+                GameLayer::Rope,
+            ]),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        ));
+
+        // Rock obstacle the rope should sag onto.
+        app.world_mut().spawn((
+            RigidBody::Static,
+            Collider::rectangle(30.0, ROCK_H),
+            CollisionLayers::new(GameLayer::Wall, [
+                GameLayer::Wall,
+                GameLayer::Dynamic,
+                GameLayer::Rope,
+            ]),
+            Transform::from_xyz(ROCK_X, ROCK_Y, 0.0),
+        ));
+
+        // Ball anchors the rope end; Dynamic layer so find_anchor can locate it.
+        let ball = app
+            .world_mut()
+            .spawn((
+                RigidBody::Dynamic,
+                Collider::circle(3.0),
+                CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
+                LinearDamping(2.0),
+                AngularDamping(2.0),
+                Mass(1.0),
+                Transform::from_xyz(N as f32 * SEGMENT_TARGET_LEN, 0.0, 0.0),
+            ))
+            .id();
+
+        // Tick once to populate the physics broadphase so find_anchor's project_point works.
+        tick(&mut app);
+
+        // Call the real production spawn_rope via SystemState.
+        {
+            type Params<'w, 's> = (
+                Commands<'w, 's>,
+                SpatialQuery<'w, 's>,
+                Query<'w, 's, &'static GlobalTransform, With<RigidBody>>,
+                ResMut<'w, Assets<Mesh>>,
+                ResMut<'w, Assets<ColorMaterial>>,
+            );
+            let mut state: SystemState<Params> = SystemState::new(app.world_mut());
+            let (mut commands, spatial_query, anchor_query, mut meshes, mut materials) =
+                state.get_mut(app.world_mut());
+            super::spawn_rope(
+                &mut commands,
+                Vec2::ZERO,
+                Vec2::new(N as f32 * SEGMENT_TARGET_LEN, 0.0),
+                &spatial_query,
+                &anchor_query,
+                &mut meshes,
+                &mut materials,
+            );
+            state.apply(app.world_mut());
+        }
+
+        // find_anchor doesn't reliably locate dynamic bodies in a headless test (the
+        // broadphase may not expose them to project_point), so mirror the old test and
+        // explicitly join the ball to the last rope segment.
+        {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<(Entity, &Transform), With<super::RopeSegment>>();
+            let last_seg = q
+                .iter(app.world())
+                .max_by(|a, b| {
+                    a.1.translation.x.partial_cmp(&b.1.translation.x).unwrap()
+                })
+                .map(|(e, _)| e);
+            if let Some(last) = last_seg {
+                let tip = SEGMENT_TARGET_LEN / 2.0;
+                app.world_mut().spawn(
+                    RevoluteJoint::new(last, ball)
+                        .with_local_anchor1(Vec2::new(tip, 0.0))
+                        .with_local_anchor2(Vec2::ZERO),
+                );
+            }
+        }
+
+        for frame in 0..100u32 {
+            tick(&mut app);
+            if frame % 10 == 9 {
+                let mut q =
+                    app.world_mut().query_filtered::<&Transform, With<super::RopeSegment>>();
+                let positions: Vec<Vec3> = q.iter(app.world()).map(|t| t.translation).collect();
+                let mid_y = positions
+                    .iter()
+                    .min_by(|a, b| (a.x - ROCK_X).abs().partial_cmp(&(b.x - ROCK_X).abs()).unwrap())
+                    .map_or(f32::NEG_INFINITY, |p| p.y);
+                let b = loc(&app, ball);
+                let vel = app.world().entity(ball).get::<LinearVelocity>().unwrap().0;
+                println!(
+                    "  frame {:4}: ball=({:.1},{:.1}) vel={:.2?}  mid-rope y={:.1}",
+                    frame + 1,
+                    b.x,
+                    b.y,
+                    vel,
+                    mid_y,
+                );
+            }
+        }
+
+        let mut q = app.world_mut().query_filtered::<&Transform, With<super::RopeSegment>>();
+        let positions: Vec<Vec3> = q.iter(app.world()).map(|t| t.translation).collect();
+        let mid_y = positions
+            .iter()
+            .min_by(|a, b| (a.x - ROCK_X).abs().partial_cmp(&(b.x - ROCK_X).abs()).unwrap())
+            .map_or(f32::NEG_INFINITY, |p| p.y);
+        let vel = app.world().entity(ball).get::<LinearVelocity>().unwrap().0;
+        println!(
+            "Final: ball y={:.1} vel={:.2?}  mid-rope y={:.1}  rock top={:.1}",
+            loc(&app, ball).y,
+            vel,
+            mid_y,
+            ROCK_TOP,
+        );
+
+        assert!(
+            mid_y >= ROCK_TOP - 3.0,
+            "Rope passed through rock: mid-rope y={:.1} is below rock top {:.1}",
+            mid_y,
+            ROCK_TOP,
+        );
+
+        // The ball should have gone downward, but gotten stopped by the rope.
+        assert!(loc(&app, ball).y < -40.0);
+        assert!(loc(&app, ball).y >= -60.0);
+    }
 }
 
 // Making taut ropes "move up" and collide is cute, but may be unworkable:

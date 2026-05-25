@@ -1,14 +1,19 @@
-use avian2d::prelude::LinearVelocity;
+mod test_lib;
+use test_lib::{loc, physics_app, tick};
+
+use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::{prelude::*, rngs::StdRng};
 use std::time::Duration;
 use vector_arena::{
-    AGENT_RADIUS,
+    AGENT_RADIUS, GameLayer,
     dungeon::{
         bsp::Partition,
         level_generation::{PartitionRole, TerrainGeometry},
+        terrain::geometry_to_collider,
     },
+    monster::MONSTER_SPEED,
     nav::playable_area_to_nav_mesh,
     player::{MoveTarget, PLAYER_SPEED, Player, move_player},
 };
@@ -216,4 +221,175 @@ fn test_player_can_path_within_room_and_to_other_room() {
         }
     }
     assert!(reached, "Player failed to path find and reach the other room!");
+}
+
+/// Run a single body-vs-wall scenario and return the body's final Y position.
+///
+/// `polyline` controls whether the wall is a polyline (terrain-style) or a solid rectangle.
+/// `driven` controls whether the body's velocity is forcibly reset each frame toward the wall
+/// (as `apply_agent_velocity` does for monsters), or left to fall under gravity.
+fn body_final_y(polyline: bool, driven: bool) -> f32 {
+    // Rock: 30 wide, 20 tall, centred at (0, -30).  Top surface at y = -20.
+    const ROCK_Y: f32 = -30.0;
+    const ROCK_W: f32 = 30.0;
+    const ROCK_H: f32 = 20.0;
+    const ROCK_TOP: f32 = ROCK_Y + ROCK_H / 2.0; // -20.0
+
+    // Body starts 30 units above rock top, well clear of any initial overlap.
+    const START_Y: f32 = ROCK_TOP + AGENT_RADIUS as f32 + 30.0; // -20 + 10 + 30 = 20
+
+    let gravity = if driven { Vec2::ZERO } else { Vec2::new(0.0, -200.0) };
+    let mut app = physics_app(gravity);
+
+    // Wall collider: either a filled rectangle or a polyline of its boundary.
+    let wall_collider = if polyline {
+        // Mirror of geometry_to_collider: a closed polyline ring around the rectangle.
+        let hw = ROCK_W / 2.0;
+        let hh = ROCK_H / 2.0;
+        Collider::polyline(
+            vec![
+                Vec2::new(-hw, hh),
+                Vec2::new(hw, hh),
+                Vec2::new(hw, -hh),
+                Vec2::new(-hw, -hh),
+            ],
+            Some(vec![[0, 1], [1, 2], [2, 3], [3, 0]]),
+        )
+    } else {
+        Collider::rectangle(ROCK_W, ROCK_H)
+    };
+
+    app.world_mut().spawn((
+        RigidBody::Static,
+        wall_collider,
+        CollisionLayers::new(
+            vector_arena::GameLayer::Wall,
+            [vector_arena::GameLayer::Wall, vector_arena::GameLayer::Dynamic],
+        ),
+        Transform::from_xyz(0.0, ROCK_Y, 0.0),
+    ));
+
+    let body = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Collider::circle(AGENT_RADIUS as f32),
+            CollisionLayers::new(
+                vector_arena::GameLayer::Dynamic,
+                [vector_arena::GameLayer::Wall, vector_arena::GameLayer::Dynamic],
+            ),
+            LockedAxes::ROTATION_LOCKED,
+            LinearDamping(0.0),
+            Mass(1.0),
+            Transform::from_xyz(0.0, START_Y, 0.0),
+        ))
+        .id();
+
+    for _ in 0..120 {
+        if driven {
+            // Mirror apply_agent_velocity: overwrite velocity toward the wall every frame.
+            app.world_mut().entity_mut(body).get_mut::<LinearVelocity>().unwrap().0 =
+                Vec2::new(0.0, -MONSTER_SPEED);
+        }
+        tick(&mut app);
+    }
+
+    app.world().entity(body).get::<Transform>().unwrap().translation.y
+}
+
+#[test]
+fn monster_stopped_by_wall() {
+    // Expected: body centre rests at rock_top + radius = -20 + 10 = -10.
+    // Tolerance of 2 units for physics settling.
+    const EXPECTED_STOP: f32 = -10.0;
+    const TOL: f32 = 2.0;
+
+    let y_solid_gravity  = body_final_y(false, false);
+    let y_poly_gravity   = body_final_y(true,  false);
+    let y_solid_driven   = body_final_y(false, true);
+    let y_poly_driven    = body_final_y(true,  true);
+
+    println!(
+        "solid+gravity={:.1}  poly+gravity={:.1}  solid+driven={:.1}  poly+driven={:.1}  \
+         expected≥{:.1}",
+        y_solid_gravity, y_poly_gravity, y_solid_driven, y_poly_driven,
+        EXPECTED_STOP - TOL,
+    );
+
+    // All four cases should stop the body near the rock surface.
+    assert!(y_solid_gravity  >= EXPECTED_STOP - TOL, "solid+gravity  clipped: y={:.1}", y_solid_gravity);
+    assert!(y_poly_gravity   >= EXPECTED_STOP - TOL, "poly+gravity   clipped: y={:.1}", y_poly_gravity);
+    assert!(y_solid_driven   >= EXPECTED_STOP - TOL, "solid+driven   clipped: y={:.1}", y_solid_driven);
+    assert!(y_poly_driven    >= EXPECTED_STOP - TOL, "poly+driven    clipped: y={:.1}", y_poly_driven);
+}
+
+/// Verify that geometry_to_collider produces working collision from a polygon-with-hole geometry.
+/// This is the same structure the dungeon uses: a filled solid-rock polygon with the playable
+/// area (room) carved out as an interior hole via geo BooleanOps.
+///
+/// Layout:
+///   Outer boundary: (-100,-100) to (100,100)  — solid rock fills this minus the room
+///   Room hole:       (-60,  -60) to ( 60,  60) — body starts at origin inside here
+///   Left wall inner face: x = -60
+///   Expected stop: x = -60 + AGENT_RADIUS = -50
+#[test]
+fn body_stops_at_dungeon_terrain_wall() {
+    use geo::{BooleanOps, MultiPolygon, Rect};
+
+    // Build solid_rock exactly as level_generation does: full bounds minus playable area.
+    let earth: geo::Polygon<f32> =
+        Rect::new((-100.0_f32, -100.0_f32), (100.0_f32, 100.0_f32)).to_polygon();
+    let room: MultiPolygon<f32> =
+        MultiPolygon::new(vec![Rect::new((-60.0_f32, -60.0_f32), (60.0_f32, 60.0_f32)).to_polygon()]);
+    let solid_rock: MultiPolygon<f32> = earth.difference(&room);
+
+    let mut app = physics_app(Vec2::ZERO);
+
+    app.world_mut().spawn((
+        RigidBody::Static,
+        geometry_to_collider(&solid_rock),
+        CollisionLayers::new(GameLayer::Wall, [GameLayer::Wall, GameLayer::Dynamic]),
+        Transform::default(),
+    ));
+
+    // Body starts at origin (inside the 120×120 room), driven left into the left wall.
+    const START_X: f32 = 0.0;
+    const START_Y: f32 = 0.0;
+    const WALL_FACE_X: f32 = -60.0; // inner face of left solid-rock wall
+
+    let body = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Collider::circle(AGENT_RADIUS),
+            CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
+            LockedAxes::ROTATION_LOCKED,
+            Mass(1.0),
+            Transform::from_xyz(START_X, START_Y, 0.0),
+        ))
+        .id();
+
+    for frame in 0..120u32 {
+        app.world_mut().entity_mut(body).get_mut::<LinearVelocity>().unwrap().0 =
+            Vec2::new(-MONSTER_SPEED, 0.0);
+        tick(&mut app);
+        if frame % 20 == 19 {
+            let p = loc(&app, body);
+            println!("  frame {:3}: x={:.2} y={:.2}", frame + 1, p.x, p.y);
+        }
+    }
+
+    let final_x = loc(&app, body).x;
+    println!(
+        "Final x={:.2}  (wall face x={WALL_FACE_X:.1}, stop x≈{:.1})",
+        final_x,
+        WALL_FACE_X + AGENT_RADIUS,
+    );
+
+    assert!(
+        final_x >= WALL_FACE_X + AGENT_RADIUS - 2.0,
+        "Body clipped through dungeon terrain wall: x={:.2} (expected ≥ {:.2})",
+        final_x,
+        WALL_FACE_X + AGENT_RADIUS - 2.0,
+    );
 }

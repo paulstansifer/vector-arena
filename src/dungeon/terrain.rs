@@ -46,14 +46,14 @@ pub fn geometry_to_collider(geometry: &MultiPolygon<f32>) -> Collider {
     for polygon in geometry.iter() {
         for ring in polygon.rings() {
             let start_index = vertices.len() as u32;
-
-            // Add vertices for the exterior ring (excluding the last point which is a duplicate of the first)
-            for coord in ring.coords() {
-                vertices.push((coord.x, coord.y).into());
+            let coords: Vec<_> = ring.coords().collect();
+            // geo rings are closed: the last coordinate is a duplicate of the first.
+            // Skip it so we don't add a zero-length degenerate edge at the seam.
+            let n = coords.len().saturating_sub(1);
+            for coord in &coords[..n] {
+                vertices.push(Vec2::new(coord.x, coord.y));
             }
-
-            let num_vertices = ring.coords().count() as u32;
-            // Create edges for the polyline (closed loop)
+            let num_vertices = n as u32;
             for i in 0..num_vertices {
                 let next = (i + 1) % num_vertices;
                 indices.push([start_index + i, start_index + next]);
