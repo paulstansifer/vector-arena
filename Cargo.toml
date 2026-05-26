@@ -12,20 +12,20 @@ rand = "0.8"
 bevy_landmass = "0.11.1"
 bevy_egui = "0.39.1"
 pyri_tooltip = "0.6.0"
+bevy_verlet = { path = "crates/bevy_verlet", default-features = false }
 
 [profile.dev]
 opt-level = 1 # Suggested by the Bevy docs
 
 [profile.dev.package."*"]
-opt-level = 3 # Suggested by the Bevy docs
+opt-level = 3                 # Suggested by the Bevy docs
+debug = "line-tables-only"    # Let's try to save some disk space
 
 [profile.release]
 opt-level = "s" # Optimize for size
 lto = true
 codegen-units = 1
 
-#[patch.crates-io]
-#getrandom = { version = "0.2", features = ["js"] }
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]

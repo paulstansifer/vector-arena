@@ -7,7 +7,7 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
 use geo::{
-    BooleanOps, MultiPolygon,
+    MultiPolygon,
     algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay},
 };
 
