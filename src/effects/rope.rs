@@ -126,15 +126,11 @@ pub fn spawn_rope(
     }
 
     for i in 0..n_segs {
-        commands.spawn((
-            DespawnOnExit(GameState::InLevel),
-            VerletStick {
-                point_a_entity: points[i],
-                point_b_entity: points[i + 1],
-                length: stick_len,
-            },
-            SweptCcd::default(),
-        ));
+        commands.spawn((DespawnOnExit(GameState::InLevel), VerletStick {
+            point_a_entity: points[i],
+            point_b_entity: points[i + 1],
+            length: stick_len,
+        }));
     }
 
     commands.spawn((DespawnOnExit(GameState::InLevel), Rope { points }));
@@ -176,6 +172,25 @@ fn push_rope_out_of_terrain(
     let filter = SpatialQueryFilter::from_mask([GameLayer::Wall]);
     for (mut tf, mut point) in &mut points {
         let pos = tf.translation.truncate();
+        let old_pos = point.old_position.map_or(pos, |p| p.truncate());
+        let delta = pos - old_pos;
+        let move_dist = delta.length();
+
+        // Swept check: raycast along the movement path to catch tunneling.
+        if move_dist > 1e-5 {
+            if let Ok(dir) = Dir2::new(delta) {
+                if let Some(hit) = spatial_query.cast_ray(old_pos, dir, move_dist, true, &filter) {
+                    let hit_point = old_pos + *dir * hit.distance;
+                    let corrected = (hit_point + hit.normal * (ROPE_COLLISION_RADIUS + 0.5))
+                        .extend(tf.translation.z);
+                    tf.translation = corrected;
+                    point.old_position = Some(corrected);
+                    continue;
+                }
+            }
+        }
+
+        // Static check: point is inside or too close to terrain without having tunneled.
         let Some(proj) = spatial_query.project_point(pos, true, &filter) else { continue };
         let dist = proj.point.distance(pos);
         if proj.is_inside || dist < ROPE_COLLISION_RADIUS {

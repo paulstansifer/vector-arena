@@ -13,7 +13,7 @@ use geo::{
 };
 use std::sync::Arc;
 
-const AGENT_ACCELERATION: f32 = 50.0;
+const AGENT_ACCELERATION: f32 = 10.0;
 
 #[derive(Component)]
 pub struct NavMeshIslandMarker;
