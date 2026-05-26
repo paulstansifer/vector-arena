@@ -1,6 +1,7 @@
 // Shared headless-physics helpers used by multiple integration test files.
 use avian2d::prelude::*;
 use bevy::prelude::*;
+use bevy_verlet::prelude::*;
 use std::time::Duration;
 
 /// Build a minimal app that runs avian2d physics headlessly.
@@ -8,7 +9,7 @@ use std::time::Duration;
 /// `Plugin::finish` (not `build`) is where avian2d registers resources like
 /// `CollisionDiagnostics`.  `App::run` calls `finish` internally, but tests
 /// drive `update` directly, so we call it here.
-pub fn physics_app(gravity: Vec2) -> App {
+pub fn physics_app(gravity: Vec2, ropes: bool) -> App {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
@@ -22,6 +23,17 @@ pub fn physics_app(gravity: Vec2) -> App {
     )))
     .insert_resource(Time::<Virtual>::default())
     .insert_resource(Gravity(gravity));
+
+    if ropes {
+        app.add_plugins(VerletPlugin::default()).insert_resource(VerletConfig {
+            gravity: gravity.extend(0.0),
+            friction: 0.02,
+            sticks_computation_depth: 5,
+            parallel_processing: false,
+        });
+        vector_arena::effects::rope::add_rope_test_systems(&mut app);
+    }
+
     app.finish();
     app
 }

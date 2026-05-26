@@ -6,7 +6,10 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 
-use crate::{effects::projectile::MagicMissile, player::{MoveTarget, Player}};
+use crate::{
+    effects::projectile::MagicMissile,
+    player::{MoveTarget, Player},
+};
 
 const TIME_SCALE_MISSILE: f32 = 0.5;
 

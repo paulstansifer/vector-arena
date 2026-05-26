@@ -546,4 +546,3 @@ pub fn update_missile_trails(
         }
     }
 }
-

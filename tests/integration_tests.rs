@@ -239,7 +239,7 @@ fn body_final_y(polyline: bool, driven: bool) -> f32 {
     const START_Y: f32 = ROCK_TOP + AGENT_RADIUS as f32 + 30.0; // -20 + 10 + 30 = 20
 
     let gravity = if driven { Vec2::ZERO } else { Vec2::new(0.0, -200.0) };
-    let mut app = physics_app(gravity);
+    let mut app = physics_app(gravity, /* ropes */ false);
 
     // Wall collider: either a filled rectangle or a polyline of its boundary.
     let wall_collider = if polyline {
@@ -247,12 +247,7 @@ fn body_final_y(polyline: bool, driven: bool) -> f32 {
         let hw = ROCK_W / 2.0;
         let hh = ROCK_H / 2.0;
         Collider::polyline(
-            vec![
-                Vec2::new(-hw, hh),
-                Vec2::new(hw, hh),
-                Vec2::new(hw, -hh),
-                Vec2::new(-hw, -hh),
-            ],
+            vec![Vec2::new(-hw, hh), Vec2::new(hw, hh), Vec2::new(hw, -hh), Vec2::new(-hw, -hh)],
             Some(vec![[0, 1], [1, 2], [2, 3], [3, 0]]),
         )
     } else {
@@ -262,10 +257,10 @@ fn body_final_y(polyline: bool, driven: bool) -> f32 {
     app.world_mut().spawn((
         RigidBody::Static,
         wall_collider,
-        CollisionLayers::new(
+        CollisionLayers::new(vector_arena::GameLayer::Wall, [
             vector_arena::GameLayer::Wall,
-            [vector_arena::GameLayer::Wall, vector_arena::GameLayer::Dynamic],
-        ),
+            vector_arena::GameLayer::Dynamic,
+        ]),
         Transform::from_xyz(0.0, ROCK_Y, 0.0),
     ));
 
@@ -274,10 +269,10 @@ fn body_final_y(polyline: bool, driven: bool) -> f32 {
         .spawn((
             RigidBody::Dynamic,
             Collider::circle(AGENT_RADIUS as f32),
-            CollisionLayers::new(
+            CollisionLayers::new(vector_arena::GameLayer::Dynamic, [
+                vector_arena::GameLayer::Wall,
                 vector_arena::GameLayer::Dynamic,
-                [vector_arena::GameLayer::Wall, vector_arena::GameLayer::Dynamic],
-            ),
+            ]),
             LockedAxes::ROTATION_LOCKED,
             LinearDamping(0.0),
             Mass(1.0),
@@ -304,23 +299,38 @@ fn monster_stopped_by_wall() {
     const EXPECTED_STOP: f32 = -10.0;
     const TOL: f32 = 2.0;
 
-    let y_solid_gravity  = body_final_y(false, false);
-    let y_poly_gravity   = body_final_y(true,  false);
-    let y_solid_driven   = body_final_y(false, true);
-    let y_poly_driven    = body_final_y(true,  true);
+    let y_solid_gravity = body_final_y(false, false);
+    let y_poly_gravity = body_final_y(true, false);
+    let y_solid_driven = body_final_y(false, true);
+    let y_poly_driven = body_final_y(true, true);
 
     println!(
         "solid+gravity={:.1}  poly+gravity={:.1}  solid+driven={:.1}  poly+driven={:.1}  \
          expected≥{:.1}",
-        y_solid_gravity, y_poly_gravity, y_solid_driven, y_poly_driven,
+        y_solid_gravity,
+        y_poly_gravity,
+        y_solid_driven,
+        y_poly_driven,
         EXPECTED_STOP - TOL,
     );
 
     // All four cases should stop the body near the rock surface.
-    assert!(y_solid_gravity  >= EXPECTED_STOP - TOL, "solid+gravity  clipped: y={:.1}", y_solid_gravity);
-    assert!(y_poly_gravity   >= EXPECTED_STOP - TOL, "poly+gravity   clipped: y={:.1}", y_poly_gravity);
-    assert!(y_solid_driven   >= EXPECTED_STOP - TOL, "solid+driven   clipped: y={:.1}", y_solid_driven);
-    assert!(y_poly_driven    >= EXPECTED_STOP - TOL, "poly+driven    clipped: y={:.1}", y_poly_driven);
+    assert!(
+        y_solid_gravity >= EXPECTED_STOP - TOL,
+        "solid+gravity  clipped: y={:.1}",
+        y_solid_gravity
+    );
+    assert!(
+        y_poly_gravity >= EXPECTED_STOP - TOL,
+        "poly+gravity   clipped: y={:.1}",
+        y_poly_gravity
+    );
+    assert!(
+        y_solid_driven >= EXPECTED_STOP - TOL,
+        "solid+driven   clipped: y={:.1}",
+        y_solid_driven
+    );
+    assert!(y_poly_driven >= EXPECTED_STOP - TOL, "poly+driven    clipped: y={:.1}", y_poly_driven);
 }
 
 /// Verify that geometry_to_collider produces working collision from a polygon-with-hole geometry.
@@ -339,11 +349,12 @@ fn body_stops_at_dungeon_terrain_wall() {
     // Build solid_rock exactly as level_generation does: full bounds minus playable area.
     let earth: geo::Polygon<f32> =
         Rect::new((-100.0_f32, -100.0_f32), (100.0_f32, 100.0_f32)).to_polygon();
-    let room: MultiPolygon<f32> =
-        MultiPolygon::new(vec![Rect::new((-60.0_f32, -60.0_f32), (60.0_f32, 60.0_f32)).to_polygon()]);
+    let room: MultiPolygon<f32> = MultiPolygon::new(vec![
+        Rect::new((-60.0_f32, -60.0_f32), (60.0_f32, 60.0_f32)).to_polygon(),
+    ]);
     let solid_rock: MultiPolygon<f32> = earth.difference(&room);
 
-    let mut app = physics_app(Vec2::ZERO);
+    let mut app = physics_app(Vec2::ZERO, /* ropes */ false);
 
     app.world_mut().spawn((
         RigidBody::Static,

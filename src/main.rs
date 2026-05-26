@@ -15,9 +15,9 @@ use vector_arena::{
     effects::{
         crumble_terrain::{Fragile, handle_right_click_excavation},
         projectile::{
-            apply_missile_knockback, init_trail_meshes, monster_fire_missiles,
-            player_fire_missile, spawn_missile_trails, tick_knockback_cooldowns,
-            update_hit_flash, update_missile_trails, update_missiles,
+            apply_missile_knockback, init_trail_meshes, monster_fire_missiles, player_fire_missile,
+            spawn_missile_trails, tick_knockback_cooldowns, update_hit_flash,
+            update_missile_trails, update_missiles,
         },
         rope,
     },
