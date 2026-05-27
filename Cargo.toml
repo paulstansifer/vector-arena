@@ -4,7 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.18.1", default-features = false, features = ["2d", "debug", "bevy_dev_tools", "default_platform"] }
+bevy = { version = "0.18.1", default-features = false, features = [
+    "2d",
+    "debug",
+    "bevy_dev_tools",
+    "default_platform",
+] }
 avian2d = "0.5"
 bevy_mesh = "0.18"
 geo = "0.32"
@@ -13,16 +18,19 @@ bevy_landmass = "0.11.1"
 bevy_egui = "0.39.1"
 pyri_tooltip = "0.6.0"
 bevy_verlet = { path = "crates/bevy_verlet", default-features = false }
+bevy_svg = "0.18.0" # default-features includes both 2d and 3d; 2d-only build has a cfg bug in the crate
+egui_extras = { version = "0.33", features = ["svg_text"] } # svg_text enables resvg/text+system-fonts for scroll letter rendering
+resvg = { version = "0.45.1", default-features = false } # for usvg::Options passed to egui_extras
 
 [profile.dev]
 opt-level = 1 # Suggested by the Bevy docs
 
 [profile.dev.package."*"]
-opt-level = 3                 # Suggested by the Bevy docs
-debug = "line-tables-only"    # Let's try to save some disk space
+opt-level = 3              # Suggested by the Bevy docs
+debug = "line-tables-only" # Let's try to save some disk space
 
 [profile.release]
-opt-level = "s" # Optimize for size
+opt-level = "s"   # Optimize for size
 lto = true
 codegen-units = 1
 

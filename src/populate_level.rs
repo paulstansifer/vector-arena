@@ -14,6 +14,7 @@ use crate::{
     item::{Inventory, Item, ItemKind, PotionColor, ScrollName, item_name},
     monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterDrop, MonsterState, Stats},
     player::{MoveTarget, PLAYER_SPEED, Player},
+    sprite::{SpriteParam, SvgSprite, potion_hex, scroll_letter},
     ui::WorldTooltip,
 };
 
@@ -144,9 +145,6 @@ pub fn populate(
     let chosen_kinds: Vec<ItemKind> =
         all_item_kinds.choose_multiple(&mut rng, item_count).copied().collect();
 
-    let potion_mesh = meshes.add(RegularPolygon::new(7.0, 3));
-    let scroll_mesh = meshes.add(Rectangle::new(12.0, 12.0));
-
     for kind in chosen_kinds {
         let room = rooms.choose(&mut rng).unwrap();
         let center = room.center();
@@ -156,29 +154,23 @@ pub fn populate(
         let y = center.y + rng.gen_range(-half_h..=half_h);
         let pos = Vec3::new(x, y, fov::ON_FLOOR_Z);
 
-        // Each item gets its own material so the pickup fade can be applied independently.
-        match kind {
-            ItemKind::Potion(_) => {
-                commands.spawn((
-                    DespawnOnExit(GameState::InLevel),
-                    Item(kind),
-                    WorldTooltip(item_name(kind, 1).to_string()),
-                    Mesh2d(potion_mesh.clone()),
-                    MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.2, 0.85, 0.3)))),
-                    Transform::from_translation(pos),
-                ));
+        let (svg_path, param) = match kind {
+            ItemKind::Potion(color) => {
+                ("sprites/potion.svg".to_string(), SpriteParam::Color(potion_hex(color)))
             }
-            ItemKind::Scroll(_) => {
-                commands.spawn((
-                    DespawnOnExit(GameState::InLevel),
-                    Item(kind),
-                    WorldTooltip(item_name(kind, 1).to_string()),
-                    Mesh2d(scroll_mesh.clone()),
-                    MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.8, 0.8, 0.75)))),
-                    Transform::from_translation(pos),
-                ));
-            }
-        }
+            ItemKind::Scroll(name) => (
+                "sprites/scroll.svg".to_string(),
+                SpriteParam::Text(scroll_letter(name).to_string()),
+            ),
+        };
+
+        commands.spawn((
+            DespawnOnExit(GameState::InLevel),
+            Item(kind),
+            WorldTooltip(item_name(kind, 1).to_string()),
+            SvgSprite { svg_path, param: Some(param) },
+            Transform::from_translation(pos).with_scale(Vec3::splat(0.4)),
+        ));
     }
 
     spawn_staircase(commands, meshes, materials, staircase_position);

@@ -30,21 +30,21 @@ pub fn item_name(item: ItemKind, count: u16) -> String {
 const PICKUP_RADIUS: f32 = 22.0;
 const ANIM_SECS: f32 = 0.25;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PotionColor {
     Red,
     Green,
     Blue,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScrollName {
     Readme,
     Agents,
     License,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ItemKind {
     Potion(PotionColor),
     Scroll(ScrollName),
@@ -61,6 +61,7 @@ pub struct PickingUp {
     progress: f32,
     origin: Vec2,
     target: Vec2,
+    initial_scale: Vec3,
 }
 
 /// When the player walks within range of a ground item, start the pickup animation.
@@ -81,6 +82,7 @@ pub fn pickup_items(
                 progress: 0.0,
                 origin: item_pos,
                 target: player_pos,
+                initial_scale: item_transform.scale,
             });
         }
     }
@@ -92,7 +94,7 @@ pub fn animate_pickup(
     mut commands: Commands,
     time: Res<Time<Real>>,
     mut items: Query<
-        (Entity, &mut Transform, &mut PickingUp, &MeshMaterial2d<ColorMaterial>, &Item),
+        (Entity, &mut Transform, &mut PickingUp, Option<&MeshMaterial2d<ColorMaterial>>, &Item),
         Without<Player>,
     >,
     player_query: Query<&Transform, With<Player>>,
@@ -116,10 +118,12 @@ pub fn animate_pickup(
         let pos = picking_up.origin.lerp(target, t * t);
         transform.translation.x = pos.x;
         transform.translation.y = pos.y;
-        transform.scale = Vec3::splat(1.0 - t * 0.85);
+        transform.scale = picking_up.initial_scale * (1.0 - t * 0.85);
 
-        if let Some(mat) = materials.get_mut(mat_handle.0.id()) {
-            mat.color = mat.color.with_alpha(1.0 - t);
+        if let Some(mat_handle) = mat_handle {
+            if let Some(mat) = materials.get_mut(mat_handle.0.id()) {
+                mat.color = mat.color.with_alpha(1.0 - t);
+            }
         }
 
         if picking_up.progress >= 1.0 {

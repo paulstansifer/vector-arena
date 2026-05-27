@@ -9,6 +9,7 @@ use bevy_landmass::prelude::AgentTarget2d;
 use crate::{
     item::{Inventory, ItemKind},
     player::{ExplorationGoal, MoveTarget, Player},
+    sprite::SpriteEguiTextures,
 };
 
 pub struct PaletteEntry {
@@ -92,6 +93,7 @@ pub fn palette_system(
     registry: Res<CommandPaletteRegistry>,
     player_query: Query<(&Inventory, &Transform), With<Player>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
+    sprite_textures: Res<SpriteEguiTextures>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -111,7 +113,7 @@ pub fn palette_system(
             .map(|p| farthest_corner_anchor(p, screen_size))
             .unwrap_or(egui::Align2::RIGHT_BOTTOM);
 
-        match render_command_palette(ctx, &mut palette, &completions, anchor) {
+        match render_command_palette(ctx, &mut palette, &completions, anchor, &sprite_textures) {
             PaletteUiAction::Navigate(s) => {
                 palette.input = s;
                 palette.selected_idx = 0;
@@ -169,6 +171,7 @@ fn render_command_palette(
     palette: &mut CommandPaletteState,
     completions: &[PaletteEntry],
     anchor: egui::Align2,
+    sprite_textures: &SpriteEguiTextures,
 ) -> PaletteUiAction {
     let n = completions.len();
     let te_id = egui::Id::new("##palette_input");
@@ -283,7 +286,12 @@ fn render_command_palette(
                 let (icon_rect, _) = child
                     .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover());
                 if let Some(item) = entry.icon {
-                    crate::ui::draw_item_icon_at(child.painter_at(icon_rect), icon_rect, item);
+                    crate::ui::draw_item_icon_at(
+                        child.painter_at(icon_rect),
+                        icon_rect,
+                        item,
+                        sprite_textures.get(item),
+                    );
                 }
 
                 child.label(palette_row_label(

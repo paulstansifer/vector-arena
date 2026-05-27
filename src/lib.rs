@@ -8,6 +8,7 @@ pub mod monster;
 pub mod nav;
 pub mod player;
 pub mod populate_level;
+pub mod sprite;
 pub mod time_scale;
 pub mod ui;
 

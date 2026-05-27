@@ -13,6 +13,7 @@ use crate::{
     item::{Item, ItemKind, item_name},
     monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
     player::Player,
+    sprite::{SpriteParam, SvgSprite, potion_hex, scroll_letter},
     ui::{MessageLog, WorldTooltip},
 };
 
@@ -207,7 +208,6 @@ pub fn apply_missile_knockback(
         (Without<MagicMissile>, With<RigidBody>),
     >,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut message_log: ResMut<MessageLog>,
 ) {
     for (transform, missile_vel, missile) in missiles.iter() {
@@ -282,34 +282,23 @@ pub fn apply_missile_knockback(
                     if let Some(drop) = drop_opt {
                         let kind = drop.0;
                         let pos = transform.translation.truncate().extend(fov::ON_FLOOR_Z);
-                        match kind {
-                            ItemKind::Potion(_) => {
-                                commands.spawn((
-                                    DespawnOnExit(GameState::InLevel),
-                                    Item(kind),
-                                    WorldTooltip(item_name(kind, 1).to_string()),
-                                    Mesh2d(meshes.add(RegularPolygon::new(7.0, 3))),
-                                    MeshMaterial2d(
-                                        materials
-                                            .add(ColorMaterial::from(Color::srgb(0.2, 0.85, 0.3))),
-                                    ),
-                                    Transform::from_translation(pos),
-                                ));
-                            }
-                            ItemKind::Scroll(_) => {
-                                commands.spawn((
-                                    DespawnOnExit(GameState::InLevel),
-                                    Item(kind),
-                                    WorldTooltip(item_name(kind, 1).to_string()),
-                                    Mesh2d(meshes.add(Rectangle::new(12.0, 12.0))),
-                                    MeshMaterial2d(
-                                        materials
-                                            .add(ColorMaterial::from(Color::srgb(0.8, 0.8, 0.75))),
-                                    ),
-                                    Transform::from_translation(pos),
-                                ));
-                            }
-                        }
+                        let (svg_path, param) = match kind {
+                            ItemKind::Potion(color) => (
+                                "sprites/potion.svg".to_string(),
+                                SpriteParam::Color(potion_hex(color)),
+                            ),
+                            ItemKind::Scroll(name) => (
+                                "sprites/scroll.svg".to_string(),
+                                SpriteParam::Text(scroll_letter(name).to_string()),
+                            ),
+                        };
+                        commands.spawn((
+                            DespawnOnExit(GameState::InLevel),
+                            Item(kind),
+                            WorldTooltip(item_name(kind, 1).to_string()),
+                            SvgSprite { svg_path, param: Some(param) },
+                            Transform::from_translation(pos).with_scale(Vec3::splat(0.4)),
+                        ));
                     }
                     commands.entity(hit).despawn();
                 }

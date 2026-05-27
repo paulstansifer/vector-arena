@@ -11,6 +11,7 @@ use crate::{
     fov::ExplorationState,
     item::{Inventory, ItemKind, item_name},
     player::Player,
+    sprite::SpriteEguiTextures,
 };
 
 const BAR_WIDTH: f32 = 140.0;
@@ -98,6 +99,7 @@ fn ui_system(
     mut app_exit: MessageWriter<AppExit>,
     mut next_state: ResMut<NextState<GameState>>,
     depth: Res<DungeonDepth>,
+    sprite_textures: Res<SpriteEguiTextures>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -123,7 +125,7 @@ fn ui_system(
         false
     };
 
-    let hud = render_hud(ctx, stats, &item_counts, depth.0, near_staircase);
+    let hud = render_hud(ctx, stats, &item_counts, depth.0, near_staircase, &sprite_textures);
     if hud.toggle_menu {
         ui_state.menu_open = !ui_state.menu_open;
     }
@@ -209,6 +211,7 @@ fn render_hud(
     item_counts: &[(ItemKind, u16)],
     depth: u32,
     near_staircase: bool,
+    sprite_textures: &SpriteEguiTextures,
 ) -> HudActions {
     let mut actions = HudActions::default();
     egui::TopBottomPanel::bottom("hud").show(ctx, |ui| {
@@ -232,7 +235,7 @@ fn render_hud(
             ui.separator();
 
             for (item, count) in item_counts {
-                draw_item_icon(ui, *item, *count);
+                draw_item_icon(ui, *item, *count, sprite_textures);
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -309,8 +312,19 @@ fn draw_stat_bar(ui: &mut egui::Ui, ratio: f32, color: egui::Color32, label: &st
 }
 
 /// Draw the item shape into an exact rect (shared by HUD and palette).
-pub fn draw_item_icon_at(painter: egui::Painter, rect: egui::Rect, item: ItemKind) {
+/// Uses `texture` (SVG-rasterized) when available, otherwise falls back to primitives.
+pub fn draw_item_icon_at(
+    painter: egui::Painter,
+    rect: egui::Rect,
+    item: ItemKind,
+    texture: Option<&egui::TextureHandle>,
+) {
     painter.rect_filled(rect, 2.0_f32, egui::Color32::from_rgb(40, 40, 40));
+    if let Some(tex) = texture {
+        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        painter.image(tex.id(), rect, uv, egui::Color32::WHITE);
+        return;
+    }
     let center = rect.center();
     let size = rect.width().min(rect.height());
     match item {
@@ -335,10 +349,10 @@ pub fn draw_item_icon_at(painter: egui::Painter, rect: egui::Rect, item: ItemKin
     }
 }
 
-fn draw_item_icon(ui: &mut egui::Ui, item: ItemKind, count: u16) {
+fn draw_item_icon(ui: &mut egui::Ui, item: ItemKind, count: u16, sprite_textures: &SpriteEguiTextures) {
     let size = BAR_HEIGHT;
     let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-    draw_item_icon_at(ui.painter_at(rect), rect, item);
+    draw_item_icon_at(ui.painter_at(rect), rect, item, sprite_textures.get(item));
 
     if count > 1 {
         ui.painter().text(

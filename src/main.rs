@@ -5,6 +5,7 @@ use bevy_landmass::{NavMeshHandle, prelude::*};
 
 use vector_arena::{
     AGENT_RADIUS, DungeonDepth, GameLayer, GameState, WorldBounds,
+    sprite::SpritePlugin,
     dungeon::{
         level_generation::TerrainGeometry,
         terrain::{
@@ -47,9 +48,11 @@ fn main() {
             avian2d::PhysicsPlugins::default(),
             Landmass2dPlugin::default(),
             // bevy_landmass::debug::Landmass2dDebugPlugin::default(),
+            bevy_svg::prelude::SvgPlugin,
             rope::RopePlugin,
             UiPlugin,
             CommandPalettePlugin,
+            SpritePlugin,
         ))
         .init_state::<GameState>()
         .init_resource::<SavedPlayer>()
