@@ -1,0 +1,83 @@
+name: Rust
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build
+        run: cargo build --verbose
+
+  build_features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: all features
+        run: cargo build --verbose --all-features
+      - name: no default features
+        run: cargo build --verbose --no-default-features
+      - name: debug
+        run: cargo build --verbose --no-default-features --features debug
+
+  build_examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build 2d cloth
+        run: cargo clippy --all-features --example 2d_cloth
+      - name: build 2d cloth cutter
+        run: cargo clippy --all-features --example 2d_cloth_cutter
+      - name: build 2d line
+        run: cargo clippy --all-features --example 2d_line
+      - name: build 3d line
+        run: cargo clippy --all-features --example 3d_line
+      - name: build 3d cloth
+        run: cargo clippy --all-features --example 3d_cloth
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: tests
+        run: cargo test --tests
+      - name: doc tests
+        run: cargo test --all-features --doc
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: "rustfmt"
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo clippy check
+        run: cargo clippy --all-features --all --tests -- -D warnings
+
+  rustdoc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: rustdoc
+        run: cargo rustdoc --all-features -- -D warnings
