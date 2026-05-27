@@ -10,7 +10,7 @@ use std::collections::HashSet;
 
 use crate::{
     AGENT_RADIUS, GameLayer, GameState, fov,
-    item::{Item, ItemKind, item_display_name},
+    item::{Item, ItemKind, item_name},
     monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
     player::Player,
     ui::{MessageLog, WorldTooltip},
@@ -287,7 +287,7 @@ pub fn apply_missile_knockback(
                                 commands.spawn((
                                     DespawnOnExit(GameState::InLevel),
                                     Item(kind),
-                                    WorldTooltip(item_display_name(kind).to_string()),
+                                    WorldTooltip(item_name(kind, 1).to_string()),
                                     Mesh2d(meshes.add(RegularPolygon::new(7.0, 3))),
                                     MeshMaterial2d(
                                         materials
@@ -300,7 +300,7 @@ pub fn apply_missile_knockback(
                                 commands.spawn((
                                     DespawnOnExit(GameState::InLevel),
                                     Item(kind),
-                                    WorldTooltip(item_display_name(kind).to_string()),
+                                    WorldTooltip(item_name(kind, 1).to_string()),
                                     Mesh2d(meshes.add(Rectangle::new(12.0, 12.0))),
                                     MeshMaterial2d(
                                         materials

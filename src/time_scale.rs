@@ -21,7 +21,7 @@ pub fn manage_time_scale(
     keyboard: Res<ButtonInput<KeyCode>>,
 ) {
     let any_missile = missile_query.iter().next().is_some();
-    let spacebar_held = keyboard.pressed(KeyCode::Space);
+    let spacebar_held = keyboard.pressed(KeyCode::Period);
 
     if any_missile {
         time.set_relative_speed(TIME_SCALE_MISSILE);

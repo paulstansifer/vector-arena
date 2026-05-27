@@ -17,7 +17,8 @@ src/
 ├── item.rs                   # Items, inventory, pickup animation, use dialog dispatch
 ├── populate_level.rs         # Spawns player, monsters, items, and the down staircase into rooms
 ├── time_scale.rs             # Global virtual-time scaling (bullet-time / pause / normal)
-├── ui.rs                     # egui HUD: message log, stat bars, inventory, menu, item dialogs
+├── ui.rs                     # egui HUD: message log, stat bars, inventory, menu
+├── command_palette.rs        # General interface for complex user commands
 ├── dungeon/
 │   ├── mod.rs                # Re-exports
 │   ├── bsp.rs                # Binary Space Partitioning algorithm

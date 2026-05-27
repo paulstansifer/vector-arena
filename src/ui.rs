@@ -9,7 +9,7 @@ use geo::Contains;
 use crate::{
     DungeonDepth, GameState,
     fov::ExplorationState,
-    item::{Inventory, ItemDialogKind, ItemKind, ItemUseDialog, item_display_name},
+    item::{Inventory, ItemKind, item_name},
     player::Player,
 };
 
@@ -83,6 +83,7 @@ impl Plugin for UiPlugin {
             .init_resource::<MessageLog>()
             .init_resource::<UiState>()
             .add_systems(EguiPrimaryContextPass, ui_system)
+            .add_systems(EguiPrimaryContextPass, crate::command_palette::palette_system)
             .add_systems(Update, crate::monster::refresh_monster_tooltips)
             .add_systems(Update, show_world_entity_tooltip);
     }
@@ -91,7 +92,6 @@ impl Plugin for UiPlugin {
 fn ui_system(
     mut contexts: EguiContexts,
     mut ui_state: ResMut<UiState>,
-    mut item_dialog: ResMut<ItemUseDialog>,
     player_query: Query<(&crate::monster::Stats, &Inventory, &Transform), With<Player>>,
     staircase_q: Query<&Transform, With<crate::Staircase>>,
     message_log: Res<MessageLog>,
@@ -145,17 +145,6 @@ fn ui_system(
         }
     }
 
-    if let Some(dialog_kind) = item_dialog.open {
-        let result = render_item_dialog(ctx, dialog_kind, &item_counts);
-        if let Some(item) = result.use_item {
-            item_dialog.pending_use = Some(item);
-        }
-        if result.cancel {
-            item_dialog.open = None;
-            item_dialog.pending_use = None;
-        }
-    }
-
     Ok(())
 }
 
@@ -195,8 +184,8 @@ fn render_message_bar(ctx: &egui::Context, log: &MessageLog, expanded: bool) -> 
         .inner
 }
 
-fn collect_item_counts(inventory: &Inventory) -> Vec<(ItemKind, usize)> {
-    let mut counts: Vec<(ItemKind, usize)> = Vec::new();
+fn collect_item_counts(inventory: &Inventory) -> Vec<(ItemKind, u16)> {
+    let mut counts: Vec<(ItemKind, u16)> = Vec::new();
     for &item in &inventory.0 {
         if let Some(entry) = counts.iter_mut().find(|(k, _)| *k == item) {
             entry.1 += 1;
@@ -217,7 +206,7 @@ struct HudActions {
 fn render_hud(
     ctx: &egui::Context,
     stats: &crate::monster::Stats,
-    item_counts: &[(ItemKind, usize)],
+    item_counts: &[(ItemKind, u16)],
     depth: u32,
     near_staircase: bool,
 ) -> HudActions {
@@ -292,61 +281,6 @@ fn render_menu(ctx: &egui::Context) -> MenuActions {
     actions
 }
 
-#[derive(Default)]
-struct ItemDialogResult {
-    cancel: bool,
-    use_item: Option<ItemKind>,
-}
-
-fn render_item_dialog(
-    ctx: &egui::Context,
-    dialog_kind: ItemDialogKind,
-    item_counts: &[(ItemKind, usize)],
-) -> ItemDialogResult {
-    let title = match dialog_kind {
-        ItemDialogKind::Potions => "Quaff a Potion",
-        ItemDialogKind::Scrolls => "Read a Scroll",
-    };
-
-    let relevant_items: Vec<(ItemKind, usize)> = item_counts
-        .iter()
-        .filter(|(k, _)| match dialog_kind {
-            ItemDialogKind::Potions => matches!(k, ItemKind::Potion(_)),
-            ItemDialogKind::Scrolls => matches!(k, ItemKind::Scroll(_)),
-        })
-        .copied()
-        .collect();
-
-    let mut result = ItemDialogResult::default();
-    egui::Window::new(title)
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
-            ui.set_min_width(200.0);
-
-            if relevant_items.is_empty() {
-                ui.label("You have none.");
-            } else {
-                for (item, count) in &relevant_items {
-                    ui.horizontal(|ui| {
-                        draw_item_icon(ui, *item, *count);
-                        let label = format!("{} (x{})", item_display_name(*item), count);
-                        if ui.button(label).clicked() {
-                            result.use_item = Some(*item);
-                        }
-                    });
-                }
-            }
-
-            ui.add_space(4.0);
-            if ui.button("Cancel").clicked() {
-                result.cancel = true;
-            }
-        });
-    result
-}
-
 fn draw_stat_bar(ui: &mut egui::Ui, ratio: f32, color: egui::Color32, label: &str) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(BAR_WIDTH, BAR_HEIGHT), egui::Sense::hover());
     let painter = ui.painter_at(rect);
@@ -374,17 +308,13 @@ fn draw_stat_bar(ui: &mut egui::Ui, ratio: f32, color: egui::Color32, label: &st
     );
 }
 
-fn draw_item_icon(ui: &mut egui::Ui, item: ItemKind, count: usize) {
-    let size = BAR_HEIGHT; // square icon, same height as the bars
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-    let painter = ui.painter_at(rect);
-    let center = rect.center();
-
+/// Draw the item shape into an exact rect (shared by HUD and palette).
+pub fn draw_item_icon_at(painter: egui::Painter, rect: egui::Rect, item: ItemKind) {
     painter.rect_filled(rect, 2.0_f32, egui::Color32::from_rgb(40, 40, 40));
-
+    let center = rect.center();
+    let size = rect.width().min(rect.height());
     match item {
         ItemKind::Potion(_) => {
-            // Upward-pointing triangle, matching the in-game RegularPolygon mesh.
             let r = size * 0.32;
             let pts = vec![
                 egui::pos2(center.x, center.y - r),
@@ -393,20 +323,25 @@ fn draw_item_icon(ui: &mut egui::Ui, item: ItemKind, count: usize) {
             ];
             painter.add(egui::Shape::convex_polygon(
                 pts,
-                egui::Color32::from_rgb(51, 217, 76), // matches Color::srgb(0.2, 0.85, 0.3)
+                egui::Color32::from_rgb(51, 217, 76),
                 egui::Stroke::NONE,
             ));
         }
         ItemKind::Scroll(_) => {
-            // Small square, matching the in-game Rectangle mesh.
             let half = size * 0.28;
             let sq = egui::Rect::from_center_size(center, egui::vec2(half * 2.0, half * 2.0));
-            painter.rect_filled(sq, 1.0_f32, egui::Color32::from_rgb(204, 204, 191)); // matches Color::srgb(0.8, 0.8, 0.75)
+            painter.rect_filled(sq, 1.0_f32, egui::Color32::from_rgb(204, 204, 191));
         }
     }
+}
+
+fn draw_item_icon(ui: &mut egui::Ui, item: ItemKind, count: u16) {
+    let size = BAR_HEIGHT;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    draw_item_icon_at(ui.painter_at(rect), rect, item);
 
     if count > 1 {
-        painter.text(
+        ui.painter().text(
             rect.right_bottom() + egui::vec2(-2.0, -2.0),
             egui::Align2::RIGHT_BOTTOM,
             count.to_string(),
@@ -415,9 +350,8 @@ fn draw_item_icon(ui: &mut egui::Ui, item: ItemKind, count: usize) {
         );
     }
 
-    // Show tooltip on hover
     if response.hovered() {
-        response.on_hover_text(item_display_name(item));
+        response.on_hover_text(item_name(item, count));
     }
 }
 

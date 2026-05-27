@@ -7,8 +7,8 @@
   * Break `apply_missile_knockback` (~135 lines, [projectile.rs](src/effects/projectile.rs)) into helpers for knockback, hit-flash, and drop-spawning.
   * Investigate the `.expect()` in [dungeon/terrain.rs](src/dungeon/terrain.rs) that has reportedly failed before.
   * Investigate `validate()` failures noted in [nav.rs](src/nav.rs) when terrain is destroyed.
-  * The `#[allow(unused)]` rope-tautness code in [rope.rs](src/effects/rope.rs) — either re-enable or delete.
   * Make `ItemKind` data-driven instead of a hardcoded enum (see the TODO in [item.rs](src/item.rs)).
+  * I've seen `buffer_with_style` in fov.rs crash (I was jammed against a door; no idea how to reproduce). Let's test when `buffer` crashes and see if we can prevent it.
   
   # Larger projects
   * Think about how to break this into a library + game definition

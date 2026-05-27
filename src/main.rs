@@ -21,9 +21,10 @@ use vector_arena::{
         },
         rope,
     },
+    command_palette::CommandPalettePlugin,
     fov::{self, OpaqueVertices},
     item::{
-        Inventory, ItemUseDialog, animate_pickup, apply_item_use, open_item_dialog, pickup_items,
+        Inventory, animate_pickup, execute_item_command, pickup_items, register_item_commands,
     },
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
@@ -48,17 +49,18 @@ fn main() {
             // bevy_landmass::debug::Landmass2dDebugPlugin::default(),
             rope::RopePlugin,
             UiPlugin,
+            CommandPalettePlugin,
         ))
         .init_state::<GameState>()
         .init_resource::<SavedPlayer>()
         .add_systems(Startup, setup)
         .add_systems(Startup, enable_ui_input_absorption)
         .add_systems(Startup, init_trail_meshes)
+        .add_systems(Startup, register_item_commands)
         .add_systems(OnEnter(GameState::Restart), on_enter_restart)
         .add_systems(OnEnter(GameState::Descend), on_enter_descend)
         .add_systems(OnExit(GameState::InLevel), save_player_on_exit)
-        .add_systems(Update, open_item_dialog)
-        .add_systems(Update, apply_item_use.after(open_item_dialog))
+        .add_systems(Update, execute_item_command)
         .add_systems(Update, set_target_on_click)
         .add_systems(Update, move_player)
         .add_systems(Update, advance_exploration.after(move_player))
@@ -83,7 +85,6 @@ fn main() {
         .insert_resource(Gravity::ZERO)
         .insert_resource(SubstepCount(40)) // To make rope physics behave well.
         .init_resource::<DungeonDepth>()
-        .init_resource::<ItemUseDialog>()
         .run();
 }
 
