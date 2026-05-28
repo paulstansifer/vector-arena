@@ -8,9 +8,7 @@ use geo::{BoundingRect, Contains};
 use rand::Rng as _;
 
 use crate::{
-    command_palette::{
-        CommandPaletteRegistry, CommandPaletteState, PaletteEntry, PaletteProvider, letter_to_idx,
-    },
+    command_palette::{CommandPaletteRegistry, CommandPaletteState, PaletteEntry, PaletteProvider},
     dungeon::terrain::DungeonState,
     monster::Stats,
     player::{ExplorationGoal, Player},
@@ -101,6 +99,7 @@ pub fn animate_pickup(
     mut inventory_query: Query<&mut Inventory, With<Player>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut log: ResMut<MessageLog>,
+    mut letter_map: ResMut<crate::command_palette::LetterMap>,
 ) {
     // Update target each frame so the item tracks the player if they move.
     let player_pos = player_query.single().map(|t| t.translation.truncate()).ok();
@@ -129,6 +128,7 @@ pub fn animate_pickup(
         if picking_up.progress >= 1.0 {
             log.push(format!("You pick up {}.", item_name(item.0, 1)));
             inventory.0.push(item.0);
+            letter_map.get_or_assign_item(item.0);
             commands.entity(entity).despawn();
         }
     }
@@ -137,21 +137,13 @@ pub fn animate_pickup(
 // ── Command palette integration ──────────────────────────────────────────────
 
 /// Build deduplicated palette entries for `command` from inventory items matching `filter`.
-/// Letters are assigned by global first-appearance order across ALL item types (Rogue-style),
-/// so potions and scrolls share a single letter namespace per inventory.
+/// Letters are stable, assigned on first pickup and persistent for the session.
 fn deduplicated_entries(
     command: &str,
     inventory: &Inventory,
     filter: fn(&ItemKind) -> bool,
+    letter_map: &crate::command_palette::LetterMap,
 ) -> Vec<PaletteEntry> {
-    // Global unique-type order across all item types (for consistent letter assignment)
-    let mut global_order: Vec<ItemKind> = Vec::new();
-    for item in &inventory.0 {
-        if !global_order.contains(item) {
-            global_order.push(*item);
-        }
-    }
-
     // Deduped counts for filtered items only
     let mut unique: Vec<(ItemKind, u16)> = Vec::new();
     for item in &inventory.0 {
@@ -164,27 +156,31 @@ fn deduplicated_entries(
         }
     }
 
-    unique
+    let mut entries: Vec<PaletteEntry> = unique
         .iter()
-        .map(|(item, count)| {
-            let global_idx = global_order.iter().position(|t| t == item).unwrap_or(0);
-            let letter = (b'a' + global_idx as u8) as char;
-
-            PaletteEntry {
+        .filter_map(|(item, count)| {
+            letter_map.get_item(*item).map(|letter| PaletteEntry {
                 key: format!("{command} {letter}"),
                 description: item_name(*item, *count),
                 icon: Some(*item),
                 is_complete: true,
-            }
+            })
         })
-        .collect()
+        .collect();
+    entries.sort_by_key(|e| e.key.clone());
+    entries
 }
 
 /// Provides `q` (quaff) and `r` (read) completions.
 pub struct ItemCommandProvider;
 
 impl PaletteProvider for ItemCommandProvider {
-    fn completions(&self, input: &str, inventory: &Inventory) -> Vec<PaletteEntry> {
+    fn completions(
+        &self,
+        input: &str,
+        inventory: &Inventory,
+        letter_map: &crate::command_palette::LetterMap,
+    ) -> Vec<PaletteEntry> {
         let tokens: Vec<&str> = input.split_whitespace().collect();
         match tokens.as_slice() {
             [] => vec![
@@ -202,12 +198,18 @@ impl PaletteProvider for ItemCommandProvider {
                 },
             ],
             // Match both "q" (browsing sub-menu) and "q <letter>" (complete command)
-            ["q"] | ["q", _] => {
-                deduplicated_entries("q", inventory, |i| matches!(i, ItemKind::Potion(_)))
-            }
-            ["r"] | ["r", _] => {
-                deduplicated_entries("r", inventory, |i| matches!(i, ItemKind::Scroll(_)))
-            }
+            ["q"] | ["q", _] => deduplicated_entries(
+                "q",
+                inventory,
+                |i| matches!(i, ItemKind::Potion(_)),
+                letter_map,
+            ),
+            ["r"] | ["r", _] => deduplicated_entries(
+                "r",
+                inventory,
+                |i| matches!(i, ItemKind::Scroll(_)),
+                letter_map,
+            ),
             _ => vec![],
         }
     }
@@ -217,20 +219,12 @@ pub fn register_item_commands(mut registry: ResMut<CommandPaletteRegistry>) {
     registry.register(Box::new(ItemCommandProvider));
 }
 
-/// Look up the item type at `global_idx` in the inventory's global unique-type order,
-/// verify it passes `filter`, and remove its first occurrence.
+/// Verify `target` passes `filter`, then remove its first occurrence from inventory.
 fn find_and_remove_item(
     inventory: &mut Inventory,
     filter: fn(&ItemKind) -> bool,
-    global_idx: usize,
+    target: ItemKind,
 ) -> Option<ItemKind> {
-    let mut global_order: Vec<ItemKind> = Vec::new();
-    for item in &inventory.0 {
-        if !global_order.contains(item) {
-            global_order.push(*item);
-        }
-    }
-    let target = *global_order.get(global_idx)?;
     if !filter(&target) {
         return None;
     }
@@ -248,6 +242,7 @@ pub fn execute_item_command(
     dungeon_state: Res<DungeonState>,
     mut log: ResMut<MessageLog>,
     mut commands: Commands,
+    letter_map: Res<crate::command_palette::LetterMap>,
 ) {
     let Some(cmd) = palette.pending_command.take() else { return };
 
@@ -261,10 +256,12 @@ pub fn execute_item_command(
     match parts.as_slice() {
         ["q", letter_str] => {
             let Some(ch) = letter_str.chars().next() else { return };
-            let Some(idx) = letter_to_idx(ch) else { return };
-            if let Some(item) =
-                find_and_remove_item(&mut inventory, |i| matches!(i, ItemKind::Potion(_)), idx)
-            {
+            let Some(item_kind) = letter_map.item_for_letter(ch) else { return };
+            if let Some(item) = find_and_remove_item(
+                &mut inventory,
+                |i| matches!(i, ItemKind::Potion(_)),
+                item_kind,
+            ) {
                 let gained = 20.0_f32.min(stats.max_hp - stats.hp);
                 stats.hp = (stats.hp + 20.0).min(stats.max_hp);
                 log.push(format!("You quaff {}. (+{} HP)", item_name(item, 1), gained as i32));
@@ -272,10 +269,12 @@ pub fn execute_item_command(
         }
         ["r", letter_str] => {
             let Some(ch) = letter_str.chars().next() else { return };
-            let Some(idx) = letter_to_idx(ch) else { return };
-            if let Some(item) =
-                find_and_remove_item(&mut inventory, |i| matches!(i, ItemKind::Scroll(_)), idx)
-            {
+            let Some(item_kind) = letter_map.item_for_letter(ch) else { return };
+            if let Some(item) = find_and_remove_item(
+                &mut inventory,
+                |i| matches!(i, ItemKind::Scroll(_)),
+                item_kind,
+            ) {
                 if let Some(dest) = random_in_playable_area(&dungeon_state) {
                     position.0 = dest;
                     transform.translation.x = dest.x;

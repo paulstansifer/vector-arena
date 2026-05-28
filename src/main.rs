@@ -5,7 +5,7 @@ use bevy_landmass::{NavMeshHandle, prelude::*};
 
 use vector_arena::{
     AGENT_RADIUS, DungeonDepth, GameLayer, GameState, WorldBounds,
-    command_palette::CommandPalettePlugin,
+    command_palette::{CommandPalettePlugin, LetterMap},
     dungeon::{
         level_generation::TerrainGeometry,
         terrain::{
@@ -13,7 +13,6 @@ use vector_arena::{
             geometry_to_collider, geometry_to_mesh, sync_dungeon_to_entities,
         },
     },
-    goto,
     effects::{
         crumble_terrain::{Fragile, handle_right_click_excavation},
         projectile::{
@@ -24,6 +23,7 @@ use vector_arena::{
         rope,
     },
     fov::{self, OpaqueVertices},
+    goto,
     item::{Inventory, animate_pickup, execute_item_command, pickup_items, register_item_commands},
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
@@ -55,6 +55,7 @@ fn main() {
         ))
         .init_state::<GameState>()
         .init_resource::<SavedPlayer>()
+        .init_resource::<LetterMap>()
         .add_systems(Startup, setup)
         .add_systems(Startup, enable_ui_input_absorption)
         .add_systems(Startup, init_trail_meshes)
@@ -87,6 +88,7 @@ fn main() {
         .add_systems(Update, goto::compute_goto_assignments)
         .add_systems(Update, goto::reset_goto_on_close)
         .add_systems(Update, goto::execute_goto_command)
+        .add_systems(Update, monster::execute_monster_command)
         .init_resource::<goto::GotoState>()
         .insert_resource(Gravity::ZERO)
         .insert_resource(SubstepCount(40)) // To make rope physics behave well.
@@ -108,9 +110,11 @@ fn on_enter_restart(
     mut depth: ResMut<DungeonDepth>,
     mut message_log: ResMut<MessageLog>,
     mut next_state: ResMut<NextState<GameState>>,
+    mut monster_letters: ResMut<LetterMap>,
 ) {
     message_log.clear();
     depth.0 = 1;
+    monster_letters.clear_monsters();
     spawn_game_world(
         &mut commands,
         &mut meshes,
@@ -120,6 +124,7 @@ fn on_enter_restart(
         window.height(),
         1,
         None,
+        &mut monster_letters,
     );
     next_state.set(GameState::InLevel);
 }
@@ -134,9 +139,11 @@ fn on_enter_descend(
     mut message_log: ResMut<MessageLog>,
     saved_player: Res<SavedPlayer>,
     mut next_state: ResMut<NextState<GameState>>,
+    mut monster_letters: ResMut<LetterMap>,
 ) {
     depth.0 += 1;
     message_log.push(format!("You descend to depth {}.", depth.0));
+    monster_letters.clear_monsters();
     spawn_game_world(
         &mut commands,
         &mut meshes,
@@ -146,6 +153,7 @@ fn on_enter_descend(
         window.height(),
         depth.0,
         saved_player.0.as_ref().map(|(stats, inv)| (*stats, Inventory(inv.0.clone()))),
+        &mut monster_letters,
     );
     next_state.set(GameState::InLevel);
 }
@@ -167,6 +175,7 @@ fn spawn_game_world(
     window_height: f32,
     depth: u32,
     saved_player: Option<(Stats, Inventory)>,
+    monster_letters: &mut LetterMap,
 ) {
     // Create the archipelago (the "world" for landmass pathfinding)
     let archipelago_id = commands
@@ -271,6 +280,7 @@ fn spawn_game_world(
         archipelago_id,
         depth,
         saved_player,
+        monster_letters,
     );
 
     // Create points of interest from room centers and corridor endpoints.

@@ -209,6 +209,7 @@ pub fn execute_goto_command(
 
     let parts: Vec<&str> = command.split_whitespace().collect();
     if parts.len() != 2 || parts[0] != "g" {
+        palette.pending_command = Some(command);
         return;
     }
 

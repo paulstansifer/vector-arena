@@ -26,6 +26,7 @@ pub fn populate(
     archipelago_id: Entity,
     depth: u32,
     saved_player: Option<(Stats, Inventory)>,
+    monster_letters: &mut crate::command_palette::LetterMap,
 ) {
     let mut rng = rand::thread_rng();
 
@@ -136,6 +137,7 @@ pub fn populate(
                 AgentTarget2d::None,
             ))
             .id();
+        monster_letters.assign_monster(monster);
         if let Some(kind) = drop {
             commands.entity(monster).insert(MonsterDrop(kind));
         }

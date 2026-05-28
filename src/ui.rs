@@ -86,6 +86,7 @@ impl Plugin for UiPlugin {
             .add_systems(EguiPrimaryContextPass, ui_system)
             .add_systems(EguiPrimaryContextPass, crate::command_palette::palette_system)
             .add_systems(EguiPrimaryContextPass, crate::goto::render_goto_markers)
+            .add_systems(EguiPrimaryContextPass, crate::monster::render_monster_markers)
             .add_systems(Update, crate::monster::refresh_monster_tooltips)
             .add_systems(Update, show_world_entity_tooltip);
     }

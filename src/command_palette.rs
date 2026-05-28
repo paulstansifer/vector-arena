@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 // Command palette: extensible spacebar-triggered command entry.
 // Other modules register PaletteProviders to contribute commands;
 // the UI renders completions and writes pending_command as a String.
@@ -9,6 +11,7 @@ use bevy_landmass::prelude::AgentTarget2d;
 use crate::{
     goto::{self, GotoState},
     item::{Inventory, ItemKind},
+    monster::{Monster, MonsterState, Stats},
     player::{ExplorationGoal, MoveTarget, Player},
     sprite::SpriteEguiTextures,
 };
@@ -32,7 +35,12 @@ pub struct CommandPaletteState {
 }
 
 pub trait PaletteProvider: Send + Sync + 'static {
-    fn completions(&self, input: &str, inventory: &Inventory) -> Vec<PaletteEntry>;
+    fn completions(
+        &self,
+        input: &str,
+        inventory: &Inventory,
+        letter_map: &LetterMap,
+    ) -> Vec<PaletteEntry>;
 }
 
 #[derive(Resource, Default)]
@@ -45,8 +53,13 @@ impl CommandPaletteRegistry {
         self.providers.push(provider);
     }
 
-    pub fn completions(&self, input: &str, inventory: &Inventory) -> Vec<PaletteEntry> {
-        self.providers.iter().flat_map(|p| p.completions(input, inventory)).collect()
+    pub fn completions(
+        &self,
+        input: &str,
+        inventory: &Inventory,
+        letter_map: &LetterMap,
+    ) -> Vec<PaletteEntry> {
+        self.providers.iter().flat_map(|p| p.completions(input, inventory, letter_map)).collect()
     }
 }
 
@@ -64,21 +77,39 @@ pub fn open_palette_system(
     keyboard: Res<ButtonInput<Key>>,
     mut state: ResMut<CommandPaletteState>,
     mut player_query: Query<
-        (Entity, &mut MoveTarget, &mut AgentTarget2d, &mut LinearVelocity),
+        (Entity, &mut MoveTarget, &mut AgentTarget2d, &mut LinearVelocity, &Inventory),
         With<Player>,
     >,
     mut commands: Commands,
+    registry: Res<CommandPaletteRegistry>,
+    letter_map: Res<LetterMap>,
+    goto_state: Res<GotoState>,
 ) {
     if !state.open {
         // Space opens with blank input; a letter key opens pre-filled with "[letter] "
-        // so completions for that command show immediately on the first frame.
+        // only if that letter is a recognized top-level palette command.
         let open_with = if keyboard.just_pressed(Key::Space) {
             Some(String::new())
         } else {
             keyboard
                 .get_just_pressed()
                 .find_map(|k| if let Key::Character(ch) = k { Some(ch) } else { None })
-                .map(|ch| format!("{ch} "))
+                .and_then(|ch| {
+                    let empty = Inventory::default();
+                    let inventory = player_query.single().map(|q| q.4).unwrap_or(&empty);
+                    let top_level: Vec<_> = registry
+                        .completions("", inventory, &letter_map)
+                        .into_iter()
+                        .chain(goto::goto_completions("", &goto_state))
+                        .collect();
+                    let is_cmd = top_level.iter().any(|e| e.key == ch.as_str());
+                    let is_monster = ch.len() == 1
+                        && ch
+                            .chars()
+                            .next()
+                            .map_or(false, |c| letter_map.entity_for_letter(c).is_some());
+                    (is_cmd || is_monster).then(|| format!("{ch} "))
+                })
         };
 
         if let Some(initial_input) = open_with {
@@ -86,7 +117,7 @@ pub fn open_palette_system(
             state.input = initial_input;
             state.selected_idx = 0;
 
-            if let Ok((entity, mut move_target, mut agent_target, mut velocity)) =
+            if let Ok((entity, mut move_target, mut agent_target, mut velocity, _)) =
                 player_query.single_mut()
             {
                 move_target.active = false;
@@ -101,6 +132,42 @@ pub fn open_palette_system(
     }
 }
 
+fn monster_completions(
+    input: &str,
+    letter_map: &LetterMap,
+    monster_query: &Query<(Entity, &Stats, &MonsterState), With<Monster>>,
+) -> Vec<PaletteEntry> {
+    let trimmed = input.trim();
+    let show_all = trimmed.is_empty();
+    let show_one = trimmed.len() == 1 && trimmed.chars().next().map_or(false, |c| c.is_uppercase());
+    if !show_all && !show_one {
+        return vec![];
+    }
+    let mut entries: Vec<PaletteEntry> = monster_query
+        .iter()
+        .filter_map(|(entity, stats, state)| {
+            let letter = letter_map.letter_for_monster(entity)?;
+            let key = letter.to_string();
+            if show_one && trimmed != key.as_str() {
+                return None;
+            }
+            Some(PaletteEntry {
+                key,
+                description: format!(
+                    "{} {}/{} HP",
+                    state.label(),
+                    stats.hp as i32,
+                    stats.max_hp as i32
+                ),
+                icon: None,
+                is_complete: true,
+            })
+        })
+        .collect();
+    entries.sort_by_key(|e| e.key.clone());
+    entries
+}
+
 pub fn palette_system(
     mut contexts: bevy_egui::EguiContexts,
     mut palette: ResMut<CommandPaletteState>,
@@ -109,6 +176,8 @@ pub fn palette_system(
     player_query: Query<(&Inventory, &Transform), With<Player>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     sprite_textures: Res<SpriteEguiTextures>,
+    letter_map: Res<LetterMap>,
+    monster_query: Query<(Entity, &Stats, &MonsterState), With<Monster>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -117,8 +186,9 @@ pub fn palette_system(
     };
 
     if palette.open {
-        let mut completions = registry.completions(&palette.input, inventory);
+        let mut completions = registry.completions(&palette.input, inventory, &letter_map);
         completions.extend(goto::goto_completions(&palette.input, &goto_state));
+        completions.extend(monster_completions(&palette.input, &letter_map, &monster_query));
 
         let screen_rect = ctx.viewport_rect();
         let screen_size = Vec2::new(screen_rect.width(), screen_rect.height());
@@ -363,12 +433,70 @@ fn palette_row_label(
     job
 }
 
+/// Unified letter map: items use lowercase a-z (stable across sessions),
+/// monsters use uppercase A-Z (recycled when monsters die or the level exits).
+#[derive(Resource, Default)]
+pub struct LetterMap {
+    items: HashMap<ItemKind, char>,
+    monsters: HashMap<Entity, char>,
+}
+
+impl LetterMap {
+    // ── Item side ────────────────────────────────────────────────────────────
+
+    pub fn get_or_assign_item(&mut self, item: ItemKind) -> Option<char> {
+        if let Some(&letter) = self.items.get(&item) {
+            return Some(letter);
+        }
+        for letter in 'a'..='z' {
+            if !self.items.values().any(|&l| l == letter) {
+                self.items.insert(item, letter);
+                return Some(letter);
+            }
+        }
+        None
+    }
+
+    pub fn get_item(&self, item: ItemKind) -> Option<char> { self.items.get(&item).copied() }
+
+    pub fn item_for_letter(&self, letter: char) -> Option<ItemKind> {
+        self.items.iter().find(|(_, l)| **l == letter).map(|(item, _)| *item)
+    }
+
+    // ── Monster side ─────────────────────────────────────────────────────────
+
+    pub fn assign_monster(&mut self, entity: Entity) -> Option<char> {
+        if let Some(&letter) = self.monsters.get(&entity) {
+            return Some(letter);
+        }
+        for letter in 'A'..='Z' {
+            if !self.monsters.values().any(|&l| l == letter) {
+                self.monsters.insert(entity, letter);
+                return Some(letter);
+            }
+        }
+        None
+    }
+
+    pub fn release_monster(&mut self, entity: Entity) { self.monsters.remove(&entity); }
+
+    pub fn letter_for_monster(&self, entity: Entity) -> Option<char> {
+        self.monsters.get(&entity).copied()
+    }
+
+    pub fn entity_for_letter(&self, letter: char) -> Option<Entity> {
+        self.monsters.iter().find(|(_, l)| **l == letter).map(|(e, _)| *e)
+    }
+
+    pub fn clear_monsters(&mut self) { self.monsters.clear(); }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::item::{ItemCommandProvider, PotionColor, ScrollName};
 
-    /// Inventory: Red×2, Readme×2, Blue×1, Agents×1 (interleaved so global order is
+    /// Inventory: Red×2, Readme×2, Blue×1, Agents×1 (with stable letters:
     /// Red='a', Readme='b', Blue='c', Agents='d').
     fn test_inventory() -> Inventory {
         Inventory(vec![
@@ -379,6 +507,15 @@ mod tests {
             ItemKind::Scroll(ScrollName::Readme),
             ItemKind::Scroll(ScrollName::Agents),
         ])
+    }
+
+    fn test_letter_map() -> LetterMap {
+        let mut map = LetterMap::default();
+        map.get_or_assign_item(ItemKind::Potion(PotionColor::Red));
+        map.get_or_assign_item(ItemKind::Scroll(ScrollName::Readme));
+        map.get_or_assign_item(ItemKind::Potion(PotionColor::Blue));
+        map.get_or_assign_item(ItemKind::Scroll(ScrollName::Agents));
+        map
     }
 
     fn keys(entries: &[PaletteEntry]) -> Vec<&str> {
@@ -394,18 +531,20 @@ mod tests {
     }
 
     #[test]
-    fn quaff_uses_global_letters() {
+    fn quaff_uses_stable_letters() {
         let inv = test_inventory();
-        let entries = ItemCommandProvider.completions("q ", &inv);
+        let letter_map = test_letter_map();
+        let entries = ItemCommandProvider.completions("q ", &inv, &letter_map);
         assert_eq!(keys(&entries), ["q a", "q c"]);
         assert_eq!(entries[0].description, "2 Red potions");
         assert_eq!(entries[1].description, "a Blue potion");
     }
 
     #[test]
-    fn read_uses_global_letters() {
+    fn read_uses_stable_letters() {
         let inv = test_inventory();
-        let entries = ItemCommandProvider.completions("r ", &inv);
+        let letter_map = test_letter_map();
+        let entries = ItemCommandProvider.completions("r ", &inv, &letter_map);
         assert_eq!(keys(&entries), ["r b", "r d"]);
         assert_eq!(entries[0].description, "2 scrolls titled 'Readme'");
         assert_eq!(entries[1].description, "a scroll titled 'Agents'");
@@ -415,15 +554,16 @@ mod tests {
     #[test]
     fn down_space_down_equals_r_d() {
         let inv = test_inventory();
+        let letter_map = test_letter_map();
         let p = ItemCommandProvider;
 
-        let root = p.completions("", &inv);
+        let root = p.completions("", &inv, &letter_map);
         let after_down = press_down("", &root); // → "r"
 
         // Space typed by user (no auto-space because "r" is the key of a non-complete root entry,
         // but completions at this point are already read entries since ["r"] matches the sub-menu)
         let spaced = after_down + " "; // "r "
-        let read = p.completions(&spaced, &inv);
+        let read = p.completions(&spaced, &inv, &letter_map);
         let final_input = press_down(&spaced, &read); // → "r d"
 
         assert_eq!(final_input, "r d");
@@ -439,17 +579,18 @@ mod tests {
     #[test]
     fn x_backspace_then_down_space_down_equals_r_d() {
         let inv = test_inventory();
+        let letter_map = test_letter_map();
         let p = ItemCommandProvider;
 
         // 'x' matches nothing
-        assert!(p.completions("x", &inv).is_empty());
+        assert!(p.completions("x", &inv, &letter_map).is_empty());
         // After backspace we're back at "" with root completions
-        let root = p.completions("", &inv);
+        let root = p.completions("", &inv, &letter_map);
         assert_eq!(root.len(), 2);
 
         let after_down = press_down("", &root);
         let spaced = after_down + " ";
-        let read = p.completions(&spaced, &inv);
+        let read = p.completions(&spaced, &inv, &letter_map);
         let final_input = press_down(&spaced, &read);
 
         assert_eq!(final_input, "r d");

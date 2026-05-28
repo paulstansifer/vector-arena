@@ -4,8 +4,7 @@
 // via collision events.  Global time dilation while missiles are in flight is
 // handled separately in `crate::time_scale`.
 use avian2d::prelude::*;
-use bevy::input::keyboard::Key;
-use bevy::prelude::*;
+use bevy::{input::keyboard::Key, prelude::*};
 use rand::Rng;
 use std::collections::HashSet;
 
@@ -210,6 +209,7 @@ pub fn apply_missile_knockback(
     >,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut message_log: ResMut<MessageLog>,
+    mut monster_letters: ResMut<crate::command_palette::LetterMap>,
 ) {
     for (transform, missile_vel, missile) in missiles.iter() {
         let fired_by_player = missile.fired_by_player;
@@ -301,6 +301,7 @@ pub fn apply_missile_knockback(
                             Transform::from_translation(pos).with_scale(Vec3::splat(0.4)),
                         ));
                     }
+                    monster_letters.release_monster(hit);
                     commands.entity(hit).despawn();
                 }
             } else if is_player {

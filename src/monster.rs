@@ -6,7 +6,14 @@ use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use geo::Intersects;
 
-use crate::{dungeon::terrain::DungeonState, item::ItemKind, player::Player};
+use bevy_egui::egui;
+
+use crate::{
+    command_palette::CommandPaletteState,
+    dungeon::terrain::DungeonState,
+    item::ItemKind,
+    player::{ExplorationGoal, MoveTarget, Player},
+};
 
 pub const MONSTER_SPEED: f32 = 80.0;
 pub const MONSTER_MAX_HP: f32 = 20.0;
@@ -136,10 +143,19 @@ fn tick_state(
 }
 
 pub fn refresh_monster_tooltips(
-    mut query: Query<(&Stats, &MonsterState, &mut crate::ui::WorldTooltip), With<Monster>>,
+    mut query: Query<(Entity, &Stats, &MonsterState, &mut crate::ui::WorldTooltip), With<Monster>>,
+    letter_map: Res<crate::command_palette::LetterMap>,
 ) {
-    for (stats, state, mut tooltip) in query.iter_mut() {
-        tooltip.0 = format!("HP: {}/{} [{}]", stats.hp as i32, stats.max_hp as i32, state.label());
+    for (entity, stats, state, mut tooltip) in query.iter_mut() {
+        let letter_prefix =
+            letter_map.letter_for_monster(entity).map(|l| format!("[{l}] ")).unwrap_or_default();
+        tooltip.0 = format!(
+            "{}HP: {}/{} [{}]",
+            letter_prefix,
+            stats.hp as i32,
+            stats.max_hp as i32,
+            state.label()
+        );
     }
 }
 
@@ -203,4 +219,85 @@ fn random_wander_target(origin: Vec2, rng: &mut impl rand::Rng) -> Vec2 {
     let angle = rng.gen_range(0.0..std::f32::consts::TAU);
     let dist = rng.gen_range(50.0..MONSTER_WANDER_RANGE);
     origin + Vec2::new(angle.cos(), angle.sin()) * dist
+}
+
+pub fn render_monster_markers(
+    palette: Res<CommandPaletteState>,
+    letter_map: Res<crate::command_palette::LetterMap>,
+    monster_query: Query<(Entity, &Transform), With<Monster>>,
+    mut egui_context: bevy_egui::EguiContexts,
+    camera_query: Query<(&Camera, &GlobalTransform)>,
+) {
+    if !palette.open {
+        return;
+    }
+
+    let Ok((camera, camera_transform)) = camera_query.single() else { return };
+    let Ok(ctx) = egui_context.ctx_mut() else { return };
+
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("monster_markers"),
+    ));
+
+    for (entity, transform) in monster_query.iter() {
+        let Some(letter) = letter_map.letter_for_monster(entity) else { continue };
+        let Ok(viewport_pos) = camera.world_to_viewport(camera_transform, transform.translation)
+        else {
+            continue;
+        };
+        if viewport_pos.x < 0.0 || viewport_pos.y < 0.0 {
+            continue;
+        }
+        let screen_pos = egui::Pos2::new(viewport_pos.x, viewport_pos.y);
+        painter.circle_filled(
+            screen_pos,
+            10.0,
+            egui::Color32::from_rgba_unmultiplied(220, 60, 60, 150),
+        );
+        painter.text(
+            screen_pos,
+            egui::Align2::CENTER_CENTER,
+            letter.to_string(),
+            egui::FontId::monospace(12.0),
+            egui::Color32::WHITE,
+        );
+    }
+}
+
+/// Consumes a single-uppercase-letter pending command and paths the player toward that monster.
+pub fn execute_monster_command(
+    mut palette: ResMut<CommandPaletteState>,
+    letter_map: Res<crate::command_palette::LetterMap>,
+    monster_query: Query<&Transform, With<Monster>>,
+    mut player_query: Query<
+        (Entity, &Transform, &mut MoveTarget, &mut AgentTarget2d),
+        With<Player>,
+    >,
+    time: Res<Time>,
+    mut commands: Commands,
+) {
+    let Some(cmd) = palette.pending_command.as_deref() else { return };
+    let mut chars = cmd.chars();
+    let (Some(letter), None) = (chars.next(), chars.next()) else { return };
+    if !letter.is_uppercase() {
+        return;
+    }
+
+    let Some(monster_entity) = letter_map.entity_for_letter(letter) else { return };
+    palette.pending_command = None;
+
+    let destination = match monster_query.get(monster_entity) {
+        Ok(tf) => tf.translation.truncate(),
+        Err(_) => return,
+    };
+
+    if let Ok((entity, transform, mut move_target, mut agent_target)) = player_query.single_mut() {
+        move_target.destination = destination;
+        move_target.origin = transform.translation.truncate();
+        move_target.active = true;
+        move_target.time_set = time.elapsed();
+        *agent_target = AgentTarget2d::Point(destination);
+        commands.entity(entity).remove::<ExplorationGoal>();
+    }
 }
