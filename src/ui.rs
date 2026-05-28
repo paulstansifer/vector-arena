@@ -349,10 +349,20 @@ pub fn draw_item_icon_at(
     }
 }
 
-fn draw_item_icon(ui: &mut egui::Ui, item: ItemKind, count: u16, sprite_textures: &SpriteEguiTextures) {
+fn draw_item_icon(
+    ui: &mut egui::Ui,
+    item: ItemKind,
+    count: u16,
+    sprite_textures: &SpriteEguiTextures,
+) {
     let size = BAR_HEIGHT;
     let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-    draw_item_icon_at(ui.painter_at(rect), rect, item, sprite_textures.get(item));
+    draw_item_icon_at(
+        ui.painter_at(rect),
+        rect,
+        item,
+        sprite_textures.get(item),
+    );
 
     if count > 1 {
         ui.painter().text(

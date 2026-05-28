@@ -5,7 +5,7 @@ use bevy_landmass::{NavMeshHandle, prelude::*};
 
 use vector_arena::{
     AGENT_RADIUS, DungeonDepth, GameLayer, GameState, WorldBounds,
-    sprite::SpritePlugin,
+    command_palette::CommandPalettePlugin,
     dungeon::{
         level_generation::TerrainGeometry,
         terrain::{
@@ -22,15 +22,13 @@ use vector_arena::{
         },
         rope,
     },
-    command_palette::CommandPalettePlugin,
     fov::{self, OpaqueVertices},
-    item::{
-        Inventory, animate_pickup, execute_item_command, pickup_items, register_item_commands,
-    },
+    item::{Inventory, animate_pickup, execute_item_command, pickup_items, register_item_commands},
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
     player::{Player, advance_exploration, move_player, set_target_on_click},
     populate_level,
+    sprite::SpritePlugin,
     time_scale::manage_time_scale,
     ui::{MessageLog, UiPlugin, enable_ui_input_absorption},
 };

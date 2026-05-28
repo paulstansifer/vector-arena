@@ -32,9 +32,7 @@ pub struct SpriteEguiTextures {
 }
 
 impl SpriteEguiTextures {
-    pub fn get(&self, item: ItemKind) -> Option<&egui::TextureHandle> {
-        self.textures.get(&item)
-    }
+    pub fn get(&self, item: ItemKind) -> Option<&egui::TextureHandle> { self.textures.get(&item) }
 
     fn insert(&mut self, item: ItemKind, handle: egui::TextureHandle) {
         self.textures.entry(item).or_insert(handle);
@@ -94,15 +92,22 @@ fn parameterize_svg(bytes: &[u8], param: Option<&SpriteParam>) -> Vec<u8> {
     s.into_bytes()
 }
 
-fn read_svg_bytes(svg_path: &str, param: Option<&SpriteParam>) -> Option<Vec<u8>> {
-    let bytes = match std::fs::read(svg_path) {
-        Ok(b) => b,
-        Err(e) => {
-            error!("Failed to read SVG {svg_path}: {e}");
-            return None;
+fn get_embedded_svg(svg_path: &str) -> Option<&'static [u8]> {
+    match svg_path {
+        "sprites/potion.svg" => Some(include_bytes!("../sprites/potion.svg")),
+        "sprites/scroll.svg" => Some(include_bytes!("../sprites/scroll.svg")),
+        "sprites/hatch.svg" => Some(include_bytes!("../sprites/hatch.svg")),
+        "sprites/wizard.svg" => Some(include_bytes!("../sprites/wizard.svg")),
+        _ => {
+            error!("Unknown SVG sprite: {svg_path}");
+            None
         }
-    };
-    Some(parameterize_svg(&bytes, param))
+    }
+}
+
+fn read_svg_bytes(svg_path: &str, param: Option<&SpriteParam>) -> Option<Vec<u8>> {
+    let bytes = get_embedded_svg(svg_path)?;
+    Some(parameterize_svg(bytes, param))
 }
 
 fn load_svg_handle(
@@ -224,12 +229,9 @@ pub fn register_egui_sprites(
     let ctx = contexts.ctx_mut()?;
 
     for (entity, svg_sprite, maybe_item) in &query {
-        let Some(tex) = load_egui_texture(
-            &svg_sprite.svg_path,
-            svg_sprite.param.as_ref(),
-            ctx,
-            &mut cache,
-        ) else {
+        let Some(tex) =
+            load_egui_texture(&svg_sprite.svg_path, svg_sprite.param.as_ref(), ctx, &mut cache)
+        else {
             continue;
         };
         commands.entity(entity).insert(SpriteEguiData { texture: tex.clone() });
