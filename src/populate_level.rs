@@ -11,10 +11,10 @@ use crate::{
     AGENT_RADIUS, GameLayer, GameState, Staircase,
     effects::projectile::MonsterShootTimer,
     fov,
-    item::{Inventory, Item, ItemKind, PotionColor, ScrollName, item_name},
+    item::{ALL_ITEM_KINDS, Inventory, Item, ItemKind, item_name},
     monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterDrop, MonsterState, Stats},
     player::{MoveTarget, PLAYER_SPEED, Player},
-    sprite::{SpriteParam, SvgSprite, potion_hex, scroll_letter},
+    sprite::{SvgSprite, sprite_spec},
     ui::WorldTooltip,
 };
 
@@ -30,26 +30,20 @@ pub fn populate(
 ) {
     let mut rng = rand::thread_rng();
 
+    let room_center = |r: &Rect<f32>| { let c = r.center(); Vec2::new(c.x, c.y) };
+
     // Pick the player's room by index so we can exclude it when placing the staircase.
     let player_room_idx = if rooms.is_empty() { 0 } else { rng.gen_range(0..rooms.len()) };
+    let player_position = rooms.get(player_room_idx).map(room_center).unwrap_or(Vec2::ZERO);
 
-    let player_position = rooms
-        .get(player_room_idx)
-        .map(|r| {
-            let c = r.center();
-            Vec2::new(c.x, c.y)
-        })
-        .unwrap_or(Vec2::ZERO);
-
-    let staircase_position = rooms
+    let non_player_centers: Vec<Vec2> = rooms
         .iter()
         .enumerate()
         .filter(|(i, _)| *i != player_room_idx)
-        .map(|(_, r)| {
-            let c = r.center();
-            Vec2::new(c.x, c.y)
-        })
-        .collect::<Vec<_>>()
+        .map(|(_, r)| room_center(r))
+        .collect();
+
+    let staircase_position = non_player_centers
         .choose(&mut rng)
         .copied()
         .unwrap_or(player_position + Vec2::new(50.0, 0.0));
@@ -87,29 +81,11 @@ pub fn populate(
 
     let monster_mesh = meshes.add(Circle::new(AGENT_RADIUS));
 
-    let monster_positions: Vec<Vec2> = rooms
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| *i != player_room_idx)
-        .map(|(_, r)| {
-            let c = r.center();
-            Vec2::new(c.x, c.y)
-        })
-        .collect();
-
-    let all_item_kinds = [
-        ItemKind::Potion(PotionColor::Red),
-        ItemKind::Potion(PotionColor::Green),
-        ItemKind::Potion(PotionColor::Blue),
-        ItemKind::Scroll(ScrollName::Readme),
-        ItemKind::Scroll(ScrollName::Agents),
-        ItemKind::Scroll(ScrollName::License),
-    ];
 
     // One more monster per depth level (2 at depth 1, 3 at depth 2, …).
-    let monster_count = (depth as usize + 1).min(monster_positions.len());
-    for position in monster_positions.into_iter().take(monster_count) {
-        let drop = if rng.gen_bool(0.6) { all_item_kinds.choose(&mut rng).copied() } else { None };
+    let monster_count = (depth as usize + 1).min(non_player_centers.len());
+    for &position in non_player_centers.iter().take(monster_count) {
+        let drop = if rng.gen_bool(0.6) { ALL_ITEM_KINDS.choose(&mut rng).copied() } else { None };
         let monster = commands
             .spawn((
                 DespawnOnExit(GameState::InLevel),
@@ -145,7 +121,7 @@ pub fn populate(
 
     let item_count = rng.gen_range(4..=5);
     let chosen_kinds: Vec<ItemKind> =
-        all_item_kinds.choose_multiple(&mut rng, item_count).copied().collect();
+        ALL_ITEM_KINDS.choose_multiple(&mut rng, item_count).copied().collect();
 
     for kind in chosen_kinds {
         let room = rooms.choose(&mut rng).unwrap();
@@ -156,21 +132,12 @@ pub fn populate(
         let y = center.y + rng.gen_range(-half_h..=half_h);
         let pos = Vec3::new(x, y, fov::ON_FLOOR_Z);
 
-        let (svg_path, param) = match kind {
-            ItemKind::Potion(color) => {
-                ("sprites/potion.svg".to_string(), SpriteParam::Color(potion_hex(color)))
-            }
-            ItemKind::Scroll(name) => (
-                "sprites/scroll.svg".to_string(),
-                SpriteParam::Text(scroll_letter(name).to_string()),
-            ),
-        };
-
+        let (svg_path, param) = sprite_spec(kind);
         commands.spawn((
             DespawnOnExit(GameState::InLevel),
             Item(kind),
             WorldTooltip(item_name(kind, 1).to_string()),
-            SvgSprite { svg_path, param: Some(param) },
+            SvgSprite { svg_path: svg_path.into(), param: Some(param) },
             Transform::from_translation(pos).with_scale(Vec3::splat(0.4)),
         ));
     }

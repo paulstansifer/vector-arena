@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 use bevy_svg::prelude::{Svg, Svg2d};
 
-use crate::item::{Item, ItemKind, PotionColor, ScrollName};
+use crate::item::{ALL_ITEM_KINDS, Item, ItemKind, PotionColor, ScrollName};
 
 pub enum SpriteParam {
     Color(String),
@@ -198,16 +198,7 @@ pub fn init_sprite_egui_textures(
     let ctx = contexts.ctx_mut()?;
     *done = true;
 
-    let all_kinds = [
-        ItemKind::Potion(PotionColor::Red),
-        ItemKind::Potion(PotionColor::Green),
-        ItemKind::Potion(PotionColor::Blue),
-        ItemKind::Scroll(ScrollName::Readme),
-        ItemKind::Scroll(ScrollName::Agents),
-        ItemKind::Scroll(ScrollName::License),
-    ];
-
-    for kind in all_kinds {
+    for &kind in ALL_ITEM_KINDS {
         let (path, param) = sprite_spec(kind);
         if let Some(tex) = load_egui_texture(path, Some(&param), ctx, &mut cache) {
             sprite_textures.insert(kind, tex);

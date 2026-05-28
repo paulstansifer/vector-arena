@@ -48,6 +48,15 @@ pub enum ItemKind {
     Scroll(ScrollName),
 }
 
+pub const ALL_ITEM_KINDS: &[ItemKind] = &[
+    ItemKind::Potion(PotionColor::Red),
+    ItemKind::Potion(PotionColor::Green),
+    ItemKind::Potion(PotionColor::Blue),
+    ItemKind::Scroll(ScrollName::Readme),
+    ItemKind::Scroll(ScrollName::Agents),
+    ItemKind::Scroll(ScrollName::License),
+];
+
 #[derive(Component)]
 pub struct Item(pub ItemKind);
 

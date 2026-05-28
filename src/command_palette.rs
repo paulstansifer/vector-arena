@@ -104,10 +104,7 @@ pub fn open_palette_system(
                         .collect();
                     let is_cmd = top_level.iter().any(|e| e.key == ch.as_str());
                     let is_monster = ch.len() == 1
-                        && ch
-                            .chars()
-                            .next()
-                            .map_or(false, |c| letter_map.entity_for_letter(c).is_some());
+                        && ch.chars().next().is_some_and(|c| letter_map.entity_for_letter(c).is_some());
                     (is_cmd || is_monster).then(|| format!("{ch} "))
                 })
         };
@@ -139,7 +136,7 @@ fn monster_completions(
 ) -> Vec<PaletteEntry> {
     let trimmed = input.trim();
     let show_all = trimmed.is_empty();
-    let show_one = trimmed.len() == 1 && trimmed.chars().next().map_or(false, |c| c.is_uppercase());
+    let show_one = trimmed.len() == 1 && trimmed.chars().next().is_some_and(|c| c.is_uppercase());
     if !show_all && !show_one {
         return vec![];
     }
@@ -217,10 +214,6 @@ pub fn palette_system(
         }
     }
     Ok(())
-}
-
-pub fn letter_to_idx(c: char) -> Option<usize> {
-    c.is_ascii_lowercase().then(|| (c as u8 - b'a') as usize)
 }
 
 fn farthest_corner_anchor(player_screen: Vec2, screen_size: Vec2) -> egui::Align2 {
