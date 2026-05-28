@@ -7,6 +7,7 @@ use bevy_egui::egui;
 use bevy_landmass::prelude::AgentTarget2d;
 
 use crate::{
+    goto::{self, GotoState},
     item::{Inventory, ItemKind},
     player::{ExplorationGoal, MoveTarget, Player},
     sprite::SpriteEguiTextures,
@@ -91,6 +92,7 @@ pub fn palette_system(
     mut contexts: bevy_egui::EguiContexts,
     mut palette: ResMut<CommandPaletteState>,
     registry: Res<CommandPaletteRegistry>,
+    goto_state: Res<GotoState>,
     player_query: Query<(&Inventory, &Transform), With<Player>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     sprite_textures: Res<SpriteEguiTextures>,
@@ -102,7 +104,8 @@ pub fn palette_system(
     };
 
     if palette.open {
-        let completions = registry.completions(&palette.input, inventory);
+        let mut completions = registry.completions(&palette.input, inventory);
+        completions.extend(goto::goto_completions(&palette.input, &goto_state));
 
         let screen_rect = ctx.viewport_rect();
         let screen_size = Vec2::new(screen_rect.width(), screen_rect.height());

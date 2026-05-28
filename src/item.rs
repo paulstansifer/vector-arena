@@ -286,7 +286,9 @@ pub fn execute_item_command(
                 }
             }
         }
-        _ => {}
+        _ => {
+            palette.pending_command = Some(cmd);
+        }
     }
 }
 

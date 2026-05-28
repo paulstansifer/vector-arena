@@ -10,6 +10,7 @@ use geo::{
     MultiPolygon,
     algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay},
 };
+use bevy::math::Vec2;
 
 /// Convert the terrain geometry to a Bevy mesh for rendering.
 pub fn geometry_to_mesh(geometry: &MultiPolygon<f32>) -> Mesh {
@@ -71,6 +72,11 @@ pub struct DungeonCollider(pub Collider);
 
 #[derive(Resource)]
 pub struct DungeonVisuals(pub Handle<Mesh>);
+
+#[derive(Resource)]
+pub struct PointsOfInterest {
+    pub points: Vec<Vec2>,
+}
 
 /// Bevy system to sync dungeon visuals and collider from resources to entity components.
 pub fn sync_dungeon_to_entities(

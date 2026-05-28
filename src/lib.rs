@@ -3,6 +3,7 @@ pub mod command_palette;
 pub mod dungeon;
 pub mod effects;
 pub mod fov;
+pub mod goto;
 pub mod item;
 pub mod monster;
 pub mod nav;

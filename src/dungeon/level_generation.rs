@@ -8,6 +8,7 @@ use avian2d::prelude::Collider;
 use bevy::math::Vec2;
 use geo::{BooleanOps, LineString, MultiPolygon, Polygon, Rect, Translate};
 use rand::prelude::*;
+use std::collections::HashSet;
 
 /// Space around the edge of the map
 pub const MARGIN: f32 = 10.0;
@@ -20,6 +21,7 @@ pub struct TerrainGeometry {
     pub solid_rock: MultiPolygon<f32>,
     pub playable_area: MultiPolygon<f32>,
     pub rooms: Vec<Rect<f32>>,
+    pub corridor_ends: Vec<Vec2>,
     pub doors: Vec<DoorGeometry>,
 }
 
@@ -105,7 +107,7 @@ impl TerrainGeometry {
         allocated_partitions: Vec<(Partition, PartitionRole)>,
         rng: &mut impl Rng,
     ) -> Self {
-        let (rooms, playable_area, doors) = render(&allocated_partitions, rng);
+        let (rooms, playable_area, doors, corridor_ends) = render(&allocated_partitions, rng);
 
         // The terrain is the bounds minus the playable area
         let earth = Rect::<f32>::new((0.0, 0.0), (width, height));
@@ -119,6 +121,11 @@ impl TerrainGeometry {
 
         let rooms = rooms.into_iter().map(|r| r.translate(offset_x, offset_y)).collect();
 
+        let corridor_ends = corridor_ends
+            .into_iter()
+            .map(|pos| Vec2::new(pos.x + offset_x, pos.y + offset_y))
+            .collect();
+
         let doors = doors
             .into_iter()
             .map(|mut d| {
@@ -130,7 +137,7 @@ impl TerrainGeometry {
             })
             .collect();
 
-        TerrainGeometry { solid_rock: geometry, playable_area, rooms, doors }
+        TerrainGeometry { solid_rock: geometry, playable_area, rooms, corridor_ends, doors }
     }
 }
 
@@ -212,14 +219,15 @@ fn is_double_width_corridor_connection(
 
 // For rooms, shrink at least PADDING away from the edges (respecting MIN_ROOM_SIZE), adding hallways out to the edge.
 // For corridors, if there are two connections, draw a straight hallway between them; otherwise, draw hallways from all connections to the center point.
-// Returns rooms and a multipolygon representing passable space.
+// Returns rooms, a multipolygon representing passable space, doors, and corridor endpoints.
 fn render(
     bsp: &[(Partition, PartitionRole)],
     rng: &mut impl Rng,
-) -> (Vec<Rect<f32>>, MultiPolygon<f32>, Vec<DoorGeometry>) {
+) -> (Vec<Rect<f32>>, MultiPolygon<f32>, Vec<DoorGeometry>, Vec<Vec2>) {
     let mut rooms = Vec::new();
     let mut playables = MultiPolygon::new(vec![]);
     let mut doors = Vec::new();
+    let mut corridor_ends_set: HashSet<(u32, u32)> = HashSet::new();
 
     // Avoid hallway stubs leading to nothing.
     let empty_connections: Vec<(f32, f32)> = bsp
@@ -282,6 +290,23 @@ fn render(
         playables = playables.union(&region);
     }
 
+    // Collect all live corridor endpoints (connection points).
+    for (partition, role) in bsp {
+        if matches!(role, PartitionRole::Empty) {
+            continue;
+        }
+        for connection in partition_connections(partition).into_iter().filter(&is_live) {
+            let bits_x = connection.x.to_bits();
+            let bits_y = connection.y.to_bits();
+            corridor_ends_set.insert((bits_x, bits_y));
+        }
+    }
+
+    let corridor_ends: Vec<Vec2> = corridor_ends_set
+        .into_iter()
+        .map(|(bx, by)| Vec2::new(f32::from_bits(bx), f32::from_bits(by)))
+        .collect();
+
     for door in &doors {
         let h_x = door.hinge.0;
         let h_y = door.hinge.1;
@@ -289,7 +314,7 @@ fn render(
         playables = playables.difference(&MultiPolygon::new(vec![hinge_rect.to_polygon()]));
     }
 
-    (rooms, playables, doors)
+    (rooms, playables, doors, corridor_ends)
 }
 
 #[derive(Copy, Clone)]

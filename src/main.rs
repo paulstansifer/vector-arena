@@ -9,10 +9,11 @@ use vector_arena::{
     dungeon::{
         level_generation::TerrainGeometry,
         terrain::{
-            DungeonCollider, DungeonState, DungeonVisuals, TerrainMarker, geometry_to_collider,
-            geometry_to_mesh, sync_dungeon_to_entities,
+            DungeonCollider, DungeonState, DungeonVisuals, PointsOfInterest, TerrainMarker,
+            geometry_to_collider, geometry_to_mesh, sync_dungeon_to_entities,
         },
     },
+    goto,
     effects::{
         crumble_terrain::{Fragile, handle_right_click_excavation},
         projectile::{
@@ -83,6 +84,10 @@ fn main() {
         .add_systems(Update, pickup_items)
         .add_systems(Update, animate_pickup)
         .add_systems(Update, manage_time_scale.after(move_player))
+        .add_systems(Update, goto::compute_goto_assignments)
+        .add_systems(Update, goto::reset_goto_on_close)
+        .add_systems(Update, goto::execute_goto_command)
+        .init_resource::<goto::GotoState>()
         .insert_resource(Gravity::ZERO)
         .insert_resource(SubstepCount(40)) // To make rope physics behave well.
         .init_resource::<DungeonDepth>()
@@ -267,4 +272,16 @@ fn spawn_game_world(
         depth,
         saved_player,
     );
+
+    // Create points of interest from room centers and corridor endpoints.
+    let mut poi_points: Vec<Vec2> = terrain_geometry
+        .rooms
+        .iter()
+        .map(|r| {
+            let c = r.center();
+            Vec2::new(c.x, c.y)
+        })
+        .collect();
+    poi_points.extend(terrain_geometry.corridor_ends.iter().copied());
+    commands.insert_resource(PointsOfInterest { points: poi_points });
 }
