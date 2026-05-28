@@ -16,6 +16,8 @@ pub const MARGIN: f32 = 10.0;
 pub const PADDING: f32 = 10.0;
 pub const CORRIDOR_WIDTH: f32 = 35.0;
 const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
+const DOOR_PROB: f32 = 0.25 * 0.0;
+const DOUBLE_DOOR_PROB: f32 = 0.75 * 0.0;
 
 pub struct TerrainGeometry {
     pub solid_rock: MultiPolygon<f32>,
@@ -254,8 +256,8 @@ fn render(
                     let width = if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
                     union_all(&mut region, connect_room_to_connection(&room, connection, width));
 
-                    let door_prob = if is_double { 0.75 } else { 0.25 };
-                    if rng.gen_bool(door_prob) {
+                    let door_prob = if is_double { DOUBLE_DOOR_PROB } else { DOOR_PROB };
+                    if rng.gen_bool(door_prob as f64) {
                         let room_entry = room_entry_point(&room, connection);
 
                         if is_double {
