@@ -11,9 +11,7 @@
   * Make `ItemKind` data-driven instead of a hardcoded enum (see the TODO in [item.rs](src/item.rs)).
   * I've seen `buffer_with_style` in fov.rs crash (I was jammed against a door; no idea how to reproduce). Let's test when `buffer` crashes and see if we can prevent it.
   * Items should stay on their current letter (either Nethack-style or Angband-style)
-  * Command keys ("q" and "r") should bring up the command palette.
   * "i" should look at all inventory (and give the option of using any items)
-  * "g" should navigate to various locations (corridor ends, centers of rooms...)
   * "d" should descend
   * "m" should allow targeting named locations (monsters, cardinal directions, corridors ends in the current room...)
 

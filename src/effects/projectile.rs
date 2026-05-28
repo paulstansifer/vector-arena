@@ -4,6 +4,7 @@
 // via collision events.  Global time dilation while missiles are in flight is
 // handled separately in `crate::time_scale`.
 use avian2d::prelude::*;
+use bevy::input::keyboard::Key;
 use bevy::prelude::*;
 use rand::Rng;
 use std::collections::HashSet;
@@ -119,7 +120,7 @@ fn spawn_missile(
 }
 
 pub fn player_fire_missile(
-    keyboard: Res<ButtonInput<KeyCode>>,
+    keyboard: Res<ButtonInput<Key>>,
     window: Single<&Window>,
     camera_query: Single<(&Camera, &GlobalTransform)>,
     player_query: Single<&Transform, With<Player>>,
@@ -127,7 +128,7 @@ pub fn player_fire_missile(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyM) {
+    if !keyboard.just_pressed(Key::Character("m".into())) {
         return;
     }
 

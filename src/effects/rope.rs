@@ -4,6 +4,7 @@
 // Endpoints near a static surface are pinned with VerletLocked; endpoints near a
 // dynamic body get a RopeEndAnchor that tracks the body's movement each frame.
 use avian2d::prelude::*;
+use bevy::input::keyboard::Key;
 use bevy::prelude::*;
 use bevy_verlet::prelude::*;
 
@@ -55,7 +56,7 @@ impl Plugin for RopePlugin {
 }
 
 fn handle_rope_drag(
-    keyboard: Res<ButtonInput<KeyCode>>,
+    keyboard: Res<ButtonInput<Key>>,
     window: Single<&Window>,
     camera: Single<(&Camera, &GlobalTransform), With<Camera2d>>,
     mut drag_state: ResMut<RopeDragState>,
@@ -67,7 +68,7 @@ fn handle_rope_drag(
     let (cam, cam_tf) = *camera;
     let Ok(world_pos) = cam.viewport_to_world_2d(cam_tf, cursor_pos) else { return };
 
-    if keyboard.just_pressed(KeyCode::KeyO) {
+    if keyboard.just_pressed(Key::Character("o".into())) {
         if drag_state.start.is_none() {
             drag_state.start = Some(world_pos);
         } else {

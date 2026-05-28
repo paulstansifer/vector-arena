@@ -4,6 +4,7 @@
 // under the time dilation.
 use std::time::Duration;
 
+use bevy::input::keyboard::Key;
 use bevy::prelude::*;
 
 use crate::{
@@ -18,10 +19,10 @@ pub fn manage_time_scale(
     mut fixed_time: ResMut<Time<Fixed>>,
     missile_query: Query<&MagicMissile>,
     move_target: Single<&MoveTarget, With<Player>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
+    keyboard: Res<ButtonInput<Key>>,
 ) {
     let any_missile = missile_query.iter().next().is_some();
-    let spacebar_held = keyboard.pressed(KeyCode::Period);
+    let spacebar_held = keyboard.pressed(Key::Character(".".into()));
 
     if any_missile {
         time.set_relative_speed(TIME_SCALE_MISSILE);
