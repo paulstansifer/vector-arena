@@ -89,7 +89,7 @@ pub fn goto_completions(input: &str, state: &GotoState) -> Vec<PaletteEntry> {
         return vec![];
     }
 
-    if input == "g" {
+    if input.trim_end() == "g" {
         return state
             .labels
             .iter()

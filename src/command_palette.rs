@@ -2,7 +2,7 @@
 // Other modules register PaletteProviders to contribute commands;
 // the UI renders completions and writes pending_command as a String.
 use avian2d::prelude::LinearVelocity;
-use bevy::prelude::*;
+use bevy::{input::keyboard::Key, prelude::*};
 use bevy_egui::egui;
 use bevy_landmass::prelude::AgentTarget2d;
 
@@ -61,7 +61,7 @@ impl Plugin for CommandPalettePlugin {
 }
 
 pub fn open_palette_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
+    keyboard: Res<ButtonInput<Key>>,
     mut state: ResMut<CommandPaletteState>,
     mut player_query: Query<
         (Entity, &mut MoveTarget, &mut AgentTarget2d, &mut LinearVelocity),
@@ -69,20 +69,33 @@ pub fn open_palette_system(
     >,
     mut commands: Commands,
 ) {
-    if !state.open && keyboard.just_pressed(KeyCode::Space) {
-        state.open = true;
-        state.input.clear();
-        state.selected_idx = 0;
+    if !state.open {
+        // Space opens with blank input; a letter key opens pre-filled with "[letter] "
+        // so completions for that command show immediately on the first frame.
+        let open_with = if keyboard.just_pressed(Key::Space) {
+            Some(String::new())
+        } else {
+            keyboard
+                .get_just_pressed()
+                .find_map(|k| if let Key::Character(ch) = k { Some(ch) } else { None })
+                .map(|ch| format!("{ch} "))
+        };
 
-        if let Ok((entity, mut move_target, mut agent_target, mut velocity)) =
-            player_query.single_mut()
-        {
-            move_target.active = false;
-            *agent_target = AgentTarget2d::None;
-            velocity.0 = Vec2::ZERO;
-            commands.entity(entity).remove::<ExplorationGoal>();
+        if let Some(initial_input) = open_with {
+            state.open = true;
+            state.input = initial_input;
+            state.selected_idx = 0;
+
+            if let Ok((entity, mut move_target, mut agent_target, mut velocity)) =
+                player_query.single_mut()
+            {
+                move_target.active = false;
+                *agent_target = AgentTarget2d::None;
+                velocity.0 = Vec2::ZERO;
+                commands.entity(entity).remove::<ExplorationGoal>();
+            }
         }
-    } else if state.open && keyboard.just_pressed(KeyCode::Escape) {
+    } else if keyboard.just_pressed(Key::Escape) {
         state.open = false;
         state.input.clear();
     }
