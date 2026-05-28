@@ -86,7 +86,8 @@ fn parameterize_svg(bytes: &[u8], param: Option<&SpriteParam>) -> Vec<u8> {
             s = s.replace("#ff00ff", hex).replace("#FF00FF", hex);
         }
         SpriteParam::Text(text) => {
-            s = s.replace("&amp;", text);
+            s = s.replace("&amp;", text)
+                .replace("font-family:'Arial'", "font-family:'Liberation Sans'");
         }
     }
     s.into_bytes()
@@ -110,6 +111,26 @@ fn read_svg_bytes(svg_path: &str, param: Option<&SpriteParam>) -> Option<Vec<u8>
     Some(parameterize_svg(bytes, param))
 }
 
+const EMBEDDED_FONT: &[u8] = include_bytes!("../fonts/LiberationSans-Regular.ttf");
+
+fn make_usvg_options() -> resvg::usvg::Options<'static> {
+    let mut options = resvg::usvg::Options::default();
+    options.fontdb_mut().load_font_data(EMBEDDED_FONT.to_vec());
+    #[cfg(not(target_arch = "wasm32"))]
+    options.fontdb_mut().load_system_fonts();
+    options
+}
+
+// Pre-flattens SVG text to paths using usvg. This is needed for bevy_svg's
+// WASM path since bevy_svg's from_bytes API doesn't expose the font database.
+fn flatten_svg_text(bytes: &[u8]) -> Vec<u8> {
+    let options = make_usvg_options();
+    match resvg::usvg::Tree::from_data(bytes, &options) {
+        Ok(tree) => tree.to_string(&resvg::usvg::WriteOptions::default()).into_bytes(),
+        Err(_) => bytes.to_vec(),
+    }
+}
+
 fn load_svg_handle(
     svg_path: &str,
     param: Option<&SpriteParam>,
@@ -122,7 +143,8 @@ fn load_svg_handle(
         return Some(h.clone());
     }
     let modified = read_svg_bytes(svg_path, param)?;
-    let mut svg = match Svg::from_bytes(&modified, svg_path, None::<&std::path::Path>) {
+    let flattened = flatten_svg_text(&modified);
+    let mut svg = match Svg::from_bytes(&flattened, svg_path, None::<&std::path::Path>) {
         Ok(s) => s,
         Err(e) => {
             error!("Failed to parse SVG {svg_path}: {e}");
@@ -147,8 +169,7 @@ fn load_egui_texture(
         return Some(t.clone());
     }
     let modified = read_svg_bytes(svg_path, param)?;
-    let mut options = resvg::usvg::Options::default();
-    options.fontdb_mut().load_system_fonts();
+    let options = make_usvg_options();
     let color_image = match egui_extras::image::load_svg_bytes(&modified, &options) {
         Ok(img) => img,
         Err(e) => {

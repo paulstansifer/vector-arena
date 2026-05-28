@@ -14,6 +14,7 @@
   * "i" should look at all inventory (and give the option of using any items)
   * "d" should descend
   * "m" should allow targeting named locations (monsters, cardinal directions, corridors ends in the current room...)
+  * Use less than half a megabyte worth of font for the scrolls.
 
   # Larger projects
   * Think about how to break this into a library + game definition
