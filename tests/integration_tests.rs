@@ -10,7 +10,7 @@ use vector_arena::{
     AGENT_RADIUS, GameLayer,
     dungeon::{
         bsp::Partition,
-        level_generation::{PartitionRole, TerrainGeometry},
+        level_generation::{PartitionRole, RoomVariant, TerrainGeometry},
         terrain::geometry_to_collider,
     },
     monster::MONSTER_SPEED,
@@ -60,8 +60,8 @@ fn test_player_can_path_within_room_and_to_other_room() {
     };
 
     let allocated_partitions = vec![
-        (bottom_left, PartitionRole::Room),
-        (bottom_right, PartitionRole::Room),
+        (bottom_left, PartitionRole::Room { variant: RoomVariant::Normal }),
+        (bottom_right, PartitionRole::Room { variant: RoomVariant::Normal }),
         (top_left, PartitionRole::Corridor { double_width: false }),
         (top_right, PartitionRole::Corridor { double_width: false }),
     ];

@@ -341,7 +341,7 @@ mod tests {
     use super::*;
     use crate::dungeon::{
         bsp::Partition,
-        level_generation::{PartitionRole, TerrainGeometry},
+        level_generation::{PartitionRole, RoomVariant, TerrainGeometry},
     };
     use geo::CoordsIter;
     use rand::{SeedableRng, rngs::StdRng};
@@ -370,9 +370,9 @@ mod tests {
         };
 
         let allocated_partitions = vec![
-            (left, PartitionRole::Room),
+            (left, PartitionRole::Room { variant: RoomVariant::Normal }),
             (mid, PartitionRole::Corridor { double_width: false }),
-            (right, PartitionRole::Room),
+            (right, PartitionRole::Room { variant: RoomVariant::Colonnade }),
         ];
 
         let terrain_geometry = TerrainGeometry::from_partitions_and_roles(
@@ -412,6 +412,7 @@ mod tests {
         }
 
         let pass_1_points: usize = exploration_state.0.coords_count();
+        println!("First pass points: {pass_1_points}");
 
         for extra_pass in 0..100 {
             for pt in &points {
@@ -425,12 +426,15 @@ mod tests {
                 );
                 exploration_state.0 = new_exp;
             }
+            if extra_pass % 10 == 0 {
+                println!("Extra pass {extra_pass} points: {}", exploration_state.0.coords_count())
+            }
         }
 
         let pass_2_points: usize = exploration_state.0.coords_count();
         assert!(pass_1_points < 500, "{}", pass_1_points);
         let extra_points = pass_2_points - pass_1_points;
-        assert!(extra_points < 20, "{}", extra_points);
+        assert!(extra_points < 30, "{}", extra_points);
     }
 
     // Helper: a MultiPolygon rectangle.

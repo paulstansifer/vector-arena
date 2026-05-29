@@ -4,12 +4,11 @@
 // plays at normal speed even during bullet-time.
 use avian2d::prelude::{LinearVelocity, Position};
 use bevy::{prelude::*, time::Real};
-use geo::{BoundingRect, Contains};
-use rand::Rng as _;
+
 
 use crate::{
     command_palette::{CommandPaletteRegistry, CommandPaletteState, PaletteEntry, PaletteProvider},
-    dungeon::terrain::DungeonState,
+    dungeon::terrain::{DungeonState, random_in_playable_area},
     monster::Stats,
     player::{ExplorationGoal, Player},
     ui::MessageLog,
@@ -284,7 +283,7 @@ pub fn execute_item_command(
                 |i| matches!(i, ItemKind::Scroll(_)),
                 item_kind,
             ) {
-                if let Some(dest) = random_in_playable_area(&dungeon_state) {
+                if let Some(dest) = random_in_playable_area(&dungeon_state.playable_area, &mut rand::thread_rng()) {
                     position.0 = dest;
                     transform.translation.x = dest.x;
                     transform.translation.y = dest.y;
@@ -300,15 +299,3 @@ pub fn execute_item_command(
     }
 }
 
-fn random_in_playable_area(dungeon_state: &DungeonState) -> Option<Vec2> {
-    let bbox = dungeon_state.playable_area.bounding_rect()?;
-    let mut rng = rand::thread_rng();
-    for _ in 0..1000 {
-        let x = rng.gen_range(bbox.min().x..bbox.max().x);
-        let y = rng.gen_range(bbox.min().y..bbox.max().y);
-        if dungeon_state.playable_area.contains(&geo::Point::new(x, y)) {
-            return Some(Vec2::new(x, y));
-        }
-    }
-    None
-}

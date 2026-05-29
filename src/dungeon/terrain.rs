@@ -7,10 +7,13 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_mesh::{Indices, PrimitiveTopology};
 use geo::{
-    MultiPolygon,
+    BoundingRect, Buffer, Contains, MultiPolygon,
+    algorithm::buffer::BufferStyle,
     algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay},
+    buffer::{LineCap, LineJoin},
 };
 use bevy::math::Vec2;
+use rand::Rng;
 
 /// Convert the terrain geometry to a Bevy mesh for rendering.
 pub fn geometry_to_mesh(geometry: &MultiPolygon<f32>) -> Mesh {
@@ -76,6 +79,24 @@ pub struct DungeonVisuals(pub Handle<Mesh>);
 #[derive(Resource)]
 pub struct PointsOfInterest {
     pub points: Vec<Vec2>,
+}
+
+/// Returns a random point inside `playable_area`, eroded by `AGENT_RADIUS` so results
+/// are never right against the wall. Returns `None` after 1000 failed attempts.
+pub fn random_in_playable_area(playable_area: &MultiPolygon<f32>, rng: &mut impl Rng) -> Option<Vec2> {
+    let style = BufferStyle::new(-crate::AGENT_RADIUS)
+        .line_cap(LineCap::Square)
+        .line_join(LineJoin::Bevel);
+    let eroded = playable_area.buffer_with_style(style);
+    let bbox = eroded.bounding_rect()?;
+    for _ in 0..1000 {
+        let x = rng.gen_range(bbox.min().x..bbox.max().x);
+        let y = rng.gen_range(bbox.min().y..bbox.max().y);
+        if eroded.contains(&geo::Point::new(x, y)) {
+            return Some(Vec2::new(x, y));
+        }
+    }
+    None
 }
 
 /// Bevy system to sync dungeon visuals and collider from resources to entity components.

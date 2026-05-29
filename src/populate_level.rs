@@ -4,11 +4,12 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::Rect;
+use geo::{MultiPolygon, Rect};
 use rand::prelude::*;
 
 use crate::{
     AGENT_RADIUS, GameLayer, GameState, Staircase,
+    dungeon::terrain::random_in_playable_area,
     effects::projectile::MonsterShootTimer,
     fov,
     item::{ALL_ITEM_KINDS, Inventory, Item, ItemKind, item_name},
@@ -23,6 +24,7 @@ pub fn populate(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
     rooms: &[Rect<f32>],
+    playable_area: &MultiPolygon<f32>,
     archipelago_id: Entity,
     depth: u32,
     saved_player: Option<(Stats, Inventory)>,
@@ -124,13 +126,8 @@ pub fn populate(
         ALL_ITEM_KINDS.choose_multiple(&mut rng, item_count).copied().collect();
 
     for kind in chosen_kinds {
-        let room = rooms.choose(&mut rng).unwrap();
-        let center = room.center();
-        let half_w = (room.width() / 2.0 - 18.0).max(5.0);
-        let half_h = (room.height() / 2.0 - 18.0).max(5.0);
-        let x = center.x + rng.gen_range(-half_w..=half_w);
-        let y = center.y + rng.gen_range(-half_h..=half_h);
-        let pos = Vec3::new(x, y, fov::ON_FLOOR_Z);
+        let Some(pt) = random_in_playable_area(playable_area, &mut rng) else { continue };
+        let pos = Vec3::new(pt.x, pt.y, fov::ON_FLOOR_Z);
 
         let (svg_path, param) = sprite_spec(kind);
         commands.spawn((

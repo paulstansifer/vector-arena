@@ -18,6 +18,8 @@ pub const CORRIDOR_WIDTH: f32 = 35.0;
 const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
 const DOOR_PROB: f32 = 0.25 * 0.0;
 const DOUBLE_DOOR_PROB: f32 = 0.75 * 0.0;
+/// Probability a room gets a special variant (high for testing)
+const SPECIAL_ROOM_PROB: f32 = 0.4;
 
 pub struct TerrainGeometry {
     pub solid_rock: MultiPolygon<f32>,
@@ -147,8 +149,15 @@ const EMPTY_PROB: f32 = 0.3; // if a partition is a dead end, the probability it
 const CORRIDOR_PROB: f32 = 0.45; // otherwise, the probability it will be a corridor
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RoomVariant {
+    Normal,
+    Oval,
+    Colonnade,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PartitionRole {
-    Room,
+    Room { variant: RoomVariant },
     Corridor { double_width: bool },
     Empty,
 }
@@ -163,7 +172,7 @@ fn allocate_roles(p: Vec<Partition>, rng: &mut impl Rng) -> Vec<(Partition, Part
                 0 => panic!("Shouldn't be possible to generate an unconnected partition"),
                 1 => {
                     if rng.gen_bool((1.0 - EMPTY_PROB).into()) {
-                        PartitionRole::Room
+                        PartitionRole::Room { variant: random_room_variant(rng) }
                     } else {
                         PartitionRole::Empty
                     }
@@ -173,10 +182,10 @@ fn allocate_roles(p: Vec<Partition>, rng: &mut impl Rng) -> Vec<(Partition, Part
                         let double_width = rng.gen_bool(0.15);
                         PartitionRole::Corridor { double_width }
                     } else {
-                        PartitionRole::Room
+                        PartitionRole::Room { variant: random_room_variant(rng) }
                     }
                 }
-                _ => PartitionRole::Room,
+                _ => PartitionRole::Room { variant: random_room_variant(rng) },
             };
 
             (partition, role)
@@ -246,26 +255,64 @@ fn render(
 
         match role {
             PartitionRole::Empty => continue,
-            PartitionRole::Room => {
+            PartitionRole::Room { variant } => {
                 let room = shrink_room(partition);
-                region = region.union(&room.to_polygon());
                 rooms.push(room);
 
-                for connection in partition_connections(partition).into_iter().filter(is_live) {
-                    let is_double = is_double_width_corridor_connection(&connection, bsp);
-                    let width = if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
-                    union_all(&mut region, connect_room_to_connection(&room, connection, width));
+                match variant {
+                    RoomVariant::Normal => {
+                        region = region.union(&room.to_polygon());
+                        for connection in
+                            partition_connections(partition).into_iter().filter(is_live)
+                        {
+                            let is_double = is_double_width_corridor_connection(&connection, bsp);
+                            let width =
+                                if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                            union_all(
+                                &mut region,
+                                connect_room_to_connection(&room, connection, width),
+                            );
 
-                    let door_prob = if is_double { DOUBLE_DOOR_PROB } else { DOOR_PROB };
-                    if rng.gen_bool(door_prob as f64) {
-                        let room_entry = room_entry_point(&room, connection);
-
-                        if is_double {
-                            let (d1, d2) = create_double_door(connection.side, room_entry);
-                            doors.push(d1);
-                            doors.push(d2);
-                        } else {
-                            doors.push(create_door(connection.side, room_entry));
+                            let door_prob = if is_double { DOUBLE_DOOR_PROB } else { DOOR_PROB };
+                            if rng.gen_bool(door_prob as f64) {
+                                let room_entry = room_entry_point(&room, connection);
+                                if is_double {
+                                    let (d1, d2) = create_double_door(connection.side, room_entry);
+                                    doors.push(d1);
+                                    doors.push(d2);
+                                } else {
+                                    doors.push(create_door(connection.side, room_entry));
+                                }
+                            }
+                        }
+                    }
+                    RoomVariant::Oval => {
+                        region = region.union(&oval_polygon(&room));
+                        for connection in
+                            partition_connections(partition).into_iter().filter(is_live)
+                        {
+                            let is_double = is_double_width_corridor_connection(&connection, bsp);
+                            let width =
+                                if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                            let entry = oval_entry_point(&room, connection, width);
+                            union_all(&mut region, connect_to_entry(entry, connection, width));
+                        }
+                    }
+                    RoomVariant::Colonnade => {
+                        region = region.union(&room.to_polygon());
+                        for connection in
+                            partition_connections(partition).into_iter().filter(is_live)
+                        {
+                            let is_double = is_double_width_corridor_connection(&connection, bsp);
+                            let width =
+                                if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                            union_all(
+                                &mut region,
+                                connect_room_to_connection(&room, connection, width),
+                            );
+                        }
+                        for col in colonnade_columns(&room) {
+                            region = region.difference(&MultiPolygon::new(vec![col.to_polygon()]));
                         }
                     }
                 }
@@ -429,6 +476,150 @@ fn room_entry_point(room: &Rect<f32>, connection: ConnectionPoint) -> (f32, f32)
     }
 }
 
+fn random_room_variant(rng: &mut impl Rng) -> RoomVariant {
+    if rng.gen_bool(SPECIAL_ROOM_PROB as f64) {
+        RoomVariant::Colonnade
+        // TODO: oval rooms cause big performance problems. Investigate.
+        // if rng.gen_bool(0.5) { RoomVariant::Oval } else { RoomVariant::Colonnade }
+    } else {
+        RoomVariant::Normal
+    }
+}
+
+fn oval_polygon(room: &Rect<f32>) -> Polygon<f32> {
+    let cx = (room.min().x + room.max().x) / 2.0;
+    let cy = (room.min().y + room.max().y) / 2.0;
+    let a = room.width() / 2.0;
+    let b = room.height() / 2.0;
+    let steps = 32usize;
+    let coords: Vec<(f32, f32)> = (0..=steps)
+        .map(|i| {
+            let angle = 2.0 * std::f32::consts::PI * i as f32 / steps as f32;
+            (cx + a * angle.cos(), cy + b * angle.sin())
+        })
+        .collect();
+    Polygon::new(LineString::from(coords), vec![])
+}
+
+// Returns where the corridor (of the given width) should terminate at the oval's boundary,
+// pushed deep enough that both lateral edges of the corridor reach the oval surface.
+fn oval_entry_point(
+    room: &Rect<f32>,
+    connection: ConnectionPoint,
+    corridor_width: f32,
+) -> (f32, f32) {
+    let cx = (room.min().x + room.max().x) / 2.0;
+    let cy = (room.min().y + room.max().y) / 2.0;
+    let a = room.width() / 2.0;
+    let b = room.height() / 2.0;
+    let hw = corridor_width / 2.0;
+
+    match connection.side {
+        ConnectionSide::Left | ConnectionSide::Right => {
+            // Corridor spans y' in [connection.y - hw, connection.y + hw].
+            // oval left boundary at y': cx - a*sqrt(1 - ((y'-cy)/b)^2)
+            // The boundary is ∪-shaped, so max (deepest into room) is at the endpoints.
+            // Equivalently: the half-width term x_at(y') = a*sqrt(...) is ∩-shaped,
+            // so min(x_at) is at the endpoints of the span.
+            let y_lo = (connection.y - hw).clamp(cy - b, cy + b);
+            let y_hi = (connection.y + hw).clamp(cy - b, cy + b);
+            let x_at = |y: f32| {
+                let t = (y - cy) / b;
+                a * (1.0 - t * t).max(0.0).sqrt()
+            };
+            let min_extent = x_at(y_lo).min(x_at(y_hi)) - 2.0;
+            let x = if matches!(connection.side, ConnectionSide::Left) {
+                cx - min_extent
+            } else {
+                cx + min_extent
+            };
+            (x, connection.y.clamp(cy - b, cy + b))
+        }
+        ConnectionSide::Bottom | ConnectionSide::Top => {
+            let x_lo = (connection.x - hw).clamp(cx - a, cx + a);
+            let x_hi = (connection.x + hw).clamp(cx - a, cx + a);
+            let y_at = |x: f32| {
+                let t = (x - cx) / a;
+                b * (1.0 - t * t).max(0.0).sqrt()
+            };
+            let min_extent = y_at(x_lo).min(y_at(x_hi)) - 2.0;
+            let y = if matches!(connection.side, ConnectionSide::Bottom) {
+                cy - min_extent
+            } else {
+                cy + min_extent
+            };
+            (connection.x.clamp(cx - a, cx + a), y)
+        }
+    }
+}
+
+fn colonnade_columns(room: &Rect<f32>) -> Vec<Rect<f32>> {
+    const COL_SIZE: f32 = 20.0;
+    const COL_HALF: f32 = COL_SIZE / 2.0;
+    // Column center sits CORRIDOR_WIDTH inward from each long wall face
+    let from_wall = CORRIDOR_WIDTH + COL_HALF;
+
+    let mut columns = Vec::new();
+    let long_axis_is_x = room.width() >= room.height();
+
+    // wall_a / wall_b: coordinates of the two column rows (perpendicular to long axis)
+    // along_min / along_max: range along the long axis within which columns are placed
+    let (wall_a, wall_b, along_min, along_max) = if long_axis_is_x {
+        let wa = room.min().y + from_wall;
+        let wb = room.max().y - from_wall;
+        if wb - wa < CORRIDOR_WIDTH {
+            return columns; // room too narrow to fit two rows with a gap between them
+        }
+        (wa, wb, room.min().x + CORRIDOR_WIDTH, room.max().x - CORRIDOR_WIDTH)
+    } else {
+        let wa = room.min().x + from_wall;
+        let wb = room.max().x - from_wall;
+        if wb - wa < CORRIDOR_WIDTH {
+            return columns;
+        }
+        (wa, wb, room.min().y + CORRIDOR_WIDTH, room.max().y - CORRIDOR_WIDTH)
+    };
+
+    let span = along_max - along_min;
+    if span <= 0.0 {
+        return columns;
+    }
+
+    let n = ((span + CORRIDOR_WIDTH) / (COL_SIZE + CORRIDOR_WIDTH)).floor() as usize;
+    if n == 0 {
+        return columns;
+    }
+
+    let total = n as f32 * COL_SIZE + (n - 1) as f32 * CORRIDOR_WIDTH;
+    let margin = (span - total) / 2.0;
+    let step = COL_SIZE + CORRIDOR_WIDTH;
+
+    for i in 0..n {
+        let mid = along_min + margin + COL_HALF + i as f32 * step;
+        if long_axis_is_x {
+            columns.push(Rect::new(
+                (mid - COL_HALF, wall_a - COL_HALF),
+                (mid + COL_HALF, wall_a + COL_HALF),
+            ));
+            columns.push(Rect::new(
+                (mid - COL_HALF, wall_b - COL_HALF),
+                (mid + COL_HALF, wall_b + COL_HALF),
+            ));
+        } else {
+            columns.push(Rect::new(
+                (wall_a - COL_HALF, mid - COL_HALF),
+                (wall_a + COL_HALF, mid + COL_HALF),
+            ));
+            columns.push(Rect::new(
+                (wall_b - COL_HALF, mid - COL_HALF),
+                (wall_b + COL_HALF, mid + COL_HALF),
+            ));
+        }
+    }
+
+    columns
+}
+
 fn shrink_room(partition: &Partition) -> Rect<f32> {
     let width = partition.x.1 - partition.x.0;
     let height = partition.y.1 - partition.y.0;
@@ -448,33 +639,39 @@ fn partition_center(partition: &Partition) -> (f32, f32) {
     ((partition.x.0 + partition.x.1) / 2.0, (partition.y.0 + partition.y.1) / 2.0)
 }
 
-fn connect_room_to_connection(
-    room: &Rect<f32>,
+fn connect_to_entry(
+    entry: (f32, f32),
     connection: ConnectionPoint,
     width: f32,
 ) -> Vec<geo::Polygon<f32>> {
-    let room_entry = room_entry_point(room, connection);
-
     let conn_pt = (connection.x, connection.y);
     let elbow = if connection.side.is_vertical() {
-        (room_entry.0, connection.y)
+        (entry.0, connection.y)
     } else {
-        (connection.x, room_entry.1)
+        (connection.x, entry.1)
     };
 
     let mut polygons = vec![rect_for_segment(conn_pt, elbow, width)];
 
     let needs_bend = if connection.side.is_vertical() {
-        (room_entry.1 - connection.y).abs() > f32::EPSILON
+        (entry.1 - connection.y).abs() > f32::EPSILON
     } else {
-        (room_entry.0 - connection.x).abs() > f32::EPSILON
+        (entry.0 - connection.x).abs() > f32::EPSILON
     };
     if needs_bend {
         polygons.push(bevel_at_point(elbow, width));
-        polygons.push(rect_for_segment(elbow, room_entry, width));
+        polygons.push(rect_for_segment(elbow, entry, width));
     }
 
     polygons
+}
+
+fn connect_room_to_connection(
+    room: &Rect<f32>,
+    connection: ConnectionPoint,
+    width: f32,
+) -> Vec<geo::Polygon<f32>> {
+    connect_to_entry(room_entry_point(room, connection), connection, width)
 }
 
 fn connect_adjacent(a: ConnectionPoint, b: ConnectionPoint, width: f32) -> Vec<Polygon<f32>> {
