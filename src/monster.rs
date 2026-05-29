@@ -4,15 +4,16 @@
 // the player, tired ones rest briefly, and distracted ones path to a fixed point.
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::Intersects;
+use geo::{Contains, Intersects};
 
 use bevy_egui::egui;
 
 use crate::{
     command_palette::CommandPaletteState,
     dungeon::terrain::DungeonState,
+    fov::CurrentFovState,
     item::ItemKind,
-    player::{ExplorationGoal, MoveTarget, Player},
+    player::Player,
 };
 
 pub const MONSTER_SPEED: f32 = 80.0;
@@ -227,6 +228,7 @@ pub fn render_monster_markers(
     monster_query: Query<(Entity, &Transform), With<Monster>>,
     mut egui_context: bevy_egui::EguiContexts,
     camera_query: Query<(&Camera, &GlobalTransform)>,
+    current_fov: Option<Res<CurrentFovState>>,
 ) {
     if !palette.open {
         return;
@@ -242,6 +244,12 @@ pub fn render_monster_markers(
 
     for (entity, transform) in monster_query.iter() {
         let Some(letter) = letter_map.letter_for_monster(entity) else { continue };
+        let pos = transform.translation.truncate();
+        if let Some(ref fov) = current_fov {
+            if !fov.0.contains(&geo::Point::new(pos.x, pos.y)) {
+                continue;
+            }
+        }
         let Ok(viewport_pos) = camera.world_to_viewport(camera_transform, transform.translation)
         else {
             continue;
@@ -265,39 +273,3 @@ pub fn render_monster_markers(
     }
 }
 
-/// Consumes a single-uppercase-letter pending command and paths the player toward that monster.
-pub fn execute_monster_command(
-    mut palette: ResMut<CommandPaletteState>,
-    letter_map: Res<crate::command_palette::LetterMap>,
-    monster_query: Query<&Transform, With<Monster>>,
-    mut player_query: Query<
-        (Entity, &Transform, &mut MoveTarget, &mut AgentTarget2d),
-        With<Player>,
-    >,
-    time: Res<Time>,
-    mut commands: Commands,
-) {
-    let Some(cmd) = palette.pending_command.as_deref() else { return };
-    let mut chars = cmd.chars();
-    let (Some(letter), None) = (chars.next(), chars.next()) else { return };
-    if !letter.is_uppercase() {
-        return;
-    }
-
-    let Some(monster_entity) = letter_map.entity_for_letter(letter) else { return };
-    palette.pending_command = None;
-
-    let destination = match monster_query.get(monster_entity) {
-        Ok(tf) => tf.translation.truncate(),
-        Err(_) => return,
-    };
-
-    if let Ok((entity, transform, mut move_target, mut agent_target)) = player_query.single_mut() {
-        move_target.destination = destination;
-        move_target.origin = transform.translation.truncate();
-        move_target.active = true;
-        move_target.time_set = time.elapsed();
-        *agent_target = AgentTarget2d::Point(destination);
-        commands.entity(entity).remove::<ExplorationGoal>();
-    }
-}

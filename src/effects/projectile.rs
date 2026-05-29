@@ -4,14 +4,16 @@
 // via collision events.  Global time dilation while missiles are in flight is
 // handled separately in `crate::time_scale`.
 use avian2d::prelude::*;
-use bevy::{input::keyboard::Key, prelude::*};
+use bevy::prelude::*;
 use rand::Rng;
 use std::collections::HashSet;
 
 use crate::{
     AGENT_RADIUS, GameLayer, GameState, fov,
+    command_palette::{LetterMap, PaletteEntry, PendingClickTarget},
+    goto::GotoState,
     item::{Item, ItemKind, item_name},
-    monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
+    monster::{AlertedByMissile, Monster, MonsterDrop, MonsterState, Stats},
     player::Player,
     sprite::{SpriteParam, SvgSprite, potion_hex, scroll_letter},
     ui::{MessageLog, WorldTooltip},
@@ -118,25 +120,79 @@ fn spawn_missile(
     ));
 }
 
-pub fn player_fire_missile(
-    keyboard: Res<ButtonInput<Key>>,
-    window: Single<&Window>,
-    camera_query: Single<(&Camera, &GlobalTransform)>,
-    player_query: Single<&Transform, With<Player>>,
+/// Palette completions for the "m" (magic missile) command.
+pub fn missile_completions(
+    input: &str,
+    goto_state: &GotoState,
+    letter_map: &LetterMap,
+    monster_query: &Query<(Entity, &Stats, &MonsterState, &Transform), With<Monster>>,
+    current_fov: Option<&geo::MultiPolygon<f32>>,
+) -> Vec<PaletteEntry> {
+    if input.is_empty() {
+        return vec![PaletteEntry {
+            key: "m".to_string(),
+            description: "Fire magic missile".to_string(),
+            icon: None,
+            is_complete: false,
+        }];
+    }
+    if !input.starts_with('m') {
+        return vec![];
+    }
+    crate::command_palette::targeting_sub_completions(
+        input, 'm', "Fire at", goto_state, letter_map, monster_query, current_fov,
+    )
+}
+
+/// Fires a player missile toward a palette-selected monster/location target or a world-click target.
+pub fn execute_missile_command(
+    mut palette: ResMut<crate::command_palette::CommandPaletteState>,
+    mut click_target: ResMut<PendingClickTarget>,
+    goto_state: Res<GotoState>,
+    player_query: Query<&Transform, With<Player>>,
+    monster_query: Query<&Transform, With<Monster>>,
+    letter_map: Res<LetterMap>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    if !keyboard.just_pressed(Key::Character("m".into())) {
-        return;
+    let mut target_pos: Option<Vec2> = None;
+
+    if let Some(cmd) = &palette.pending_command {
+        if let Some(rest) = cmd.strip_prefix("m ") {
+            let rest = rest.trim();
+            if rest.len() == 1 {
+                let c = rest.chars().next().unwrap();
+                match c {
+                    c if c.is_uppercase() => {
+                        if let Some(entity) = letter_map.entity_for_letter(c) {
+                            target_pos = monster_query
+                                .get(entity)
+                                .ok()
+                                .map(|tf| tf.translation.truncate());
+                        }
+                    }
+                    c if c.is_lowercase() => {
+                        let idx = (c as u8).wrapping_sub(b'a') as usize;
+                        if idx < goto_state.labels.len() {
+                            target_pos = Some(goto_state.labels[idx]);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            palette.pending_command = None;
+        }
     }
 
-    let Some(cursor_pos) = window.cursor_position() else { return };
-    let (camera, camera_transform) = *camera_query;
-    let Ok(world_pos) = camera.viewport_to_world_2d(camera_transform, cursor_pos) else { return };
+    if target_pos.is_none() {
+        target_pos = click_target.missile_pos.take();
+    }
 
-    let player_pos = player_query.translation.truncate();
-    let direction = (world_pos - player_pos).normalize_or_zero();
+    let Some(target_pos) = target_pos else { return };
+    let Ok(player_tf) = player_query.single() else { return };
+    let player_pos = player_tf.translation.truncate();
+    let direction = (target_pos - player_pos).normalize_or_zero();
     if direction == Vec2::ZERO {
         return;
     }

@@ -16,7 +16,7 @@ use vector_arena::{
     effects::{
         crumble_terrain::{Fragile, handle_right_click_excavation},
         projectile::{
-            apply_missile_knockback, init_trail_meshes, monster_fire_missiles, player_fire_missile,
+            apply_missile_knockback, execute_missile_command, init_trail_meshes, monster_fire_missiles,
             spawn_missile_trails, tick_knockback_cooldowns, update_hit_flash,
             update_missile_trails, update_missiles,
         },
@@ -74,7 +74,7 @@ fn main() {
         .add_systems(Update, fov::update_fov)
         .add_systems(Update, handle_right_click_excavation.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, sync_dungeon_to_entities)
-        .add_systems(Update, player_fire_missile)
+        .add_systems(Update, execute_missile_command)
         .add_systems(Update, monster_fire_missiles)
         .add_systems(Update, update_missiles)
         .add_systems(Update, spawn_missile_trails)
@@ -88,7 +88,6 @@ fn main() {
         .add_systems(Update, goto::compute_goto_assignments)
         .add_systems(Update, goto::reset_goto_on_close)
         .add_systems(Update, goto::execute_goto_command)
-        .add_systems(Update, monster::execute_monster_command)
         .init_resource::<goto::GotoState>()
         .insert_resource(Gravity::ZERO)
         .insert_resource(SubstepCount(40)) // To make rope physics behave well.

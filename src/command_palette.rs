@@ -6,9 +6,11 @@ use std::collections::HashMap;
 use avian2d::prelude::LinearVelocity;
 use bevy::{input::keyboard::Key, prelude::*};
 use bevy_egui::egui;
+use bevy_egui::egui::PointerButton;
 use bevy_landmass::prelude::AgentTarget2d;
 
 use crate::{
+    fov::CurrentFovState,
     goto::{self, GotoState},
     item::{Inventory, ItemKind},
     monster::{Monster, MonsterState, Stats},
@@ -63,12 +65,122 @@ impl CommandPaletteRegistry {
     }
 }
 
+/// World-position targeting set by the palette when the user clicks outside the egui UI
+/// while a targeting command ("m" or "g") is active.  Consumed by the respective action systems.
+#[derive(Resource, Default)]
+pub struct PendingClickTarget {
+    pub missile_pos: Option<Vec2>,
+    pub goto_pos: Option<Vec2>,
+}
+
+/// True when the current palette input is in a targeting sub-command for "m" or "g".
+pub fn is_in_targeting_mode(input: &str) -> bool {
+    let t = input.trim_end();
+    t == "m" || t.starts_with("m ") || t == "g" || t.starts_with("g ")
+}
+
+/// Shared completion body for the "g" and "m" targeting commands.
+/// The caller emits the root stub entry; this handles the sub-menu and single-target lookups.
+/// `prefix` is 'g' or 'm'; `location_verb` is "Go to" or "Fire at".
+pub fn targeting_sub_completions(
+    input: &str,
+    prefix: char,
+    location_verb: &str,
+    goto_state: &GotoState,
+    letter_map: &LetterMap,
+    monster_query: &Query<(Entity, &Stats, &MonsterState, &Transform), With<Monster>>,
+    current_fov: Option<&geo::MultiPolygon<f32>>,
+) -> Vec<PaletteEntry> {
+    use geo::Contains;
+    let in_fov = |pos: Vec2| -> bool {
+        current_fov.map_or(true, |fov| fov.contains(&geo::Point::new(pos.x, pos.y)))
+    };
+
+    let trimmed = input.trim_end();
+
+    // Sub-menu: just the prefix, no target specified yet
+    if trimmed.len() == 1 && trimmed.starts_with(prefix) {
+        let mut entries: Vec<PaletteEntry> = monster_query
+            .iter()
+            .filter_map(|(entity, stats, state, tf)| {
+                let letter = letter_map.letter_for_monster(entity)?;
+                in_fov(tf.translation.truncate()).then(|| PaletteEntry {
+                    key: format!("{prefix} {letter}"),
+                    description: format!(
+                        "{} {}/{} HP",
+                        state.label(),
+                        stats.hp as i32,
+                        stats.max_hp as i32
+                    ),
+                    icon: None,
+                    is_complete: true,
+                })
+            })
+            .collect();
+        for (i, _) in goto_state.labels.iter().enumerate() {
+            let letter = ('a' as u8 + i as u8) as char;
+            entries.push(PaletteEntry {
+                key: format!("{prefix} {letter}"),
+                description: format!("{location_verb} location {letter}"),
+                icon: None,
+                is_complete: true,
+            });
+        }
+        entries.sort_by(|a, b| a.key.cmp(&b.key));
+        return entries;
+    }
+
+    // Single-target: "{prefix} X"
+    if input.len() < 3 || input.chars().nth(1) != Some(' ') {
+        return vec![];
+    }
+    let target = input[2..].trim();
+    if target.len() != 1 {
+        return vec![];
+    }
+    let c = target.chars().next().unwrap();
+    match c {
+        c if c.is_uppercase() => {
+            let Some(entity) = letter_map.entity_for_letter(c) else { return vec![] };
+            let Ok((_, stats, state, tf)) = monster_query.get(entity) else { return vec![] };
+            if !in_fov(tf.translation.truncate()) {
+                return vec![];
+            }
+            vec![PaletteEntry {
+                key: format!("{prefix} {c}"),
+                description: format!(
+                    "{} {}/{} HP",
+                    state.label(),
+                    stats.hp as i32,
+                    stats.max_hp as i32
+                ),
+                icon: None,
+                is_complete: true,
+            }]
+        }
+        c if c.is_lowercase() => {
+            let idx = (c as u8).wrapping_sub(b'a') as usize;
+            if idx >= goto_state.labels.len() {
+                return vec![];
+            }
+            vec![PaletteEntry {
+                key: format!("{prefix} {c}"),
+                description: format!("{location_verb} location {c}"),
+                icon: None,
+                is_complete: true,
+            }]
+        }
+        _ => vec![],
+    }
+}
+
 pub struct CommandPalettePlugin;
 
 impl Plugin for CommandPalettePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CommandPaletteState>()
             .init_resource::<CommandPaletteRegistry>()
+            .init_resource::<PendingClickTarget>()
             .add_systems(Update, open_palette_system);
     }
 }
@@ -83,11 +195,11 @@ pub fn open_palette_system(
     mut commands: Commands,
     registry: Res<CommandPaletteRegistry>,
     letter_map: Res<LetterMap>,
-    goto_state: Res<GotoState>,
 ) {
     if !state.open {
         // Space opens with blank input; a letter key opens pre-filled with "[letter] "
         // only if that letter is a recognized top-level palette command.
+        // Uppercase monster letters open pre-filled with "g [letter] " for navigation.
         let open_with = if keyboard.just_pressed(Key::Space) {
             Some(String::new())
         } else {
@@ -95,17 +207,18 @@ pub fn open_palette_system(
                 .get_just_pressed()
                 .find_map(|k| if let Key::Character(ch) = k { Some(ch) } else { None })
                 .and_then(|ch| {
-                    let empty = Inventory::default();
-                    let inventory = player_query.single().map(|q| q.4).unwrap_or(&empty);
-                    let top_level: Vec<_> = registry
-                        .completions("", inventory, &letter_map)
-                        .into_iter()
-                        .chain(goto::goto_completions("", &goto_state))
-                        .collect();
-                    let is_cmd = top_level.iter().any(|e| e.key == ch.as_str());
                     let is_monster = ch.len() == 1
                         && ch.chars().next().is_some_and(|c| letter_map.entity_for_letter(c).is_some());
-                    (is_cmd || is_monster).then(|| format!("{ch} "))
+                    if is_monster {
+                        return Some(format!("g {ch} "));
+                    }
+                    // "g" and "m" are always top-level targeting commands
+                    let is_cmd = ch == "g" || ch == "m" || {
+                        let empty = Inventory::default();
+                        let inventory = player_query.single().map(|q| q.4).unwrap_or(&empty);
+                        registry.completions("", inventory, &letter_map).iter().any(|e| e.key == ch.as_str())
+                    };
+                    is_cmd.then(|| format!("{ch} "))
                 })
         };
 
@@ -129,52 +242,19 @@ pub fn open_palette_system(
     }
 }
 
-fn monster_completions(
-    input: &str,
-    letter_map: &LetterMap,
-    monster_query: &Query<(Entity, &Stats, &MonsterState), With<Monster>>,
-) -> Vec<PaletteEntry> {
-    let trimmed = input.trim();
-    let show_all = trimmed.is_empty();
-    let show_one = trimmed.len() == 1 && trimmed.chars().next().is_some_and(|c| c.is_uppercase());
-    if !show_all && !show_one {
-        return vec![];
-    }
-    let mut entries: Vec<PaletteEntry> = monster_query
-        .iter()
-        .filter_map(|(entity, stats, state)| {
-            let letter = letter_map.letter_for_monster(entity)?;
-            let key = letter.to_string();
-            if show_one && trimmed != key.as_str() {
-                return None;
-            }
-            Some(PaletteEntry {
-                key,
-                description: format!(
-                    "{} {}/{} HP",
-                    state.label(),
-                    stats.hp as i32,
-                    stats.max_hp as i32
-                ),
-                icon: None,
-                is_complete: true,
-            })
-        })
-        .collect();
-    entries.sort_by_key(|e| e.key.clone());
-    entries
-}
 
 pub fn palette_system(
     mut contexts: bevy_egui::EguiContexts,
     mut palette: ResMut<CommandPaletteState>,
+    mut click_target: ResMut<PendingClickTarget>,
     registry: Res<CommandPaletteRegistry>,
     goto_state: Res<GotoState>,
+    current_fov: Option<Res<CurrentFovState>>,
     player_query: Query<(&Inventory, &Transform), With<Player>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     sprite_textures: Res<SpriteEguiTextures>,
     letter_map: Res<LetterMap>,
-    monster_query: Query<(Entity, &Stats, &MonsterState), With<Monster>>,
+    monster_query: Query<(Entity, &Stats, &MonsterState, &Transform), With<Monster>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -184,8 +264,21 @@ pub fn palette_system(
 
     if palette.open {
         let mut completions = registry.completions(&palette.input, inventory, &letter_map);
-        completions.extend(goto::goto_completions(&palette.input, &goto_state));
-        completions.extend(monster_completions(&palette.input, &letter_map, &monster_query));
+        let fov = current_fov.as_deref().map(|r| &r.0);
+        completions.extend(goto::goto_completions(
+            &palette.input,
+            &goto_state,
+            &letter_map,
+            &monster_query,
+            fov,
+        ));
+        completions.extend(crate::effects::projectile::missile_completions(
+            &palette.input,
+            &goto_state,
+            &letter_map,
+            &monster_query,
+            fov,
+        ));
 
         let screen_rect = ctx.viewport_rect();
         let screen_size = Vec2::new(screen_rect.width(), screen_rect.height());
@@ -196,7 +289,15 @@ pub fn palette_system(
             .map(|p| farthest_corner_anchor(p, screen_size))
             .unwrap_or(egui::Align2::RIGHT_BOTTOM);
 
-        match render_command_palette(ctx, &mut palette, &completions, anchor, &sprite_textures) {
+        let targeting = is_in_targeting_mode(&palette.input);
+        match render_command_palette(
+            ctx,
+            &mut palette,
+            &completions,
+            anchor,
+            &sprite_textures,
+            targeting,
+        ) {
             PaletteUiAction::Navigate(s) => {
                 palette.input = s;
                 palette.selected_idx = 0;
@@ -211,6 +312,28 @@ pub fn palette_system(
                 palette.input.clear();
             }
             PaletteUiAction::None => {}
+        }
+
+        // Detect a click on the game world (outside any egui widget) while in targeting mode.
+        if targeting {
+            let clicked = ctx.input(|i| i.pointer.button_clicked(PointerButton::Primary));
+            if clicked && !ctx.is_pointer_over_area() {
+                if let Some(egui::Pos2 { x, y }) = ctx.pointer_latest_pos() {
+                    if let Ok((cam, cam_tf)) = camera_query.single() {
+                        if let Ok(world_pos) =
+                            cam.viewport_to_world_2d(cam_tf, bevy::math::Vec2::new(x, y))
+                        {
+                            if palette.input.starts_with('m') {
+                                click_target.missile_pos = Some(world_pos);
+                            } else {
+                                click_target.goto_pos = Some(world_pos);
+                            }
+                            palette.open = false;
+                            palette.input.clear();
+                        }
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -251,6 +374,7 @@ fn render_command_palette(
     completions: &[PaletteEntry],
     anchor: egui::Align2,
     sprite_textures: &SpriteEguiTextures,
+    targeting: bool,
 ) -> PaletteUiAction {
     let n = completions.len();
     let te_id = egui::Id::new("##palette_input");
@@ -398,6 +522,16 @@ fn render_command_palette(
                 } else {
                     PaletteUiAction::Navigate(entry.key.clone() + " ")
                 };
+            }
+
+            if targeting {
+                ui.separator();
+                ui.label(
+                    egui::RichText::new("select an onscreen target letter or click to target")
+                        .italics()
+                        .color(egui::Color32::from_rgb(140, 140, 170))
+                        .size(11.0),
+                );
             }
         });
 
