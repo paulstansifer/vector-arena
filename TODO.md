@@ -1,5 +1,4 @@
   * Ropes tend to pass through walls.
-  * Game tooltips are constrained to be very narrow. Also, they display regardless of whether the thing they're attached to is visible.
   * Navigation to unseen areas still doesn't always work, especially when doorways are involved.
   * I think magic missiles sometimes pass through monsters.
   * Magic missles sometimes launch from the wrong spot, especially when monsters fire them
@@ -14,6 +13,7 @@
   * "i" should look at all inventory (and give the option of using any items)
   * "d" should descend
   * "m" should allow targeting named locations (monsters, cardinal directions, corridors ends in the current room...)
+  * "." should cancel movement
   * Use less than half a megabyte worth of font for the scrolls.
 
   # Larger projects

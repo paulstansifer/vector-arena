@@ -8,7 +8,7 @@ use geo::Contains;
 
 use crate::{
     DungeonDepth, GameState,
-    fov::ExplorationState,
+    fov::CurrentFovState,
     item::{Inventory, ItemKind, item_name},
     player::Player,
     sprite::SpriteEguiTextures,
@@ -108,7 +108,7 @@ fn ui_system(
     ctx.style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
-        style.spacing.tooltip_width = 80.0;
+        style.spacing.tooltip_width = 200.0;
     });
 
     let Ok((stats, inventory, player_tf)) = player_query.single() else {
@@ -359,12 +359,7 @@ fn draw_item_icon(
 ) {
     let size = BAR_HEIGHT;
     let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-    draw_item_icon_at(
-        ui.painter_at(rect),
-        rect,
-        item,
-        sprite_textures.get(item),
-    );
+    draw_item_icon_at(ui.painter_at(rect), rect, item, sprite_textures.get(item));
 
     if count > 1 {
         ui.painter().text(
@@ -386,7 +381,7 @@ fn show_world_entity_tooltip(
     camera_query: Query<(&Camera, &GlobalTransform)>,
     entity_query: Query<(&Transform, &WorldTooltip)>,
     windows: Query<&Window>,
-    exploration_state: Option<Res<ExplorationState>>,
+    current_fov: Option<Res<CurrentFovState>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let window = match windows.single() {
@@ -411,13 +406,13 @@ fn show_world_entity_tooltip(
     let hover_distance = 20.0;
     for (transform, tooltip) in entity_query.iter() {
         let pos = transform.translation.truncate();
-        if let Some(ref exp) = exploration_state {
-            if exp.0.contains(&geo::Point::new(pos.x, pos.y)) {
-                continue;
-            }
-        }
         if pos.distance(world_pos) < hover_distance {
-            make_egui_tooltip(ctx, egui::Id::new("world_tooltip"), mouse_pos, |ui| {
+            if let Some(ref fov) = current_fov {
+                if !fov.0.contains(&geo::Point::new(pos.x, pos.y)) {
+                    continue;
+                }
+            }
+            make_egui_tooltip(ctx, egui::Id::new(("world_tooltip", tooltip.0.as_str())), mouse_pos, |ui| {
                 ui.label(&tooltip.0);
             });
             return Ok(());

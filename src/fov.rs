@@ -184,6 +184,9 @@ pub struct NeverExploredMeshMarker;
 #[derive(Resource)]
 pub struct ExplorationState(pub geo::MultiPolygon<f32>);
 
+#[derive(Resource)]
+pub struct CurrentFovState(pub geo::MultiPolygon<f32>);
+
 pub fn spawn_fov_meshes(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -209,6 +212,7 @@ pub fn spawn_fov_meshes(
         geo::Rect::new((-w / 2.0 - 200.0, -h / 2.0 - 200.0), (w / 2.0 + 200.0, h / 2.0 + 200.0));
     let bg_poly = MultiPolygon::new(vec![bg_rect.to_polygon()]);
     commands.insert_resource(ExplorationState(bg_poly.clone()));
+    commands.insert_resource(CurrentFovState(MultiPolygon::new(vec![])));
 
     commands.spawn((
         DespawnOnExit(GameState::InLevel),
@@ -229,6 +233,7 @@ pub fn update_fov(
     dungeon_state: Res<DungeonState>,
     bounds: Res<WorldBounds>,
     mut exploration_state: ResMut<ExplorationState>,
+    mut current_fov: ResMut<CurrentFovState>,
 ) {
     let Ok(player_transform) = player_query.single() else { return };
     let fov_mesh_handle = fov_mesh_query.single().unwrap();
@@ -276,7 +281,7 @@ pub fn update_fov(
         })
         .collect();
 
-    let (new_exp, new_fov, new_ne) = update_fov_from_pov(
+    let (new_exp, new_fov, new_ne, new_fov_poly) = update_fov_from_pov(
         origin,
         radius,
         &obstacles,
@@ -286,6 +291,7 @@ pub fn update_fov(
     );
 
     exploration_state.0 = new_exp;
+    current_fov.0 = new_fov_poly;
     *meshes.get_mut(&fov_mesh_handle.0).unwrap() = new_fov;
     *meshes.get_mut(&never_explored_mesh_handle.0).unwrap() = new_ne;
 }
@@ -297,7 +303,7 @@ fn update_fov_from_pov(
     bounds: &WorldBounds,
     exploration: &MultiPolygon<f32>,
     remembered_positions: &[Vec2],
-) -> (MultiPolygon<f32>, Mesh, Mesh) {
+) -> (MultiPolygon<f32>, Mesh, Mesh, MultiPolygon<f32>) {
     let fov_poly = fov_arc(origin, radius, None, solid_rock);
     let fov_multi = MultiPolygon::new(vec![fov_poly]);
 
@@ -326,6 +332,7 @@ fn update_fov_from_pov(
         exploration.intersection(&dark_area).simplify(1e-1),
         terrain::geometry_to_mesh(&dark_area),
         terrain::geometry_to_mesh(&exploration),
+        fov_multi,
     )
 }
 
@@ -393,7 +400,7 @@ mod tests {
         }
 
         for pt in &points {
-            let (new_exp, _, _) = update_fov_from_pov(
+            let (new_exp, _, _, _) = update_fov_from_pov(
                 *pt,
                 600.0,
                 &terrain_geometry.solid_rock,
@@ -408,7 +415,7 @@ mod tests {
 
         for extra_pass in 0..100 {
             for pt in &points {
-                let (new_exp, _, _) = update_fov_from_pov(
+                let (new_exp, _, _, _) = update_fov_from_pov(
                     Vec2::new(pt.x + 0.01 * (extra_pass as f32), pt.y + 0.01 * (extra_pass as f32)),
                     600.0,
                     &terrain_geometry.solid_rock,
