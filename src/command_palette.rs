@@ -106,12 +106,7 @@ pub fn targeting_sub_completions(
                 let letter = letter_map.letter_for_monster(entity)?;
                 in_fov(tf.translation.truncate()).then(|| PaletteEntry {
                     key: format!("{prefix} {letter}"),
-                    description: format!(
-                        "{} {}/{} HP",
-                        state.label(),
-                        stats.hp as i32,
-                        stats.max_hp as i32
-                    ),
+                    description: monster_desc(stats, state),
                     icon: None,
                     is_complete: true,
                 })
@@ -135,10 +130,11 @@ pub fn targeting_sub_completions(
         return vec![];
     }
     let target = input[2..].trim();
-    if target.len() != 1 {
+    let mut target_chars = target.chars();
+    let Some(c) = target_chars.next() else { return vec![] };
+    if target_chars.next().is_some() {
         return vec![];
     }
-    let c = target.chars().next().unwrap();
     match c {
         c if c.is_uppercase() => {
             let Some(entity) = letter_map.entity_for_letter(c) else { return vec![] };
@@ -148,12 +144,7 @@ pub fn targeting_sub_completions(
             }
             vec![PaletteEntry {
                 key: format!("{prefix} {c}"),
-                description: format!(
-                    "{} {}/{} HP",
-                    state.label(),
-                    stats.hp as i32,
-                    stats.max_hp as i32
-                ),
+                description: monster_desc(stats, state),
                 icon: None,
                 is_complete: true,
             }]
@@ -172,6 +163,10 @@ pub fn targeting_sub_completions(
         }
         _ => vec![],
     }
+}
+
+fn monster_desc(stats: &Stats, state: &MonsterState) -> String {
+    format!("{} {}/{} HP", state.label(), stats.hp as i32, stats.max_hp as i32)
 }
 
 pub struct CommandPalettePlugin;
@@ -315,24 +310,26 @@ pub fn palette_system(
         }
 
         // Detect a click on the game world (outside any egui widget) while in targeting mode.
-        if targeting {
-            let clicked = ctx.input(|i| i.pointer.button_clicked(PointerButton::Primary));
-            if clicked && !ctx.is_pointer_over_area() {
-                if let Some(egui::Pos2 { x, y }) = ctx.pointer_latest_pos() {
-                    if let Ok((cam, cam_tf)) = camera_query.single() {
-                        if let Ok(world_pos) =
-                            cam.viewport_to_world_2d(cam_tf, bevy::math::Vec2::new(x, y))
-                        {
-                            if palette.input.starts_with('m') {
-                                click_target.missile_pos = Some(world_pos);
-                            } else {
-                                click_target.goto_pos = Some(world_pos);
-                            }
-                            palette.open = false;
-                            palette.input.clear();
-                        }
-                    }
+        if targeting
+            && ctx.input(|i| i.pointer.button_clicked(PointerButton::Primary))
+            && !ctx.is_pointer_over_area()
+        {
+            let world_pos = ctx.pointer_latest_pos().and_then(|egui::Pos2 { x, y }| {
+                camera_query
+                    .single()
+                    .ok()
+                    .and_then(|(cam, cam_tf)| {
+                        cam.viewport_to_world_2d(cam_tf, bevy::math::Vec2::new(x, y)).ok()
+                    })
+            });
+            if let Some(world_pos) = world_pos {
+                if palette.input.starts_with('m') {
+                    click_target.missile_pos = Some(world_pos);
+                } else {
+                    click_target.goto_pos = Some(world_pos);
                 }
+                palette.open = false;
+                palette.input.clear();
             }
         }
     }

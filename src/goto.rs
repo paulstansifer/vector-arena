@@ -26,7 +26,7 @@ pub fn compute_goto_assignments(
     item_query: Query<&Transform, With<crate::item::Item>>,
     mut goto_state: ResMut<GotoState>,
 ) {
-    let active = palette.input.starts_with('g') || palette.input.starts_with('m');
+    let active = crate::command_palette::is_in_targeting_mode(&palette.input);
     if !palette.open || !active || goto_state.computed {
         return;
     }
@@ -106,7 +106,7 @@ pub fn render_goto_markers(
     mut egui_context: bevy_egui::EguiContexts,
     camera_query: Query<(&Camera, &GlobalTransform)>,
 ) {
-    let active = palette.input.starts_with('g') || palette.input.starts_with('m');
+    let active = crate::command_palette::is_in_targeting_mode(&palette.input);
     if !palette.open || !active || goto_state.labels.is_empty() {
         return;
     }
