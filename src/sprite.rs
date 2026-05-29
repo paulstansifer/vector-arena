@@ -158,6 +158,28 @@ fn load_svg_handle(
     Some(handle)
 }
 
+fn rasterize_svg_centered(bytes: &[u8], options: &resvg::usvg::Options) -> Option<egui::ColorImage> {
+    let tree = match resvg::usvg::Tree::from_data(bytes, options) {
+        Ok(t) => t,
+        Err(e) => {
+            error!("Failed to parse SVG for egui texture: {e}");
+            return None;
+        }
+    };
+    let size = tree.size();
+    let w = size.width() as u32;
+    let h = size.height() as u32;
+    // Center the content bounding box in the pixmap. SVG sprites are designed
+    // with content centered at (0,0) in pixel space (via translate transforms on
+    // the layer), so without this offset the center appears at the top-left corner.
+    let bbox = tree.root().abs_bounding_box();
+    let tx = w as f32 / 2.0 - (bbox.left() + bbox.right()) / 2.0;
+    let ty = h as f32 / 2.0 - (bbox.top() + bbox.bottom()) / 2.0;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h)?;
+    resvg::render(&tree, resvg::tiny_skia::Transform::from_translate(tx, ty), &mut pixmap.as_mut());
+    Some(egui::ColorImage::from_rgba_premultiplied([w as usize, h as usize], pixmap.data()))
+}
+
 fn load_egui_texture(
     svg_path: &str,
     param: Option<&SpriteParam>,
@@ -170,13 +192,7 @@ fn load_egui_texture(
     }
     let modified = read_svg_bytes(svg_path, param)?;
     let options = make_usvg_options();
-    let color_image = match egui_extras::image::load_svg_bytes(&modified, &options) {
-        Ok(img) => img,
-        Err(e) => {
-            error!("Failed to rasterize SVG {svg_path}: {e}");
-            return None;
-        }
-    };
+    let color_image = rasterize_svg_centered(&modified, &options)?;
     let tex_name = format!("{}/{}", svg_path, &key.1);
     let tex = ctx.load_texture(tex_name, color_image, Default::default());
     cache.egui_textures.insert(key, tex.clone());
