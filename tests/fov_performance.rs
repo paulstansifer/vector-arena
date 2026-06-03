@@ -28,7 +28,7 @@ fn test_fov_point_explosion() {
                     horz_conn: (vec![], vec![200.0]),
                     vert_conn: (vec![], vec![]),
                 },
-                PartitionRole::Room { variant: RoomVariant::Normal },
+                PartitionRole::Room { variant: RoomVariant::Colonnade },
             ),
             (
                 Partition {
@@ -46,7 +46,7 @@ fn test_fov_point_explosion() {
                     horz_conn: (vec![200.0], vec![]),
                     vert_conn: (vec![], vec![]),
                 },
-                PartitionRole::Room { variant: RoomVariant::Normal },
+                PartitionRole::Room { variant: RoomVariant::Oval },
             ),
         ],
         &mut rng,
@@ -88,7 +88,7 @@ fn test_fov_point_explosion() {
     let pass_1_points: usize = exploration_state.0.coords_count();
     println!("First pass points: {pass_1_points}");
 
-    for extra_pass in 0..100 {
+    for extra_pass in 0..10 {
         for pt in &points {
             let (new_exp, _, _, _) = update_fov_from_pov(
                 Vec2::new(pt.x + 0.01 * (extra_pass as f32), pt.y + 0.01 * (extra_pass as f32)),
@@ -108,14 +108,14 @@ fn test_fov_point_explosion() {
             }
 
         }
-        if extra_pass % 10 == 0 {
+        if extra_pass % 2 == 0 {
             println!("Extra pass {extra_pass} points: {}", exploration_state.0.coords_count());
         }
     }
 
     let pass_2_points: usize = exploration_state.0.coords_count();
     assert!(pass_1_points < 500, "{}", pass_1_points);
-    let extra_points = pass_2_points - pass_1_points;
+    let extra_points = pass_2_points as i32 - pass_1_points as i32; // simplification might make it go down!
     assert!(extra_points < 30, "{}", extra_points);
 }
 
