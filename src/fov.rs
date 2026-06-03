@@ -296,7 +296,7 @@ pub fn update_fov(
     *meshes.get_mut(&never_explored_mesh_handle.0).unwrap() = new_ne;
 }
 
-fn update_fov_from_pov(
+pub fn update_fov_from_pov(
     origin: Vec2,
     radius: f32,
     solid_rock: &MultiPolygon<f32>,
@@ -339,103 +339,6 @@ fn update_fov_from_pov(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dungeon::{
-        bsp::Partition,
-        level_generation::{PartitionRole, RoomVariant, TerrainGeometry},
-    };
-    use geo::CoordsIter;
-    use rand::{SeedableRng, rngs::StdRng};
-
-    #[test]
-    fn test_fov_point_explosion() {
-        let mut rng = StdRng::seed_from_u64(1234);
-
-        let left = Partition {
-            x: (10.0, 300.0),
-            y: (10.0, 300.0),
-            horz_conn: (vec![300.0], vec![]),
-            vert_conn: (vec![], vec![]),
-        };
-        let mid = Partition {
-            x: (300.0, 500.0),
-            y: (10.0, 300.0),
-            horz_conn: (vec![500.0], vec![300.0]),
-            vert_conn: (vec![], vec![]),
-        };
-        let right = Partition {
-            x: (500.0, 790.0),
-            y: (10.0, 300.0),
-            horz_conn: (vec![], vec![500.0]),
-            vert_conn: (vec![], vec![]),
-        };
-
-        let allocated_partitions = vec![
-            (left, PartitionRole::Room { variant: RoomVariant::Normal }),
-            (mid, PartitionRole::Corridor { double_width: false }),
-            (right, PartitionRole::Room { variant: RoomVariant::Colonnade }),
-        ];
-
-        let terrain_geometry = TerrainGeometry::from_partitions_and_roles(
-            800.0,
-            310.0,
-            allocated_partitions,
-            &mut rng,
-        );
-
-        let world_bounds = WorldBounds { width: 1200.0, height: 800.0 };
-        let w = world_bounds.width;
-        let h = world_bounds.height;
-        let bg_rect = geo::Rect::new(
-            (-w / 2.0 - 200.0, -h / 2.0 - 200.0),
-            (w / 2.0 + 200.0, h / 2.0 + 200.0),
-        );
-        let mut exploration_state = ExplorationState(MultiPolygon::new(vec![bg_rect.to_polygon()]));
-
-        let mut points = vec![];
-        for i in 0..=20 {
-            let t = i as f32 / 20.0;
-            let x = 150.0 * (1.0 - t) + 650.0 * t;
-            let y = 150.0;
-            points.push(Vec2::new(x, y));
-        }
-
-        for pt in &points {
-            let (new_exp, _, _, _) = update_fov_from_pov(
-                *pt,
-                600.0,
-                &terrain_geometry.solid_rock,
-                &world_bounds,
-                &exploration_state.0,
-                &[],
-            );
-            exploration_state.0 = new_exp;
-        }
-
-        let pass_1_points: usize = exploration_state.0.coords_count();
-        println!("First pass points: {pass_1_points}");
-
-        for extra_pass in 0..100 {
-            for pt in &points {
-                let (new_exp, _, _, _) = update_fov_from_pov(
-                    Vec2::new(pt.x + 0.01 * (extra_pass as f32), pt.y + 0.01 * (extra_pass as f32)),
-                    600.0,
-                    &terrain_geometry.solid_rock,
-                    &world_bounds,
-                    &exploration_state.0,
-                    &[],
-                );
-                exploration_state.0 = new_exp;
-            }
-            if extra_pass % 10 == 0 {
-                println!("Extra pass {extra_pass} points: {}", exploration_state.0.coords_count())
-            }
-        }
-
-        let pass_2_points: usize = exploration_state.0.coords_count();
-        assert!(pass_1_points < 500, "{}", pass_1_points);
-        let extra_points = pass_2_points - pass_1_points;
-        assert!(extra_points < 30, "{}", extra_points);
-    }
 
     // Helper: a MultiPolygon rectangle.
     fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> MultiPolygon<f32> {
