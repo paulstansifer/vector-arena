@@ -14,6 +14,19 @@ use crate::{
     fov::{ExplorationState, find_exploration_waypoint},
 };
 
+// How far (in world units) to search for the nearest navmesh point when a
+// destination lands off the mesh (e.g. too close to a wall).
+const NAVMESH_SNAP_RADIUS: f32 = 80.0;
+
+fn snap_to_navmesh(point: Vec2, archipelago_query: &Query<&Archipelago2d>) -> Vec2 {
+    archipelago_query
+        .iter()
+        .next()
+        .and_then(|a| a.sample_point(point, &NAVMESH_SNAP_RADIUS).ok())
+        .map(|s| s.point())
+        .unwrap_or(point)
+}
+
 pub const PLAYER_SPEED: f32 = 480.0;
 pub const STOP_THRESHOLD: f32 = 8.0;
 
@@ -53,6 +66,7 @@ pub fn set_target_on_click(
         (Entity, &Transform, &mut MoveTarget, &mut AgentTarget2d),
         With<Player>,
     >,
+    archipelago_query: Query<&Archipelago2d>,
     time: Res<Time>,
     exploration_state: Res<ExplorationState>,
     dungeon_state: Res<DungeonState>,
@@ -73,9 +87,11 @@ pub fn set_target_on_click(
         Err(_) => return,
     };
 
+    let snapped_goal = snap_to_navmesh(goal_position, &archipelago_query);
+
     for (entity, transform, mut move_target, mut agent_target) in player_query.iter_mut() {
         let current_position = transform.translation.truncate();
-        let distance = current_position.distance(goal_position);
+        let distance = current_position.distance(snapped_goal);
 
         if distance <= STOP_THRESHOLD {
             move_target.active = false;
@@ -94,15 +110,16 @@ pub fn set_target_on_click(
                 &known_blockers,
                 &dungeon_state.playable_area,
             ) {
+                let waypoint = snap_to_navmesh(waypoint, &archipelago_query);
                 move_target.set(waypoint, current_position, time.elapsed());
                 *agent_target = AgentTarget2d::Point(waypoint);
                 commands.entity(entity).insert(ExplorationGoal(goal_position));
             }
             // If no frontier waypoint exists, ignore the click.
         } else {
-            // Normal click in explored territory: path directly.
-            move_target.set(goal_position, current_position, time.elapsed());
-            *agent_target = AgentTarget2d::Point(goal_position);
+            // Normal click in explored territory: path directly (snapped to navmesh).
+            move_target.set(snapped_goal, current_position, time.elapsed());
+            *agent_target = AgentTarget2d::Point(snapped_goal);
             commands.entity(entity).remove::<ExplorationGoal>();
         }
     }
@@ -115,6 +132,7 @@ pub fn advance_exploration(
         (Entity, &Transform, &mut MoveTarget, &mut AgentTarget2d, &ExplorationGoal),
         With<Player>,
     >,
+    archipelago_query: Query<&Archipelago2d>,
     exploration_state: Res<ExplorationState>,
     dungeon_state: Res<DungeonState>,
     mut commands: Commands,
@@ -134,9 +152,10 @@ pub fn advance_exploration(
     let current = transform.translation.truncate();
 
     if !exploration_state.0.contains(&geo::Point::new(goal.x, goal.y)) {
-        // Goal is now in explored territory — path directly to it.
-        move_target.set(goal, current, time.elapsed());
-        *agent_target = AgentTarget2d::Point(goal);
+        // Goal is now in explored territory — path directly to it (snapped to navmesh).
+        let snapped = snap_to_navmesh(goal, &archipelago_query);
+        move_target.set(snapped, current, time.elapsed());
+        *agent_target = AgentTarget2d::Point(snapped);
         commands.entity(entity).remove::<ExplorationGoal>();
     } else {
         let known_blockers = dungeon_state.solid_rock.difference(&exploration_state.0);
@@ -147,6 +166,7 @@ pub fn advance_exploration(
             &dungeon_state.playable_area,
         ) {
             Some(waypoint) if waypoint.distance(current) > STOP_THRESHOLD => {
+                let waypoint = snap_to_navmesh(waypoint, &archipelago_query);
                 move_target.set(waypoint, current, time.elapsed());
                 *agent_target = AgentTarget2d::Point(waypoint);
             }

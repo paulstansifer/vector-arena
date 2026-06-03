@@ -46,7 +46,7 @@ fn main() {
             }),
             avian2d::PhysicsPlugins::default(),
             Landmass2dPlugin::default(),
-            bevy_landmass::debug::Landmass2dDebugPlugin::default(),
+            // bevy_landmass::debug::Landmass2dDebugPlugin::default(),
             bevy_svg::prelude::SvgPlugin,
             rope::RopePlugin,
             UiPlugin,
