@@ -7,7 +7,7 @@ use bevy::{prelude::*, time::Real};
 
 
 use crate::{
-    command_palette::{CommandPaletteRegistry, CommandPaletteState, PaletteEntry, PaletteProvider},
+    command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     dungeon::terrain::{DungeonState, random_in_playable_area},
     monster::Stats,
     player::{ExplorationGoal, Player},
@@ -144,87 +144,23 @@ pub fn animate_pickup(
 
 // ── Command palette integration ──────────────────────────────────────────────
 
-/// Build deduplicated palette entries for `command` from inventory items matching `filter`.
-/// Letters are stable, assigned on first pickup and persistent for the session.
-fn deduplicated_entries(
-    command: &str,
-    inventory: &Inventory,
-    filter: fn(&ItemKind) -> bool,
-    letter_map: &crate::command_palette::LetterMap,
-) -> Vec<PaletteEntry> {
-    // Deduped counts for filtered items only
-    let mut unique: Vec<(ItemKind, u16)> = Vec::new();
-    for item in &inventory.0 {
-        if filter(item) {
-            if let Some(entry) = unique.iter_mut().find(|(t, _)| t == item) {
-                entry.1 += 1;
-            } else {
-                unique.push((*item, 1));
-            }
-        }
-    }
-
-    let mut entries: Vec<PaletteEntry> = unique
-        .iter()
-        .filter_map(|(item, count)| {
-            letter_map.get_item(*item).map(|letter| PaletteEntry {
-                key: format!("{command} {letter}"),
-                description: item_name(*item, *count),
-                icon: Some(*item),
-                is_complete: true,
-            })
-        })
-        .collect();
-    entries.sort_by_key(|e| e.key.clone());
-    entries
-}
-
-/// Provides `q` (quaff) and `r` (read) completions.
-pub struct ItemCommandProvider;
-
-impl PaletteProvider for ItemCommandProvider {
-    fn completions(
-        &self,
-        input: &str,
-        inventory: &Inventory,
-        letter_map: &crate::command_palette::LetterMap,
-    ) -> Vec<PaletteEntry> {
-        let tokens: Vec<&str> = input.split_whitespace().collect();
-        match tokens.as_slice() {
-            [] => vec![
-                PaletteEntry {
-                    key: "q".into(),
-                    description: "quaff a potion".into(),
-                    icon: None,
-                    is_complete: false,
-                },
-                PaletteEntry {
-                    key: "r".into(),
-                    description: "read a scroll".into(),
-                    icon: None,
-                    is_complete: false,
-                },
-            ],
-            // Match both "q" (browsing sub-menu) and "q <letter>" (complete command)
-            ["q"] | ["q", _] => deduplicated_entries(
-                "q",
-                inventory,
-                |i| matches!(i, ItemKind::Potion(_)),
-                letter_map,
-            ),
-            ["r"] | ["r", _] => deduplicated_entries(
-                "r",
-                inventory,
-                |i| matches!(i, ItemKind::Scroll(_)),
-                letter_map,
-            ),
-            _ => vec![],
-        }
-    }
-}
-
-pub fn register_item_commands(mut registry: ResMut<CommandPaletteRegistry>) {
-    registry.register(Box::new(ItemCommandProvider));
+pub fn register_item_commands(mut registry: ResMut<PaletteRegistry>) {
+    registry.commands.push(PaletteCommand {
+        key: "q".to_string(),
+        description: "quaff a potion".to_string(),
+        icon: None,
+        kind: PaletteCommandKind::InventoryTarget {
+            item_filter: |i| matches!(i, ItemKind::Potion(_)),
+        },
+    });
+    registry.commands.push(PaletteCommand {
+        key: "r".to_string(),
+        description: "read a scroll".to_string(),
+        icon: None,
+        kind: PaletteCommandKind::InventoryTarget {
+            item_filter: |i| matches!(i, ItemKind::Scroll(_)),
+        },
+    });
 }
 
 /// Verify `target` passes `filter`, then remove its first occurrence from inventory.

@@ -17,8 +17,8 @@ use vector_arena::{
         crumble_terrain::{Fragile, handle_right_click_excavation},
         projectile::{
             apply_missile_knockback, execute_missile_command, init_trail_meshes,
-            monster_fire_missiles, spawn_missile_trails, tick_knockback_cooldowns,
-            update_hit_flash, update_missile_trails, update_missiles,
+            monster_fire_missiles, register_missile_command, spawn_missile_trails,
+            tick_knockback_cooldowns, update_hit_flash, update_missile_trails, update_missiles,
         },
         rope,
     },
@@ -60,6 +60,8 @@ fn main() {
         .add_systems(Startup, enable_ui_input_absorption)
         .add_systems(Startup, init_trail_meshes)
         .add_systems(Startup, register_item_commands)
+        .add_systems(Startup, goto::register_goto_command)
+        .add_systems(Startup, register_missile_command)
         .add_systems(OnEnter(GameState::Restart), on_enter_restart)
         .add_systems(OnEnter(GameState::Descend), on_enter_descend)
         .add_systems(OnExit(GameState::InLevel), save_player_on_exit)

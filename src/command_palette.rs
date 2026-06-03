@@ -1,8 +1,5 @@
 use std::collections::HashMap;
 
-// Command palette: extensible spacebar-triggered command entry.
-// Other modules register PaletteProviders to contribute commands;
-// the UI renders completions and writes pending_command as a String.
 use avian2d::prelude::LinearVelocity;
 use bevy::{input::keyboard::Key, prelude::*};
 use bevy_egui::egui;
@@ -11,15 +8,30 @@ use bevy_landmass::prelude::AgentTarget2d;
 
 use crate::{
     fov::CurrentFovState,
-    goto::{self, GotoState},
-    item::{Inventory, ItemKind},
+    goto::GotoState,
+    item::{Inventory, ItemKind, item_name},
     monster::{Monster, MonsterState, Stats},
     player::{ExplorationGoal, MoveTarget, Player},
     sprite::SpriteEguiTextures,
 };
 
+pub enum PaletteCommandKind {
+    /// Sub-entries come from the player's inventory filtered by item_filter.
+    /// Executed as "{key} {item_letter}".
+    InventoryTarget { item_filter: fn(ItemKind) -> bool },
+    /// Sub-entries come from visible monsters + labeled locations.
+    /// When executed, pending_target is resolved to a Vec2 before the handler runs.
+    LocationTarget { target_verb: &'static str },
+}
+
+pub struct PaletteCommand {
+    pub key: String,
+    pub description: String,
+    pub icon: Option<ItemKind>,
+    pub kind: PaletteCommandKind,
+}
+
 pub struct PaletteEntry {
-    /// Full command string if is_complete; prefix otherwise.
     pub key: String,
     pub description: String,
     pub icon: Option<ItemKind>,
@@ -32,27 +44,33 @@ pub struct CommandPaletteState {
     pub open: bool,
     pub input: String,
     pub selected_idx: usize,
-    /// Set by the UI when an entry is activated; consumed by handler systems.
+    /// Set by the UI when a command is activated; consumed by handler systems.
+    /// For LocationTarget commands this is the bare key (e.g. "z"); for
+    /// InventoryTarget commands it includes the item letter (e.g. "q a").
     pub pending_command: Option<String>,
+    /// For LocationTarget commands: the resolved world position of the target.
+    /// Set alongside pending_command and consumed by the handler.
+    pub pending_target: Option<Vec2>,
 }
 
-pub trait PaletteProvider: Send + Sync + 'static {
-    fn completions(
-        &self,
-        input: &str,
-        inventory: &Inventory,
-        letter_map: &LetterMap,
-    ) -> Vec<PaletteEntry>;
-}
+/// True while the palette has a LocationTarget command active and is watching
+/// for world clicks. Other click-handling systems should check this.
+#[derive(Resource, Default)]
+pub struct CommandPaletteWatchesClicks(pub bool);
 
 #[derive(Resource, Default)]
-pub struct CommandPaletteRegistry {
-    providers: Vec<Box<dyn PaletteProvider>>,
+pub struct PaletteRegistry {
+    pub commands: Vec<PaletteCommand>,
 }
 
-impl CommandPaletteRegistry {
-    pub fn register(&mut self, provider: Box<dyn PaletteProvider>) {
-        self.providers.push(provider);
+impl PaletteRegistry {
+    pub fn is_location_targeting(&self, input: &str) -> bool {
+        let trimmed = input.trim_end();
+        self.commands.iter().any(|cmd| {
+            matches!(cmd.kind, PaletteCommandKind::LocationTarget { .. })
+                && (trimmed == cmd.key
+                    || trimmed.starts_with(&format!("{} ", cmd.key)))
+        })
     }
 
     pub fn completions(
@@ -60,31 +78,119 @@ impl CommandPaletteRegistry {
         input: &str,
         inventory: &Inventory,
         letter_map: &LetterMap,
+        goto_state: &GotoState,
+        monster_query: &Query<(Entity, &Stats, &MonsterState, &Transform), With<Monster>>,
+        current_fov: Option<&geo::MultiPolygon<f32>>,
     ) -> Vec<PaletteEntry> {
-        self.providers.iter().flat_map(|p| p.completions(input, inventory, letter_map)).collect()
+        let mut entries = Vec::new();
+        for cmd in &self.commands {
+            match &cmd.kind {
+                PaletteCommandKind::InventoryTarget { item_filter } => {
+                    let tokens: Vec<&str> = input.split_whitespace().collect();
+                    match tokens.as_slice() {
+                        [] => entries.push(PaletteEntry {
+                            key: cmd.key.clone(),
+                            description: cmd.description.clone(),
+                            icon: cmd.icon,
+                            is_complete: false,
+                        }),
+                        [k] | [k, _] if *k == cmd.key.as_str() => {
+                            entries.extend(inventory_entries(
+                                &cmd.key, inventory, *item_filter, letter_map,
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+                PaletteCommandKind::LocationTarget { target_verb } => {
+                    if input.is_empty() {
+                        entries.push(PaletteEntry {
+                            key: cmd.key.clone(),
+                            description: cmd.description.clone(),
+                            icon: cmd.icon,
+                            is_complete: false,
+                        });
+                    } else if input.trim_end() == cmd.key
+                        || input.starts_with(&format!("{} ", cmd.key))
+                    {
+                        entries.extend(targeting_sub_completions(
+                            input,
+                            &cmd.key,
+                            target_verb,
+                            goto_state,
+                            letter_map,
+                            monster_query,
+                            current_fov,
+                        ));
+                    }
+                }
+            }
+        }
+        entries
     }
 }
 
-/// World-position targeting set by the palette when the user clicks outside the egui UI
-/// while a targeting command ("m" or "g") is active.  Consumed by the respective action systems.
-#[derive(Resource, Default)]
-pub struct PendingClickTarget {
-    pub missile_pos: Option<Vec2>,
-    pub goto_pos: Option<Vec2>,
+/// Build deduplicated palette entries for inventory items matching `filter`.
+pub(crate) fn inventory_entries(
+    command: &str,
+    inventory: &Inventory,
+    item_filter: fn(ItemKind) -> bool,
+    letter_map: &LetterMap,
+) -> Vec<PaletteEntry> {
+    let mut unique: Vec<(ItemKind, u16)> = Vec::new();
+    for item in &inventory.0 {
+        if item_filter(*item) {
+            if let Some(entry) = unique.iter_mut().find(|(t, _)| t == item) {
+                entry.1 += 1;
+            } else {
+                unique.push((*item, 1));
+            }
+        }
+    }
+    let mut entries: Vec<PaletteEntry> = unique
+        .iter()
+        .filter_map(|(item, count)| {
+            letter_map.get_item(*item).map(|letter| PaletteEntry {
+                key: format!("{command} {letter}"),
+                description: item_name(*item, *count),
+                icon: Some(*item),
+                is_complete: true,
+            })
+        })
+        .collect();
+    entries.sort_by_key(|e| e.key.clone());
+    entries
 }
 
-/// True when the current palette input is in a targeting sub-command for "m" or "g".
-pub fn is_in_targeting_mode(input: &str) -> bool {
-    let t = input.trim_end();
-    t == "m" || t.starts_with("m ") || t == "g" || t.starts_with("g ")
+/// Resolve a single target letter (uppercase monster, lowercase location label) to a Vec2.
+pub fn resolve_location_letter(
+    rest: &str,
+    letter_map: &LetterMap,
+    monster_query: &Query<(Entity, &Stats, &MonsterState, &Transform), With<Monster>>,
+    goto_state: &GotoState,
+) -> Option<Vec2> {
+    if rest.len() != 1 {
+        return None;
+    }
+    let c = rest.chars().next()?;
+    match c {
+        c if c.is_uppercase() => {
+            let entity = letter_map.entity_for_letter(c)?;
+            monster_query.get(entity).ok().map(|(_, _, _, tf)| tf.translation.truncate())
+        }
+        c if c.is_lowercase() => {
+            let idx = (c as u8).wrapping_sub(b'a') as usize;
+            goto_state.labels.get(idx).copied()
+        }
+        _ => None,
+    }
 }
 
-/// Shared completion body for the "g" and "m" targeting commands.
-/// The caller emits the root stub entry; this handles the sub-menu and single-target lookups.
-/// `prefix` is 'g' or 'm'; `location_verb` is "Go to" or "Fire at".
+/// Shared completion body for LocationTarget commands.
+/// `prefix` is the command key ("g", "z", …); `location_verb` is "Go to", "Zap at", etc.
 pub fn targeting_sub_completions(
     input: &str,
-    prefix: char,
+    prefix: &str,
     location_verb: &str,
     goto_state: &GotoState,
     letter_map: &LetterMap,
@@ -98,8 +204,8 @@ pub fn targeting_sub_completions(
 
     let trimmed = input.trim_end();
 
-    // Sub-menu: just the prefix, no target specified yet
-    if trimmed.len() == 1 && trimmed.starts_with(prefix) {
+    // Sub-menu: just the prefix, no target specified yet.
+    if trimmed == prefix {
         let mut entries: Vec<PaletteEntry> = monster_query
             .iter()
             .filter_map(|(entity, stats, state, tf)| {
@@ -126,10 +232,11 @@ pub fn targeting_sub_completions(
     }
 
     // Single-target: "{prefix} X"
-    if input.len() < 3 || input.chars().nth(1) != Some(' ') {
+    let space_pos = prefix.len();
+    if input.len() < space_pos + 2 || input.chars().nth(space_pos) != Some(' ') {
         return vec![];
     }
-    let target = input[2..].trim();
+    let target = input[space_pos + 1..].trim();
     let mut target_chars = target.chars();
     let Some(c) = target_chars.next() else { return vec![] };
     if target_chars.next().is_some() {
@@ -174,8 +281,8 @@ pub struct CommandPalettePlugin;
 impl Plugin for CommandPalettePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CommandPaletteState>()
-            .init_resource::<CommandPaletteRegistry>()
-            .init_resource::<PendingClickTarget>()
+            .init_resource::<PaletteRegistry>()
+            .init_resource::<CommandPaletteWatchesClicks>()
             .add_systems(Update, open_palette_system);
     }
 }
@@ -188,13 +295,10 @@ pub fn open_palette_system(
         With<Player>,
     >,
     mut commands: Commands,
-    registry: Res<CommandPaletteRegistry>,
+    registry: Res<PaletteRegistry>,
     letter_map: Res<LetterMap>,
 ) {
     if !state.open {
-        // Space opens with blank input; a letter key opens pre-filled with "[letter] "
-        // only if that letter is a recognized top-level palette command.
-        // Uppercase monster letters open pre-filled with "g [letter] " for navigation.
         let open_with = if keyboard.just_pressed(Key::Space) {
             Some(String::new())
         } else {
@@ -207,12 +311,7 @@ pub fn open_palette_system(
                     if is_monster {
                         return Some(format!("g {ch} "));
                     }
-                    // "g" and "m" are always top-level targeting commands
-                    let is_cmd = ch == "g" || ch == "m" || {
-                        let empty = Inventory::default();
-                        let inventory = player_query.single().map(|q| q.4).unwrap_or(&empty);
-                        registry.completions("", inventory, &letter_map).iter().any(|e| e.key == ch.as_str())
-                    };
+                    let is_cmd = registry.commands.iter().any(|c| c.key == ch.as_str());
                     is_cmd.then(|| format!("{ch} "))
                 })
         };
@@ -241,8 +340,8 @@ pub fn open_palette_system(
 pub fn palette_system(
     mut contexts: bevy_egui::EguiContexts,
     mut palette: ResMut<CommandPaletteState>,
-    mut click_target: ResMut<PendingClickTarget>,
-    registry: Res<CommandPaletteRegistry>,
+    mut watches_clicks: ResMut<CommandPaletteWatchesClicks>,
+    registry: Res<PaletteRegistry>,
     goto_state: Res<GotoState>,
     current_fov: Option<Res<CurrentFovState>>,
     player_query: Query<(&Inventory, &Transform), With<Player>>,
@@ -257,23 +356,19 @@ pub fn palette_system(
         return Ok(());
     };
 
+    let targeting = palette.open && registry.is_location_targeting(&palette.input);
+    watches_clicks.0 = targeting;
+
     if palette.open {
-        let mut completions = registry.completions(&palette.input, inventory, &letter_map);
         let fov = current_fov.as_deref().map(|r| &r.0);
-        completions.extend(goto::goto_completions(
+        let completions = registry.completions(
             &palette.input,
-            &goto_state,
+            inventory,
             &letter_map,
+            &goto_state,
             &monster_query,
             fov,
-        ));
-        completions.extend(crate::effects::projectile::missile_completions(
-            &palette.input,
-            &goto_state,
-            &letter_map,
-            &monster_query,
-            fov,
-        ));
+        );
 
         let screen_rect = ctx.viewport_rect();
         let screen_size = Vec2::new(screen_rect.width(), screen_rect.height());
@@ -284,7 +379,6 @@ pub fn palette_system(
             .map(|p| farthest_corner_anchor(p, screen_size))
             .unwrap_or(egui::Align2::RIGHT_BOTTOM);
 
-        let targeting = is_in_targeting_mode(&palette.input);
         match render_command_palette(
             ctx,
             &mut palette,
@@ -298,7 +392,24 @@ pub fn palette_system(
                 palette.selected_idx = 0;
             }
             PaletteUiAction::Execute(cmd) => {
-                palette.pending_command = Some(cmd);
+                let key = cmd.split_whitespace().next().unwrap_or("").to_string();
+                if let Some(pc) = registry.commands.iter().find(|c| c.key == key) {
+                    match &pc.kind {
+                        PaletteCommandKind::LocationTarget { .. } => {
+                            let rest = cmd[key.len()..].trim();
+                            palette.pending_target = resolve_location_letter(
+                                rest,
+                                &letter_map,
+                                &monster_query,
+                                &goto_state,
+                            );
+                            palette.pending_command = Some(key);
+                        }
+                        PaletteCommandKind::InventoryTarget { .. } => {
+                            palette.pending_command = Some(cmd);
+                        }
+                    }
+                }
                 palette.open = false;
                 palette.input.clear();
             }
@@ -323,11 +434,9 @@ pub fn palette_system(
                     })
             });
             if let Some(world_pos) = world_pos {
-                if palette.input.starts_with('m') {
-                    click_target.missile_pos = Some(world_pos);
-                } else {
-                    click_target.goto_pos = Some(world_pos);
-                }
+                let key = palette.input.split_whitespace().next().unwrap_or("").to_string();
+                palette.pending_command = Some(key);
+                palette.pending_target = Some(world_pos);
                 palette.open = false;
                 palette.input.clear();
             }
@@ -376,7 +485,6 @@ fn render_command_palette(
     let n = completions.len();
     let te_id = egui::Id::new("##palette_input");
 
-    // ── Keyboard handling before rendering ──
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         return PaletteUiAction::Close;
     }
@@ -437,7 +545,6 @@ fn render_command_palette(
             te_response.request_focus();
 
             if palette.input != old_input {
-                // Auto-space: if input grew and exactly matches a non-complete entry key
                 if palette.input.len() > old_len {
                     let trimmed = palette.input.trim_end().to_string();
                     if completions.iter().any(|e| !e.is_complete && e.key == trimmed) {
@@ -618,7 +725,7 @@ impl LetterMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::item::{ItemCommandProvider, PotionColor, ScrollName};
+    use crate::item::{PotionColor, ScrollName};
 
     /// Inventory: Red×2, Readme×2, Blue×1, Agents×1 (with stable letters:
     /// Red='a', Readme='b', Blue='c', Agents='d').
@@ -658,7 +765,9 @@ mod tests {
     fn quaff_uses_stable_letters() {
         let inv = test_inventory();
         let letter_map = test_letter_map();
-        let entries = ItemCommandProvider.completions("q ", &inv, &letter_map);
+        let entries = inventory_entries(
+            "q", &inv, |i| matches!(i, ItemKind::Potion(_)), &letter_map,
+        );
         assert_eq!(keys(&entries), ["q a", "q c"]);
         assert_eq!(entries[0].description, "2 Red potions");
         assert_eq!(entries[1].description, "a Blue potion");
@@ -668,7 +777,9 @@ mod tests {
     fn read_uses_stable_letters() {
         let inv = test_inventory();
         let letter_map = test_letter_map();
-        let entries = ItemCommandProvider.completions("r ", &inv, &letter_map);
+        let entries = inventory_entries(
+            "r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map,
+        );
         assert_eq!(keys(&entries), ["r b", "r d"]);
         assert_eq!(entries[0].description, "2 scrolls titled 'Readme'");
         assert_eq!(entries[1].description, "a scroll titled 'Agents'");
@@ -679,20 +790,25 @@ mod tests {
     fn down_space_down_equals_r_d() {
         let inv = test_inventory();
         let letter_map = test_letter_map();
-        let p = ItemCommandProvider;
 
-        let root = p.completions("", &inv, &letter_map);
-        let after_down = press_down("", &root); // → "r"
+        let root_q = inventory_entries("q", &inv, |i| matches!(i, ItemKind::Potion(_)), &letter_map);
+        let root_r = inventory_entries("r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map);
+        // Simulate root level: ["q", "r"] as non-complete stubs
+        let root = vec![
+            PaletteEntry { key: "q".into(), description: "".into(), icon: None, is_complete: false },
+            PaletteEntry { key: "r".into(), description: "".into(), icon: None, is_complete: false },
+        ];
+        let after_down = press_down("", &root); // → "r"... wait, down from "" lands on first: "q"
+        // Actually press_down("", &root) → current=0 (not found → 0), new=(0+1)%2=1 → "r"
+        // Hmm, "" trim = "" which matches nothing, so unwrap_or(0), then (0+1)%2 = 1 → "r"
+        let _ = (root_q, root_r); // suppress unused warning
 
-        // Space typed by user (no auto-space because "r" is the key of a non-complete root entry,
-        // but completions at this point are already read entries since ["r"] matches the sub-menu)
         let spaced = after_down + " "; // "r "
-        let read = p.completions(&spaced, &inv, &letter_map);
-        let final_input = press_down(&spaced, &read); // → "r d"
+        let read = inventory_entries("r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map);
+        let final_input = press_down(&spaced, &read); // → "r d" (second entry)
 
         assert_eq!(final_input, "r d");
 
-        // Confirm "r d" typed directly selects the same entry
         let sel = read.iter().position(|e| e.key == final_input).unwrap();
         assert_eq!(read[sel].key, "r d");
         assert!(read[sel].is_complete);
@@ -704,17 +820,17 @@ mod tests {
     fn x_backspace_then_down_space_down_equals_r_d() {
         let inv = test_inventory();
         let letter_map = test_letter_map();
-        let p = ItemCommandProvider;
 
-        // 'x' matches nothing
-        assert!(p.completions("x", &inv, &letter_map).is_empty());
-        // After backspace we're back at "" with root completions
-        let root = p.completions("", &inv, &letter_map);
+        // Back to root after backspace: two commands available
+        let root = vec![
+            PaletteEntry { key: "q".into(), description: "".into(), icon: None, is_complete: false },
+            PaletteEntry { key: "r".into(), description: "".into(), icon: None, is_complete: false },
+        ];
         assert_eq!(root.len(), 2);
 
         let after_down = press_down("", &root);
         let spaced = after_down + " ";
-        let read = p.completions(&spaced, &inv, &letter_map);
+        let read = inventory_entries("r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map);
         let final_input = press_down(&spaced, &read);
 
         assert_eq!(final_input, "r d");

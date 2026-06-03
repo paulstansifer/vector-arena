@@ -2,15 +2,18 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 use bevy_landmass::prelude::*;
-use geo::Contains;
 
 use crate::{
-    command_palette::{CommandPaletteState, LetterMap, PaletteEntry, PendingClickTarget},
+    command_palette::{
+        CommandPaletteState, CommandPaletteWatchesClicks, PaletteCommand, PaletteCommandKind,
+        PaletteRegistry,
+    },
     dungeon::terrain::PointsOfInterest,
     fov::ExplorationState,
-    monster::{Monster, MonsterState, Stats},
     player::{ExplorationGoal, MoveTarget, Player},
 };
+
+pub const GOTO_KEY: &str = "g";
 
 #[derive(Resource, Default)]
 pub struct GotoState {
@@ -18,16 +21,25 @@ pub struct GotoState {
     pub computed: bool,
 }
 
+pub fn register_goto_command(mut registry: ResMut<PaletteRegistry>) {
+    registry.commands.push(PaletteCommand {
+        key: GOTO_KEY.to_string(),
+        description: "Go to monster or location".to_string(),
+        icon: None,
+        kind: PaletteCommandKind::LocationTarget { target_verb: "Go to" },
+    });
+}
+
 pub fn compute_goto_assignments(
     palette: Res<CommandPaletteState>,
+    watches_clicks: Res<CommandPaletteWatchesClicks>,
     exploration_state: Res<ExplorationState>,
     poi: Res<PointsOfInterest>,
     player_query: Query<&Transform, With<Player>>,
     item_query: Query<&Transform, With<crate::item::Item>>,
     mut goto_state: ResMut<GotoState>,
 ) {
-    let active = crate::command_palette::is_in_targeting_mode(&palette.input);
-    if !palette.open || !active || goto_state.computed {
+    if !palette.open || !watches_clicks.0 || goto_state.computed {
         return;
     }
 
@@ -37,16 +49,14 @@ pub fn compute_goto_assignments(
     };
     let player_pos = player_transform.translation.truncate();
 
-    let is_explored = |p: Vec2| !exploration_state.0.contains(&geo::Point::new(p.x, p.y));
+    let is_explored = |p: Vec2| {
+        use geo::Contains;
+        !exploration_state.0.contains(&geo::Point::new(p.x, p.y))
+    };
 
-    // Room centers and corridor ends from level generation.
     let map_points = poi.points.iter().copied().filter(|&p| is_explored(p));
-
-    // Current item positions.
     let item_points =
         item_query.iter().map(|tf| tf.translation.truncate()).filter(|&p| is_explored(p));
-
-    // 70px in each cardinal direction from the player, if explored.
     let cardinal_points = [
         player_pos + Vec2::new(0.0, 70.0),
         player_pos + Vec2::new(0.0, -70.0),
@@ -70,44 +80,20 @@ pub fn compute_goto_assignments(
 }
 
 pub fn reset_goto_on_close(palette: Res<CommandPaletteState>, mut goto_state: ResMut<GotoState>) {
-    // Don't clear while a command is pending — execute_goto_command still needs the labels.
-    if !palette.open && goto_state.computed && palette.pending_command.is_none() {
+    if !palette.open && goto_state.computed {
         goto_state.labels.clear();
         goto_state.computed = false;
     }
 }
 
-pub fn goto_completions(
-    input: &str,
-    goto_state: &GotoState,
-    letter_map: &LetterMap,
-    monster_query: &Query<(Entity, &Stats, &MonsterState, &Transform), With<Monster>>,
-    current_fov: Option<&geo::MultiPolygon<f32>>,
-) -> Vec<PaletteEntry> {
-    if input.is_empty() {
-        return vec![PaletteEntry {
-            key: "g".to_string(),
-            description: "Go to monster or location".to_string(),
-            icon: None,
-            is_complete: false,
-        }];
-    }
-    if !input.starts_with('g') {
-        return vec![];
-    }
-    crate::command_palette::targeting_sub_completions(
-        input, 'g', "Go to", goto_state, letter_map, monster_query, current_fov,
-    )
-}
-
 pub fn render_goto_markers(
     palette: Res<CommandPaletteState>,
+    watches_clicks: Res<CommandPaletteWatchesClicks>,
     goto_state: Res<GotoState>,
     mut egui_context: bevy_egui::EguiContexts,
     camera_query: Query<(&Camera, &GlobalTransform)>,
 ) {
-    let active = crate::command_palette::is_in_targeting_mode(&palette.input);
-    if !palette.open || !active || goto_state.labels.is_empty() {
+    if !palette.open || !watches_clicks.0 || goto_state.labels.is_empty() {
         return;
     }
 
@@ -131,7 +117,6 @@ pub fn render_goto_markers(
             Err(_) => continue,
         };
 
-        // Skip if outside window bounds
         if viewport_pos.x < 0.0 || viewport_pos.y < 0.0 {
             continue;
         }
@@ -140,30 +125,21 @@ pub fn render_goto_markers(
         let radius = 10.0;
         let circle_color = egui::Color32::from_rgba_unmultiplied(100, 150, 255, 150);
 
-        // Draw circle
         painter.circle_filled(screen_pos, radius, circle_color);
 
-        // Draw letter label
         let letter = ('a' as u8 + i as u8) as char;
-        let letter_str = letter.to_string();
-        let text_color = egui::Color32::WHITE;
-
         painter.text(
             screen_pos,
             egui::Align2::CENTER_CENTER,
-            letter_str,
+            letter.to_string(),
             egui::FontId::monospace(12.0),
-            text_color,
+            egui::Color32::WHITE,
         );
     }
 }
 
 pub fn execute_goto_command(
     mut palette: ResMut<CommandPaletteState>,
-    mut click_target: ResMut<PendingClickTarget>,
-    goto_state: Res<GotoState>,
-    letter_map: Res<LetterMap>,
-    monster_query: Query<&Transform, With<Monster>>,
     mut player_query: Query<
         (Entity, &Transform, &mut MoveTarget, &mut AgentTarget2d),
         With<Player>,
@@ -171,39 +147,11 @@ pub fn execute_goto_command(
     time: Res<Time>,
     mut commands: Commands,
 ) {
-    let mut destination: Option<Vec2> = None;
-
-    if let Some(cmd) = palette.pending_command.take() {
-        if let Some(rest) = cmd.strip_prefix("g ") {
-            let rest = rest.trim();
-            if rest.len() == 1 {
-                let c = rest.chars().next().unwrap();
-                match c {
-                    c if c.is_uppercase() => {
-                        if let Some(entity) = letter_map.entity_for_letter(c) {
-                            destination =
-                                monster_query.get(entity).ok().map(|tf| tf.translation.truncate());
-                        }
-                    }
-                    c if c.is_lowercase() => {
-                        let idx = (c as u8).wrapping_sub(b'a') as usize;
-                        if idx < goto_state.labels.len() {
-                            destination = Some(goto_state.labels[idx]);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        } else {
-            palette.pending_command = Some(cmd);
-        }
+    if palette.pending_command.as_deref() != Some(GOTO_KEY) {
+        return;
     }
-
-    if destination.is_none() {
-        destination = click_target.goto_pos.take();
-    }
-
-    let Some(destination) = destination else { return };
+    palette.pending_command = None;
+    let Some(destination) = palette.pending_target.take() else { return };
 
     match player_query.single_mut() {
         Ok((entity, transform, mut move_target, mut agent_target)) => {
@@ -222,31 +170,20 @@ pub fn execute_goto_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command_palette::CommandPaletteState;
 
-    fn make_app(pending_cmd: &str) -> (App, Entity) {
+    fn make_app(destination: Option<Vec2>) -> (App, Entity) {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
         let mut palette_state = CommandPaletteState::default();
-        palette_state.pending_command =
-            (!pending_cmd.is_empty()).then(|| pending_cmd.to_string());
-
-        let mut goto_state = GotoState::default();
-        goto_state.labels = vec![Vec2::new(50.0, 75.0), Vec2::new(300.0, 400.0)];
-        goto_state.computed = true;
-
-        let monster = app
-            .world_mut()
-            .spawn((Monster, Transform::from_xyz(100.0, 200.0, 0.0)))
-            .id();
-
-        let mut letter_map = LetterMap::default();
-        letter_map.assign_monster(monster); // assigns 'A'
+        if let Some(pos) = destination {
+            palette_state.pending_command = Some(GOTO_KEY.to_string());
+            palette_state.pending_target = Some(pos);
+        }
 
         app.insert_resource(palette_state);
-        app.insert_resource(goto_state);
-        app.insert_resource(letter_map);
-        app.init_resource::<crate::command_palette::PendingClickTarget>();
+        app.init_resource::<CommandPaletteWatchesClicks>();
 
         let player = app
             .world_mut()
@@ -262,8 +199,8 @@ mod tests {
     }
 
     #[test]
-    fn execute_goto_navigates_to_monster() {
-        let (mut app, player) = make_app("g A");
+    fn execute_goto_navigates_to_destination() {
+        let (mut app, player) = make_app(Some(Vec2::new(100.0, 200.0)));
         app.add_systems(Update, execute_goto_command);
         app.update();
 
@@ -273,26 +210,12 @@ mod tests {
     }
 
     #[test]
-    fn execute_goto_navigates_to_location() {
-        let (mut app, player) = make_app("g a");
+    fn execute_goto_no_op_without_pending() {
+        let (mut app, player) = make_app(None);
         app.add_systems(Update, execute_goto_command);
         app.update();
 
         let move_target = app.world().entity(player).get::<MoveTarget>().unwrap();
-        assert!(move_target.active);
-        assert_eq!(move_target.destination, Vec2::new(50.0, 75.0));
-    }
-
-    #[test]
-    fn execute_goto_click_target_navigates_to_world_pos() {
-        let (mut app, player) = make_app("");
-        app.world_mut().resource_mut::<crate::command_palette::PendingClickTarget>().goto_pos =
-            Some(Vec2::new(999.0, 888.0));
-        app.add_systems(Update, execute_goto_command);
-        app.update();
-
-        let move_target = app.world().entity(player).get::<MoveTarget>().unwrap();
-        assert!(move_target.active);
-        assert_eq!(move_target.destination, Vec2::new(999.0, 888.0));
+        assert!(!move_target.active);
     }
 }
