@@ -10,6 +10,7 @@ use bevy_landmass::prelude::*;
 use geo::{BooleanOps, Contains};
 
 use crate::{
+    command_palette::CommandPaletteState,
     dungeon::terrain::DungeonState,
     fov::{ExplorationState, find_exploration_waypoint},
 };
@@ -71,8 +72,12 @@ pub fn set_target_on_click(
     exploration_state: Res<ExplorationState>,
     dungeon_state: Res<DungeonState>,
     mut commands: Commands,
+    palette_state: Res<CommandPaletteState>,
 ) {
     if !mouse_button_input.just_pressed(MouseButton::Left) {
+        return;
+    }
+    if palette_state.open {
         return;
     }
 
