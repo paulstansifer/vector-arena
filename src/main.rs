@@ -82,7 +82,7 @@ fn main() {
         .add_systems(Update, spawn_missile_trails)
         .add_systems(Update, update_missile_trails)
         .add_systems(Update, update_hit_flash.before(apply_missile_knockback))
-        .add_systems(Update, apply_missile_knockback)
+        .add_systems(Update, apply_missile_knockback.before(spawn_missile_trails))
         .add_systems(Update, tick_knockback_cooldowns)
         .add_systems(Update, pickup_items)
         .add_systems(Update, animate_pickup)

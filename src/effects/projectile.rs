@@ -82,6 +82,17 @@ impl MonsterShootTimer {
     }
 }
 
+impl MagicMissile {
+    pub fn new(fired_by_player: bool, initial_pos: Vec2, initial_vel: Vec2) -> Self {
+        Self {
+            distance_traveled: 0.0,
+            fired_by_player,
+            last_trail_pos: Some(initial_pos),
+            last_trail_vel: Some(initial_vel),
+        }
+    }
+}
+
 fn spawn_missile(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -99,8 +110,8 @@ fn spawn_missile(
         MagicMissile {
             distance_traveled: 0.0,
             fired_by_player,
-            last_trail_pos: None,
-            last_trail_vel: None,
+            last_trail_pos: Some(spawn_pos),
+            last_trail_vel: Some(direction * MISSILE_SPEED),
         },
         Mesh2d(meshes.add(Circle::new(4.0))),
         MeshMaterial2d(materials.add(ColorMaterial::from(color))),
@@ -194,9 +205,13 @@ pub fn update_missiles(
     }
 }
 
-/// For each missile, find overlapping Dynamic-layer entities and apply knockback, damage, and a
-/// white flash. A short per-entity cooldown prevents double-hits from simultaneous missiles
-/// while allowing a bounced missile to hit again on a later pass.
+/// For each missile, sweep the collision shape along the path the missile travelled this frame
+/// (including bounces) and apply knockback, damage, and a white flash to every Dynamic entity
+/// it passed through.  This must run before `spawn_missile_trails` so both systems read the
+/// same `last_trail_pos`/`last_trail_vel` before the trail system advances them.
+///
+/// A short per-entity cooldown prevents re-hits from simultaneous missiles while still
+/// allowing a bounced missile to hit on a later pass.
 pub fn apply_missile_knockback(
     mut commands: Commands,
     spatial_query: SpatialQuery,
@@ -221,102 +236,145 @@ pub fn apply_missile_knockback(
 ) {
     for (transform, missile_vel, missile) in missiles.iter() {
         let fired_by_player = missile.fired_by_player;
-        let pos = transform.translation.truncate();
-        let knockback_dir = missile_vel.0.normalize_or_zero();
+        let current_pos = transform.translation.truncate();
+        let current_vel = missile_vel.0;
+        let current_dir = current_vel.normalize_or_zero();
 
-        let hits: Vec<Entity> = spatial_query.shape_intersections(
-            &Collider::circle(4.0),
-            pos,
-            0.0,
-            &SpatialQueryFilter::from_mask(GameLayer::Dynamic),
-        );
-
-        for hit in hits {
-            let Ok((
-                mut vel,
-                cooldown,
-                mut stats_opt,
-                mat_opt,
-                existing_flash,
-                is_player,
-                is_monster,
-                transform,
-                drop_opt,
-            )) = dynamic_query.get_mut(hit)
-            else {
-                continue;
+        // Build the swept segments for this frame using the same logic as spawn_missile_trails.
+        // Each entry is (segment_origin, unit_direction, length).
+        let segments: Vec<(Vec2, Vec2, f32)> =
+            if let (Some(last_pos), Some(last_vel)) =
+                (missile.last_trail_pos, missile.last_trail_vel)
+            {
+                let last_dir = last_vel.normalize_or_zero();
+                if let Some(contact) =
+                    bounce_contact(last_pos, last_dir, current_pos, current_dir)
+                {
+                    vec![
+                        (last_pos, last_dir, (contact - last_pos).length()),
+                        (contact, current_dir, (current_pos - contact).length()),
+                    ]
+                } else {
+                    vec![(last_pos, current_dir, (current_pos - last_pos).length())]
+                }
+            } else {
+                // No previous position recorded yet; fall back to a point check.
+                vec![(current_pos, current_dir, 0.0)]
             };
-            if cooldown.is_some_and(|c| c.0 > 0.0) {
-                continue;
-            }
-            vel.0 += knockback_dir * KNOCKBACK_SPEED;
-            commands.entity(hit).insert(KnockbackCooldown(KNOCKBACK_COOLDOWN));
 
-            let Some(ref mut stats) = stats_opt else { continue };
+        for (seg_origin, seg_dir, seg_len) in segments {
+            let hits: Vec<Entity> = if seg_len < 0.5 {
+                // Zero/near-zero movement: overlap check at the origin point.
+                spatial_query.shape_intersections(
+                    &Collider::circle(4.0),
+                    seg_origin,
+                    0.0,
+                    &SpatialQueryFilter::from_mask(GameLayer::Dynamic),
+                )
+            } else {
+                let Ok(dir2) = Dir2::new(seg_dir) else { continue };
+                spatial_query
+                    .shape_hits(
+                        &Collider::circle(4.0),
+                        seg_origin,
+                        0.0,
+                        dir2,
+                        20,
+                        &ShapeCastConfig::from_max_distance(seg_len),
+                        &SpatialQueryFilter::from_mask(GameLayer::Dynamic),
+                    )
+                    .into_iter()
+                    .map(|h| h.entity)
+                    .collect()
+            };
 
-            // Flash white, preserving the resting color across rapid re-hits.
-            if let Some(mh) = mat_opt {
-                let base_color = existing_flash
-                    .map(|f| f.base_color)
-                    .or_else(|| materials.get(&mh.0).map(|m| m.color));
-                if let Some(base) = base_color {
-                    if let Some(mat) = materials.get_mut(&mh.0) {
-                        mat.color = Color::WHITE;
+            for hit in hits {
+                let Ok((
+                    mut vel,
+                    cooldown,
+                    mut stats_opt,
+                    mat_opt,
+                    existing_flash,
+                    is_player,
+                    is_monster,
+                    transform,
+                    drop_opt,
+                )) = dynamic_query.get_mut(hit)
+                else {
+                    continue;
+                };
+                if cooldown.is_some_and(|c| c.0 > 0.0) {
+                    continue;
+                }
+                vel.0 += seg_dir * KNOCKBACK_SPEED;
+                commands.entity(hit).insert(KnockbackCooldown(KNOCKBACK_COOLDOWN));
+
+                let Some(ref mut stats) = stats_opt else { continue };
+
+                // Flash white, preserving the resting color across rapid re-hits.
+                if let Some(mh) = mat_opt {
+                    let base_color = existing_flash
+                        .map(|f| f.base_color)
+                        .or_else(|| materials.get(&mh.0).map(|m| m.color));
+                    if let Some(base) = base_color {
+                        if let Some(mat) = materials.get_mut(&mh.0) {
+                            mat.color = Color::WHITE;
+                        }
+                        commands.entity(hit).insert(HitFlash {
+                            timer: HIT_FLASH_DURATION,
+                            duration: HIT_FLASH_DURATION,
+                            base_color: base,
+                        });
                     }
-                    commands.entity(hit).insert(HitFlash {
-                        timer: HIT_FLASH_DURATION,
-                        duration: HIT_FLASH_DURATION,
-                        base_color: base,
-                    });
                 }
-            }
 
-            let was_alive = stats.hp > 0.0;
-            stats.hp -= MISSILE_DAMAGE;
+                let was_alive = stats.hp > 0.0;
+                stats.hp -= MISSILE_DAMAGE;
 
-            if is_monster {
-                if fired_by_player {
-                    commands.entity(hit).insert(AlertedByMissile);
-                }
-                message_log.push_repeating(
-                    "The magic missile hits the monster",
-                    hit,
+                if is_monster {
+                    if fired_by_player {
+                        commands.entity(hit).insert(AlertedByMissile);
+                    }
+                    message_log.push_repeating(
+                        "The magic missile hits the monster",
+                        hit,
+                        if stats.hp <= 0.0 {
+                            ", destroying it".to_string()
+                        } else {
+                            format!("; it now has {} hp", stats.hp)
+                        },
+                    );
                     if stats.hp <= 0.0 {
-                        ", destroying it".to_string()
-                    } else {
-                        format!("; it now has {} hp", stats.hp)
-                    },
-                );
-                if stats.hp <= 0.0 {
-                    if let Some(drop) = drop_opt {
-                        let kind = drop.0;
-                        let pos = transform.translation.truncate().extend(fov::ON_FLOOR_Z);
-                        let (svg_path, param) = match kind {
-                            ItemKind::Potion(color) => (
-                                "sprites/potion.svg".to_string(),
-                                SpriteParam::Color(potion_hex(color)),
-                            ),
-                            ItemKind::Scroll(name) => (
-                                "sprites/scroll.svg".to_string(),
-                                SpriteParam::Text(scroll_letter(name).to_string()),
-                            ),
-                        };
-                        commands.spawn((
-                            DespawnOnExit(GameState::InLevel),
-                            Item(kind),
-                            WorldTooltip(item_name(kind, 1).to_string()),
-                            SvgSprite { svg_path, param: Some(param) },
-                            Transform::from_translation(pos).with_scale(Vec3::splat(0.4)),
-                        ));
+                        if let Some(drop) = drop_opt {
+                            let kind = drop.0;
+                            let pos = transform.translation.truncate().extend(fov::ON_FLOOR_Z);
+                            let (svg_path, param) = match kind {
+                                ItemKind::Potion(color) => (
+                                    "sprites/potion.svg".to_string(),
+                                    SpriteParam::Color(potion_hex(color)),
+                                ),
+                                ItemKind::Scroll(name) => (
+                                    "sprites/scroll.svg".to_string(),
+                                    SpriteParam::Text(scroll_letter(name).to_string()),
+                                ),
+                            };
+                            commands.spawn((
+                                DespawnOnExit(GameState::InLevel),
+                                Item(kind),
+                                WorldTooltip(item_name(kind, 1).to_string()),
+                                SvgSprite { svg_path, param: Some(param) },
+                                Transform::from_translation(pos).with_scale(Vec3::splat(0.4)),
+                            ));
+                        }
+                        monster_letters.release_monster(hit);
+                        commands.entity(hit).despawn();
                     }
-                    monster_letters.release_monster(hit);
-                    commands.entity(hit).despawn();
+                } else if is_player {
+                    if was_alive && stats.hp <= 0.0 {
+                        message_log.push("Ouch!");
+                    }
+                    stats.hp = stats.hp.max(0.0);
                 }
-            } else if is_player {
-                if was_alive && stats.hp <= 0.0 {
-                    message_log.push("Ouch!");
-                }
-                stats.hp = stats.hp.max(0.0);
             }
         }
     }

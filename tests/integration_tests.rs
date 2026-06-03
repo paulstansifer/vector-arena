@@ -18,6 +18,95 @@ use vector_arena::{
     player::{MoveTarget, PLAYER_SPEED, Player, move_player},
 };
 
+/// Verifies that a magic missile aimed at a stationary monster registers a hit when fired from
+/// various starting distances.
+///
+/// `apply_missile_knockback` polls missile positions once per frame via `shape_intersections`.
+/// The missile travels ~58 units per 60 Hz frame, but the combined hit radius (missile 4 +
+/// monster 10 = 14 units) is far narrower.
+#[test]
+fn missile_hits_monster_at_various_distances() {
+    use vector_arena::{
+        command_palette::LetterMap,
+        effects::projectile::{MagicMissile, MISSILE_SPEED, apply_missile_knockback},
+        monster::{Monster, Stats},
+        ui::MessageLog,
+    };
+
+    const MONSTER_HP: f32 = 20.0;
+    // Monster radius 10 + missile radius 4 = 14-unit hit window.
+    // Missile speed / 60 Hz ≈ 58 units per frame, so most starting positions land outside.
+    let distances: &[f32] = &[5.0, 30.0, 50.0, 100.0, 200.0, 500.0];
+
+    let mut failures: Vec<f32> = Vec::new();
+
+    for &distance in distances {
+        let mut app = physics_app(Vec2::ZERO, false);
+        app.init_asset::<ColorMaterial>();
+        app.init_resource::<MessageLog>();
+        app.init_resource::<LetterMap>();
+        app.add_systems(Update, apply_missile_knockback);
+
+        // Monster at origin.
+        let monster = app
+            .world_mut()
+            .spawn((
+                Monster,
+                Stats { hp: MONSTER_HP, max_hp: MONSTER_HP, ..default() },
+                RigidBody::Dynamic,
+                Collider::circle(AGENT_RADIUS),
+                CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
+                LockedAxes::ROTATION_LOCKED,
+                Mass(1.0),
+                LinearVelocity::ZERO,
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ))
+            .id();
+
+        // One tick so the monster's collider is registered in the spatial query index.
+        tick(&mut app);
+
+        // Missile at (-distance, 0) aimed right (+X) toward the monster.
+        let missile_vel = Vec2::new(MISSILE_SPEED, 0.0);
+        app.world_mut().spawn((
+            MagicMissile::new(true, Vec2::new(-distance, 0.0), missile_vel),
+            RigidBody::Dynamic,
+            Collider::circle(4.0),
+            CollisionLayers::new(GameLayer::Missile, GameLayer::Wall),
+            LockedAxes::ROTATION_LOCKED,
+            LinearVelocity(missile_vel),
+            Mass(0.1),
+            Transform::from_xyz(-distance, 0.0, 0.0),
+        ));
+
+        // Run enough frames for the missile to travel well past the target.
+        let frames = (distance / (MISSILE_SPEED / 60.0)).ceil() as u32 + 20;
+        for _ in 0..frames {
+            tick(&mut app);
+        }
+
+        let hit = match app.world().get::<Stats>(monster) {
+            Some(stats) => stats.hp < MONSTER_HP,
+            None => true, // monster was destroyed — definitely a hit
+        };
+        let hp_remaining = app.world().get::<Stats>(monster).map_or(0.0, |s| s.hp);
+        println!(
+            "distance {distance:5.0}: {}  (hp {hp_remaining}/{MONSTER_HP})",
+            if hit { "HIT " } else { "MISS" },
+        );
+        if !hit {
+            failures.push(distance);
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "missile missed the monster at distances {failures:?}\n\
+         (missile travels ~{:.0} units/frame; hit window is ~14 units wide)",
+        MISSILE_SPEED / 60.0,
+    );
+}
+
 fn mock_physics_system(
     mut query: Query<(&mut Transform, &LinearVelocity)>,
     time: Res<Time<Virtual>>,
