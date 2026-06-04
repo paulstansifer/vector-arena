@@ -28,7 +28,10 @@ use vector_arena::{
     item::{Inventory, animate_pickup, execute_item_command, pickup_items, register_item_commands},
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
-    player::{Player, advance_exploration, move_player, set_target_on_click},
+    player::{
+        Player, advance_exploration, directional_move_system, execute_descend_command,
+        execute_stop_command, move_player, register_player_commands, set_target_on_click,
+    },
     populate_level,
     sprite::SpritePlugin,
     time_scale::manage_time_scale,
@@ -62,6 +65,7 @@ fn main() {
         .add_systems(Startup, init_trail_meshes)
         .add_systems(Startup, register_item_commands)
         .add_systems(Startup, goto::register_goto_command)
+        .add_systems(Startup, register_player_commands)
         .add_systems(Startup, register_missile_command)
         .add_systems(OnEnter(GameState::Restart), on_enter_restart)
         .add_systems(OnEnter(GameState::Descend), on_enter_descend)
@@ -69,7 +73,10 @@ fn main() {
         .add_systems(Update, execute_item_command)
         .add_systems(Update, set_target_on_click)
         .add_systems(Update, move_player)
+        .add_systems(Update, directional_move_system.after(move_player))
         .add_systems(Update, advance_exploration.after(move_player))
+        .add_systems(Update, execute_stop_command)
+        .add_systems(Update, execute_descend_command)
         .add_systems(Update, monster::update_monster_ai)
         .add_systems(Update, monster::refresh_monster_tooltips.after(monster::update_monster_ai))
         .add_systems(Update, nav::apply_agent_velocity)

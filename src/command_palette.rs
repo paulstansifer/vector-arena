@@ -22,6 +22,8 @@ pub enum PaletteCommandKind {
     /// Sub-entries come from visible monsters + labeled locations.
     /// When executed, pending_target is resolved to a Vec2 before the handler runs.
     LocationTarget { target_verb: &'static str },
+    /// No argument needed; fires immediately when selected.
+    Instant,
 }
 
 pub struct PaletteCommand {
@@ -123,6 +125,16 @@ impl PaletteRegistry {
                         ));
                     }
                 }
+                PaletteCommandKind::Instant => {
+                    if input.is_empty() {
+                        entries.push(PaletteEntry {
+                            key: cmd.key.clone(),
+                            description: cmd.description.clone(),
+                            icon: cmd.icon,
+                            is_complete: true,
+                        });
+                    }
+                }
             }
         }
         entries
@@ -179,7 +191,7 @@ pub fn resolve_location_letter(
         }
         c if c.is_lowercase() => {
             let idx = (c as u8).wrapping_sub(b'a') as usize;
-            goto_state.labels.get(idx).copied()
+            goto_state.labels.get(idx).and_then(|o| *o)
         }
         _ => None,
     }
@@ -213,11 +225,21 @@ pub fn targeting_sub_completions(
             })
         })
         .collect();
-    for (i, _) in goto_state.labels.iter().enumerate() {
+    for (i, opt_pos) in goto_state.labels.iter().enumerate() {
+        if opt_pos.is_none() {
+            continue;
+        }
         let letter = ('a' as u8 + i as u8) as char;
+        let desc = match letter {
+            'h' => format!("{location_verb} left"),
+            'j' => format!("{location_verb} down"),
+            'k' => format!("{location_verb} up"),
+            'l' => format!("{location_verb} right"),
+            _ => format!("{location_verb} location {letter}"),
+        };
         entries.push(PaletteEntry {
             key: format!("{prefix} {letter}"),
-            description: format!("{location_verb} location {letter}"),
+            description: desc,
             icon: None,
             is_complete: true,
         });
@@ -265,8 +287,15 @@ pub fn open_palette_system(
                     if is_monster {
                         return Some(format!("g {ch} "));
                     }
-                    let is_cmd = registry.commands.iter().any(|c| c.key == ch.as_str());
-                    is_cmd.then(|| format!("{ch} "))
+                    let matching_cmd = registry.commands.iter().find(|c| c.key == ch.as_str());
+                    match matching_cmd {
+                        Some(cmd) if matches!(cmd.kind, PaletteCommandKind::Instant) => {
+                            state.pending_command = Some(ch.to_string());
+                            None
+                        }
+                        Some(_) => Some(format!("{ch} ")),
+                        None => None,
+                    }
                 })
         };
 
@@ -361,6 +390,9 @@ pub fn palette_system(
                         }
                         PaletteCommandKind::InventoryTarget { .. } => {
                             palette.pending_command = Some(cmd);
+                        }
+                        PaletteCommandKind::Instant => {
+                            palette.pending_command = Some(key);
                         }
                     }
                 }

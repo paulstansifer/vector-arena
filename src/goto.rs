@@ -15,10 +15,16 @@ use crate::{
 
 pub const GOTO_KEY: &str = "g";
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct GotoState {
-    pub labels: Vec<Vec2>, // labels[0] = 'a', up to 26 entries
+    /// Index 0 = 'a', ..., 25 = 'z'. Indices 7/9/10/11 (h/j/k/l) are reserved for
+    /// cardinal directions (left/down/up/right). None = no label assigned.
+    pub labels: [Option<Vec2>; 26],
     pub computed: bool,
+}
+
+impl Default for GotoState {
+    fn default() -> Self { Self { labels: [None; 26], computed: false } }
 }
 
 pub fn register_goto_command(mut registry: ResMut<PaletteRegistry>) {
@@ -54,34 +60,47 @@ pub fn compute_goto_assignments(
         !exploration_state.0.contains(&geo::Point::new(p.x, p.y))
     };
 
+    // TODO: no ASCII indices!
+    // h/j/k/l (indices 7/9/10/11) are always the four cardinal directions.
+    const H: usize = 7; // left
+    const J: usize = 9; // down
+    const K: usize = 10; // up
+    const L: usize = 11; // right
+    let cardinals = [
+        (H, player_pos + Vec2::new(-70.0, 0.0)),
+        (J, player_pos + Vec2::new(0.0, -70.0)),
+        (K, player_pos + Vec2::new(0.0, 70.0)),
+        (L, player_pos + Vec2::new(70.0, 0.0)),
+    ];
+    for (idx, pos) in cardinals {
+        goto_state.labels[idx] = is_explored(pos).then_some(pos);
+    }
+
+    // Fill remaining slots with interesting points sorted by distance.
+    let reserved = [H, J, K, L];
     let map_points = poi.points.iter().copied().filter(|&p| is_explored(p));
     let item_points =
         item_query.iter().map(|tf| tf.translation.truncate()).filter(|&p| is_explored(p));
-    let cardinal_points = [
-        player_pos + Vec2::new(0.0, 70.0),
-        player_pos + Vec2::new(0.0, -70.0),
-        player_pos + Vec2::new(70.0, 0.0),
-        player_pos + Vec2::new(-70.0, 0.0),
-    ]
-    .into_iter()
-    .filter(|&p| is_explored(p));
+    let mut candidates: Vec<Vec2> = map_points.chain(item_points).collect();
+    candidates.sort_by(|a, b| {
+        player_pos.distance(*a).partial_cmp(&player_pos.distance(*b)).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    candidates.dedup_by(|a, b| a.distance(*b) < 1.0);
 
-    let mut candidates: Vec<(Vec2, f32)> = map_points
-        .chain(item_points)
-        .chain(cardinal_points)
-        .map(|p| (p, player_pos.distance(p)))
-        .collect();
+    let mut cand_iter = candidates.into_iter();
+    for i in 0..26usize {
+        if reserved.contains(&i) {
+            continue;
+        }
+        goto_state.labels[i] = cand_iter.next();
+    }
 
-    candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-    candidates.dedup_by(|a, b| a.0.distance(b.0) < 1.0);
-
-    goto_state.labels = candidates.into_iter().take(26).map(|(p, _)| p).collect();
     goto_state.computed = true;
 }
 
 pub fn reset_goto_on_close(palette: Res<CommandPaletteState>, mut goto_state: ResMut<GotoState>) {
     if !palette.open && goto_state.computed {
-        goto_state.labels.clear();
+        goto_state.labels = [None; 26];
         goto_state.computed = false;
     }
 }
@@ -93,7 +112,7 @@ pub fn render_goto_markers(
     mut egui_context: bevy_egui::EguiContexts,
     camera_query: Query<(&Camera, &GlobalTransform)>,
 ) {
-    if !palette.open || !watches_clicks.0 || goto_state.labels.is_empty() {
+    if !palette.open || !watches_clicks.0 || goto_state.labels.iter().all(|l| l.is_none()) {
         return;
     }
 
@@ -110,7 +129,8 @@ pub fn render_goto_markers(
     let painter = ctx
         .layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("goto_markers")));
 
-    for (i, pos) in goto_state.labels.iter().enumerate() {
+    for (i, opt_pos) in goto_state.labels.iter().enumerate() {
+        let Some(pos) = opt_pos else { continue };
         let world_pos = pos.extend(0.0);
         let viewport_pos = match camera.world_to_viewport(camera_transform, world_pos) {
             Ok(vp) => vp,

@@ -9,10 +9,14 @@ use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use geo::{BooleanOps, Contains};
 
+use bevy::input::keyboard::Key;
+
 use crate::{
-    command_palette::CommandPaletteState,
+    GameState, Staircase,
+    command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     dungeon::terrain::DungeonState,
     fov::{ExplorationState, find_exploration_waypoint},
+    ui::MessageLog,
 };
 
 // How far (in world units) to search for the nearest navmesh point when a
@@ -30,6 +34,9 @@ fn snap_to_navmesh(point: Vec2, archipelago_query: &Query<&Archipelago2d>) -> Ve
 
 pub const PLAYER_SPEED: f32 = 480.0;
 pub const STOP_THRESHOLD: f32 = 8.0;
+// When holding down the directional keys.
+// Max speed feels too fast! But maybe we should implement acceleration.
+pub const PLAYER_DIRECTIONAL_SPEED: f32 = 240.0;
 
 #[derive(Component)]
 pub struct Player;
@@ -234,4 +241,108 @@ pub fn move_player(
 
         velocity.0 = direction.normalize_or_zero() * new_speed;
     }
+}
+
+const DESCEND_RANGE: f32 = 40.0;
+
+pub fn register_player_commands(mut registry: ResMut<PaletteRegistry>) {
+    registry.commands.push(PaletteCommand {
+        key: "d".to_string(),
+        description: "Descend the staircase".to_string(),
+        icon: None,
+        kind: PaletteCommandKind::Instant,
+    });
+    registry.commands.push(PaletteCommand {
+        key: ".".to_string(),
+        description: "Stop moving".to_string(),
+        icon: None,
+        kind: PaletteCommandKind::Instant,
+    });
+}
+
+pub fn execute_stop_command(
+    mut palette: ResMut<CommandPaletteState>,
+    mut player_query: Query<
+        (Entity, &mut MoveTarget, &mut AgentTarget2d, &mut LinearVelocity),
+        With<Player>,
+    >,
+    mut commands: Commands,
+) {
+    if palette.pending_command.as_deref() != Some(".") {
+        return;
+    }
+    palette.pending_command = None;
+    let Ok((entity, mut move_target, mut agent_target, mut velocity)) = player_query.single_mut()
+    else {
+        return;
+    };
+    move_target.active = false;
+    *agent_target = AgentTarget2d::None;
+    velocity.0 = Vec2::ZERO;
+    commands.entity(entity).remove::<ExplorationGoal>();
+}
+
+pub fn execute_descend_command(
+    mut palette: ResMut<CommandPaletteState>,
+    player_query: Query<&Transform, With<Player>>,
+    staircase_query: Query<&Transform, With<Staircase>>,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut message_log: ResMut<MessageLog>,
+) {
+    if palette.pending_command.as_deref() != Some("d") {
+        return;
+    }
+    palette.pending_command = None;
+    let Ok(player_tf) = player_query.single() else { return };
+    let player_pos = player_tf.translation.truncate();
+    if staircase_query.iter().any(|tf| tf.translation.truncate().distance(player_pos) <= DESCEND_RANGE) {
+        next_state.set(GameState::Descend);
+    } else {
+        message_log.push("You are not near the staircase.".to_string());
+    }
+}
+
+pub fn directional_move_system(
+    keyboard: Res<ButtonInput<Key>>,
+    palette: Res<CommandPaletteState>,
+    mut player_query: Query<
+        (Entity, &Transform, &mut LinearVelocity, &mut MoveTarget, &mut AgentTarget2d),
+        With<Player>,
+    >,
+    mut commands: Commands,
+    time: Res<Time>,
+) {
+    if palette.open {
+        return;
+    }
+    let mut dir = Vec2::ZERO;
+    if keyboard.pressed(Key::Character("h".into())) || keyboard.pressed(Key::ArrowLeft) {
+        dir += Vec2::new(-1.0, 0.0);
+    }
+    if keyboard.pressed(Key::Character("j".into())) || keyboard.pressed(Key::ArrowDown) {
+        dir += Vec2::new(0.0, -1.0);
+    }
+    if keyboard.pressed(Key::Character("k".into())) || keyboard.pressed(Key::ArrowUp) {
+        dir += Vec2::new(0.0, 1.0);
+    }
+    if keyboard.pressed(Key::Character("l".into())) || keyboard.pressed(Key::ArrowRight) {
+        dir += Vec2::new(1.0, 0.0);
+    }
+    let dir = dir.normalize_or_zero();
+    if dir == Vec2::ZERO {
+        return;
+    }
+    let Ok((entity, transform, mut velocity, mut move_target, mut agent_target)) =
+        player_query.single_mut()
+    else {
+        return;
+    };
+    let pos = transform.translation.truncate();
+    move_target.destination = pos + dir * 10000.0;
+    move_target.origin = pos;
+    move_target.active = true;
+    move_target.time_set = time.elapsed();
+    velocity.0 = dir * PLAYER_DIRECTIONAL_SPEED;
+    *agent_target = AgentTarget2d::None;
+    commands.entity(entity).remove::<ExplorationGoal>();
 }
