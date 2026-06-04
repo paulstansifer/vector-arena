@@ -15,6 +15,7 @@ use crate::{
     GameState, Staircase, WorldBounds,
     dungeon::terrain::{self, DungeonState},
     player::Player,
+    status_effect::StatusEffects,
 };
 
 /// Other than solid rock (a special case), this marks things that block line-of-sight
@@ -224,7 +225,7 @@ pub fn spawn_fov_meshes(
 }
 
 pub fn update_fov(
-    player_query: Query<Ref<Transform>, (With<Player>, With<Transform>)>,
+    player_query: Query<(Ref<Transform>, Option<&StatusEffects>), (With<Player>, With<Transform>)>,
     fov_mesh_query: Query<&Mesh2d, With<FovMeshMarker>>,
     never_explored_query: Query<&Mesh2d, (With<NeverExploredMeshMarker>, Without<FovMeshMarker>)>,
     opaque_query: Query<(&GlobalTransform, &OpaqueVertices)>,
@@ -235,7 +236,7 @@ pub fn update_fov(
     mut exploration_state: ResMut<ExplorationState>,
     mut current_fov: ResMut<CurrentFovState>,
 ) {
-    let Ok(player_transform) = player_query.single() else { return };
+    let Ok((player_transform, player_effects)) = player_query.single() else { return };
     let fov_mesh_handle = fov_mesh_query.single().unwrap();
     let never_explored_mesh_handle = never_explored_query.single().unwrap();
 
@@ -245,12 +246,14 @@ pub fn update_fov(
     // TODO: `is_changed()` always seems to be true, even when time isn't passing and physics should be quiescent
     // TODO: ...but we should recalculate this if terrain changes, too.
 
-    if !player_transform.is_changed() && fov_mesh_handle.0.path().is_some() {
+    let effects_active = player_effects.map(|e| !e.is_empty()).unwrap_or(false);
+    if !player_transform.is_changed() && !effects_active && fov_mesh_handle.0.path().is_some() {
         return;
     }
 
     let origin = player_transform.translation.truncate();
-    let radius = 600.0;
+    let blind_strength = player_effects.map(|e| e.blind_strength()).unwrap_or(0.0);
+    let radius = 600.0_f32 + (50.0_f32 - 600.0_f32) * blind_strength;
 
     // Append mobile obstacle polygons to solid_rock without unioning (fov_arc only needs segments).
     let mut obstacle_polys: Vec<geo::Polygon<f32>> = dungeon_state.solid_rock.0.clone();

@@ -16,6 +16,7 @@ use crate::{
     monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterDrop, MonsterState, Stats},
     player::{MoveTarget, PLAYER_SPEED, Player},
     sprite::{SvgSprite, sprite_spec},
+    status_effect::StatusEffects,
     ui::WorldTooltip,
 };
 
@@ -57,9 +58,7 @@ pub fn populate(
 
     commands.spawn((
         DespawnOnExit(GameState::InLevel),
-        Player,
-        initial_inventory,
-        initial_stats,
+        (Player, initial_inventory, initial_stats, StatusEffects::default()),
         Mesh2d(meshes.add(Circle::new(AGENT_RADIUS))),
         MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
         Transform::from_translation(player_position.extend(fov::MOVABLE_Z)),
@@ -91,9 +90,7 @@ pub fn populate(
         let monster = commands
             .spawn((
                 DespawnOnExit(GameState::InLevel),
-                Monster,
-                MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
-                Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
+                (Monster, MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) }, Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() }, StatusEffects::default()),
                 WorldTooltip::default(),
                 MonsterShootTimer::new(),
                 Mesh2d(monster_mesh.clone()),

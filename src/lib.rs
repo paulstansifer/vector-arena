@@ -10,6 +10,7 @@ pub mod nav;
 pub mod player;
 pub mod populate_level;
 pub mod sprite;
+pub mod status_effect;
 pub mod time_scale;
 pub mod ui;
 

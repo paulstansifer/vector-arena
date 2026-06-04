@@ -12,6 +12,7 @@ use crate::{
     item::{Inventory, ItemKind, item_name},
     player::Player,
     sprite::SpriteEguiTextures,
+    status_effect::StatusEffects,
 };
 
 const BAR_WIDTH: f32 = 140.0;
@@ -95,7 +96,7 @@ impl Plugin for UiPlugin {
 fn ui_system(
     mut contexts: EguiContexts,
     mut ui_state: ResMut<UiState>,
-    player_query: Query<(&crate::monster::Stats, &Inventory, &Transform), With<Player>>,
+    player_query: Query<(&crate::monster::Stats, &Inventory, &Transform, Option<&StatusEffects>), With<Player>>,
     staircase_q: Query<&Transform, With<crate::Staircase>>,
     message_log: Res<MessageLog>,
     mut app_exit: MessageWriter<AppExit>,
@@ -111,7 +112,7 @@ fn ui_system(
         style.spacing.tooltip_width = 200.0;
     });
 
-    let Ok((stats, inventory, player_tf)) = player_query.single() else {
+    let Ok((stats, inventory, player_tf, player_effects)) = player_query.single() else {
         return Ok(());
     };
 
@@ -127,7 +128,7 @@ fn ui_system(
         false
     };
 
-    let hud = render_hud(ctx, stats, &item_counts, depth.0, near_staircase, &sprite_textures);
+    let hud = render_hud(ctx, stats, &item_counts, player_effects, depth.0, near_staircase, &sprite_textures);
     if hud.toggle_menu {
         ui_state.menu_open = !ui_state.menu_open;
     }
@@ -211,6 +212,7 @@ fn render_hud(
     ctx: &egui::Context,
     stats: &crate::monster::Stats,
     item_counts: &[(ItemKind, u16)],
+    effects: Option<&StatusEffects>,
     depth: u32,
     near_staircase: bool,
     sprite_textures: &SpriteEguiTextures,
@@ -233,6 +235,18 @@ fn render_hud(
                 egui::Color32::from_rgb(40, 80, 200),
                 &format!("MP {}/{}", stats.mana as i32, stats.max_mana as i32),
             );
+
+            if let Some(effects) = effects {
+                for e in &effects.0 {
+                    ui.separator();
+                    let (r, g, b) = e.kind.color_rgb();
+                    let secs = e.remaining.ceil() as u32;
+                    ui.colored_label(
+                        egui::Color32::from_rgb(r, g, b),
+                        format!("{} {}s", e.kind.label(), secs),
+                    );
+                }
+            }
 
             ui.separator();
 

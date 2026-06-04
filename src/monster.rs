@@ -14,6 +14,7 @@ use crate::{
     fov::CurrentFovState,
     item::ItemKind,
     player::Player,
+    status_effect::StatusEffects,
 };
 
 pub const MONSTER_SPEED: f32 = 80.0;
@@ -84,9 +85,16 @@ fn tick_state(
     player_entity: Entity,
     dist_to_player: f32,
     should_seek: bool,
+    blind_strength: f32,
+    speed_multiplier: f32,
     dt: f32,
     rng: &mut impl rand::Rng,
 ) {
+    // Blind monsters immediately exit seek mode when the effect is active.
+    if blind_strength > 0.0 && matches!(state, MonsterState::Seeking { .. }) {
+        *state = MonsterState::Tired { timer: rng.gen_range(0.0..0.5) };
+    }
+
     if should_seek && !matches!(state, MonsterState::Seeking { .. }) {
         *state = MonsterState::Seeking { timer: rng.gen_range(2.0..3.0) };
     }
@@ -95,6 +103,7 @@ fn tick_state(
         MonsterState::Sleeping { timer } => {
             *target = AgentTarget2d::None;
             settings.desired_speed = 0.0;
+            settings.max_speed = MONSTER_SPEED * speed_multiplier * 1.2;
             *timer -= dt;
             if *timer <= 0.0 {
                 *state = MonsterState::Wandering { target: random_wander_target(monster_pos, rng) };
@@ -103,14 +112,16 @@ fn tick_state(
         MonsterState::Wandering { target: wander_pos } => {
             let wt = *wander_pos;
             *target = AgentTarget2d::Point(wt);
-            settings.desired_speed = MONSTER_WANDER_SPEED;
+            settings.desired_speed = MONSTER_WANDER_SPEED * speed_multiplier;
+            settings.max_speed = settings.desired_speed * 1.2;
             if monster_pos.distance(wt) < WANDER_ARRIVE_DIST {
                 *state = MonsterState::Sleeping { timer: rng.gen_range(2.0..5.0) };
             }
         }
         MonsterState::Seeking { timer } => {
             *target = AgentTarget2d::Entity(player_entity);
-            settings.desired_speed = MONSTER_SPEED;
+            settings.desired_speed = MONSTER_SPEED * speed_multiplier;
+            settings.max_speed = settings.desired_speed * 1.2;
             *timer -= dt;
             if *timer <= 0.0 && dist_to_player > FOCUS_DIST {
                 *state = MonsterState::Tired { timer: rng.gen_range(2.0..3.0) };
@@ -119,7 +130,8 @@ fn tick_state(
         MonsterState::Distracted { target: dist_pos } => {
             let dp = *dist_pos;
             *target = AgentTarget2d::Point(dp);
-            settings.desired_speed = MONSTER_SPEED;
+            settings.desired_speed = MONSTER_SPEED * speed_multiplier;
+            settings.max_speed = settings.desired_speed * 1.2;
             if monster_pos.distance(dp) < WANDER_ARRIVE_DIST {
                 *state = if rng.gen_bool(0.5) {
                     MonsterState::Wandering { target: random_wander_target(monster_pos, rng) }
@@ -131,6 +143,7 @@ fn tick_state(
         MonsterState::Tired { timer } => {
             *target = AgentTarget2d::None;
             settings.desired_speed = 0.0;
+            settings.max_speed = MONSTER_SPEED * speed_multiplier * 1.2;
             *timer -= dt;
             if *timer <= 0.0 {
                 *state = if rng.gen_bool(0.5) {
@@ -144,19 +157,26 @@ fn tick_state(
 }
 
 pub fn refresh_monster_tooltips(
-    mut query: Query<(Entity, &Stats, &MonsterState, &mut crate::ui::WorldTooltip), With<Monster>>,
+    mut query: Query<(Entity, &Stats, &MonsterState, &mut crate::ui::WorldTooltip, Option<&StatusEffects>), With<Monster>>,
     letter_map: Res<crate::command_palette::LetterMap>,
 ) {
-    for (entity, stats, state, mut tooltip) in query.iter_mut() {
+    for (entity, stats, state, mut tooltip, effects) in query.iter_mut() {
         let letter_prefix =
             letter_map.letter_for_monster(entity).map(|l| format!("[{l}] ")).unwrap_or_default();
-        tooltip.0 = format!(
+        let mut text = format!(
             "{}HP: {}/{} [{}]",
             letter_prefix,
             stats.hp as i32,
             stats.max_hp as i32,
             state.label()
         );
+        if let Some(effects) = effects {
+            for e in &effects.0 {
+                let secs = e.remaining.ceil() as u32;
+                text.push_str(&format!(" | {} {}s", e.kind.label(), secs));
+            }
+        }
+        tooltip.0 = text;
     }
 }
 
@@ -171,6 +191,7 @@ pub fn update_monster_ai(
             &mut AgentTarget2d,
             &mut AgentSettings,
             Option<&AlertedByMissile>,
+            Option<&StatusEffects>,
         ),
         With<Monster>,
     >,
@@ -182,7 +203,7 @@ pub fn update_monster_ai(
     let solid_rock = &dungeon_state.solid_rock;
     let dt = time.delta_secs();
 
-    for (entity, transform, mut state, mut target, mut settings, alerted) in
+    for (entity, transform, mut state, mut target, mut settings, alerted, effects) in
         monster_query.iter_mut()
     {
         let monster_pos = transform.translation.truncate();
@@ -192,8 +213,13 @@ pub fn update_monster_ai(
             commands.entity(entity).remove::<AlertedByMissile>();
         }
 
+        let blind_strength = effects.map(|e| e.blind_strength()).unwrap_or(0.0);
+        let speed_multiplier = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0);
+
+        // Blind monsters have a reduced seek range (scaled toward 0).
+        let effective_seek_range = MONSTER_SEEK_RANGE * (1.0 - blind_strength);
         let dist_to_player = monster_pos.distance(player_pos);
-        let has_los = dist_to_player < MONSTER_SEEK_RANGE && {
+        let has_los = dist_to_player < effective_seek_range && {
             let seg =
                 geo::Line::new(geo::Coord { x: monster_pos.x, y: monster_pos.y }, geo::Coord {
                     x: player_pos.x,
@@ -210,6 +236,8 @@ pub fn update_monster_ai(
             player_entity,
             dist_to_player,
             missile_alerted || has_los,
+            blind_strength,
+            speed_multiplier,
             dt,
             &mut rand::thread_rng(),
         );

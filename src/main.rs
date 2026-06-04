@@ -16,10 +16,10 @@ use vector_arena::{
     effects::{
         crumble_terrain::{Fragile, handle_right_click_excavation},
         projectile::{
-            apply_damage_on_hit, apply_hit_flash_on_hit, apply_knockback_on_hit,
-            detect_missile_hits, execute_missile_command, init_trail_meshes, monster_fire_missiles,
-            register_missile_command, spawn_missile_trails, tick_knockback_cooldowns,
-            update_hit_flash, update_missile_trails, update_missiles,
+            apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit,
+            apply_knockback_on_hit, detect_missile_hits, execute_missile_command, init_trail_meshes,
+            monster_fire_missiles, register_missile_command, spawn_missile_trails,
+            tick_knockback_cooldowns, update_hit_flash, update_missile_trails, update_missiles,
         },
         rope,
     },
@@ -29,11 +29,13 @@ use vector_arena::{
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
     player::{
-        Player, advance_exploration, directional_move_system, execute_descend_command,
-        execute_stop_command, move_player, register_player_commands, set_target_on_click,
+        Player, advance_exploration, directional_move_system,
+        execute_descend_command, execute_stop_command, move_player, register_player_commands,
+        set_target_on_click,
     },
     populate_level,
     sprite::SpritePlugin,
+    status_effect::{apply_confusion_to_velocity, tick_status_effects},
     time_scale::manage_time_scale,
     ui::{MessageLog, UiPlugin, enable_ui_input_absorption},
 };
@@ -70,6 +72,7 @@ fn main() {
         .add_systems(OnEnter(GameState::Restart), on_enter_restart)
         .add_systems(OnEnter(GameState::Descend), on_enter_descend)
         .add_systems(OnExit(GameState::InLevel), save_player_on_exit)
+        .add_systems(Update, tick_status_effects)
         .add_systems(Update, execute_item_command)
         .add_systems(Update, set_target_on_click)
         .add_systems(Update, move_player)
@@ -80,6 +83,7 @@ fn main() {
         .add_systems(Update, monster::update_monster_ai)
         .add_systems(Update, monster::refresh_monster_tooltips.after(monster::update_monster_ai))
         .add_systems(Update, nav::apply_agent_velocity)
+        .add_systems(Update, apply_confusion_to_velocity.after(nav::apply_agent_velocity).after(directional_move_system))
         .add_systems(Update, nav::sync_island_nav_mesh)
         .add_systems(Update, fov::update_fov)
         .add_systems(Update, handle_right_click_excavation.run_if(not(egui_wants_any_pointer_input)))
@@ -90,6 +94,7 @@ fn main() {
         .add_systems(Update, spawn_missile_trails)
         .add_systems(Update, update_missile_trails)
         .add_observer(apply_knockback_on_hit)
+        .add_observer(apply_dodge)
         .add_observer(apply_hit_flash_on_hit)
         .add_observer(apply_damage_on_hit)
         .add_systems(Update, update_hit_flash.before(detect_missile_hits))

@@ -16,6 +16,7 @@ use crate::{
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     dungeon::terrain::DungeonState,
     fov::{ExplorationState, find_exploration_waypoint},
+    status_effect::StatusEffects,
     ui::MessageLog,
 };
 
@@ -198,12 +199,13 @@ pub fn move_player(
             &mut MoveTarget,
             Option<&AgentDesiredVelocity2d>,
             &mut AgentTarget2d,
+            Option<&StatusEffects>,
         ),
         With<Player>,
     >,
     time: Res<Time>,
 ) {
-    for (transform, mut velocity, mut move_target, desired_velocity, mut agent_target) in
+    for (transform, mut velocity, mut move_target, desired_velocity, mut agent_target, effects) in
         query.iter_mut()
     {
         if !move_target.active
@@ -239,7 +241,8 @@ pub fn move_player(
         let adj_speed = lerp(0.25, 1.0, (distance / 60.0).clamp(0.0, 1.0)) * PLAYER_SPEED;
         let new_speed = f32::min(adj_speed, new_speed);
 
-        velocity.0 = direction.normalize_or_zero() * new_speed;
+        let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0);
+        velocity.0 = direction.normalize_or_zero() * new_speed * speed_mult;
     }
 }
 
@@ -306,7 +309,7 @@ pub fn directional_move_system(
     keyboard: Res<ButtonInput<Key>>,
     palette: Res<CommandPaletteState>,
     mut player_query: Query<
-        (Entity, &Transform, &mut LinearVelocity, &mut MoveTarget, &mut AgentTarget2d),
+        (Entity, &Transform, &mut LinearVelocity, &mut MoveTarget, &mut AgentTarget2d, Option<&StatusEffects>),
         With<Player>,
     >,
     mut commands: Commands,
@@ -332,7 +335,7 @@ pub fn directional_move_system(
     if dir == Vec2::ZERO {
         return;
     }
-    let Ok((entity, transform, mut velocity, mut move_target, mut agent_target)) =
+    let Ok((entity, transform, mut velocity, mut move_target, mut agent_target, effects)) =
         player_query.single_mut()
     else {
         return;
@@ -342,7 +345,9 @@ pub fn directional_move_system(
     move_target.origin = pos;
     move_target.active = true;
     move_target.time_set = time.elapsed();
-    velocity.0 = dir * PLAYER_DIRECTIONAL_SPEED;
+    let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0);
+    velocity.0 = dir * PLAYER_DIRECTIONAL_SPEED * speed_mult;
     *agent_target = AgentTarget2d::None;
     commands.entity(entity).remove::<ExplorationGoal>();
 }
+

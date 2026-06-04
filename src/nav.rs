@@ -4,7 +4,7 @@
 // Also applies landmass-computed desired velocity to Avian2D LinearVelocity
 // for monsters each frame, and syncs the DungeonNavMesh resource to the island entity.
 use crate::player;
-use avian2d::prelude::LinearVelocity;
+use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use geo::{
@@ -101,7 +101,10 @@ pub fn sync_island_nav_mesh(
 
 /// Apply landmass's desired velocity as actual movement on agents.
 pub fn apply_agent_velocity(
-    mut agents: Query<(&AgentDesiredVelocity2d, &mut LinearVelocity), Without<player::Player>>,
+    mut agents: Query<
+        (&AgentDesiredVelocity2d, &mut LinearVelocity),
+        Without<player::Player>,
+    >,
 ) {
     for (desired_velocity, mut velocity) in agents.iter_mut() {
         let vel_diff: Vec2 = desired_velocity.velocity() - velocity.0;

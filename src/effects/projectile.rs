@@ -15,6 +15,7 @@ use crate::{
     monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
     player::Player,
     sprite::{SpriteParam, SvgSprite, potion_hex, scroll_letter},
+    status_effect::StatusEffects,
     ui::{MessageLog, WorldTooltip},
 };
 
@@ -58,6 +59,7 @@ pub struct MissileTrail {
 pub struct MagicMissile {
     pub distance_traveled: f32,
     pub fired_by_player: bool,
+    pub damage_multiplier: f32,
     last_trail_pos: Option<Vec2>,
     last_trail_vel: Option<Vec2>,
 }
@@ -83,10 +85,11 @@ impl MonsterShootTimer {
 }
 
 impl MagicMissile {
-    pub fn new(fired_by_player: bool, initial_pos: Vec2, initial_vel: Vec2) -> Self {
+    pub fn new(fired_by_player: bool, initial_pos: Vec2, initial_vel: Vec2, damage_multiplier: f32) -> Self {
         Self {
             distance_traveled: 0.0,
             fired_by_player,
+            damage_multiplier,
             last_trail_pos: Some(initial_pos),
             last_trail_vel: Some(initial_vel),
         }
@@ -100,6 +103,7 @@ fn spawn_missile(
     origin: Vec2,
     direction: Vec2,
     fired_by_player: bool,
+    damage_multiplier: f32,
 ) {
     let spawn_pos = origin + direction * (AGENT_RADIUS + 6.0);
     let color =
@@ -110,6 +114,7 @@ fn spawn_missile(
         MagicMissile {
             distance_traveled: 0.0,
             fired_by_player,
+            damage_multiplier,
             last_trail_pos: Some(spawn_pos),
             last_trail_vel: Some(direction * MISSILE_SPEED),
         },
@@ -144,7 +149,7 @@ pub fn register_missile_command(mut registry: ResMut<PaletteRegistry>) {
 /// Fires a player missile toward the resolved target stored in palette.pending_target.
 pub fn execute_missile_command(
     mut palette: ResMut<CommandPaletteState>,
-    player_query: Query<&Transform, With<Player>>,
+    player_query: Query<(&Transform, Option<&StatusEffects>), With<Player>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -154,26 +159,27 @@ pub fn execute_missile_command(
     }
     palette.pending_command = None;
     let Some(target_pos) = palette.pending_target.take() else { return };
-    let Ok(player_tf) = player_query.single() else { return };
+    let Ok((player_tf, player_effects)) = player_query.single() else { return };
     let player_pos = player_tf.translation.truncate();
     let direction = (target_pos - player_pos).normalize_or_zero();
     if direction == Vec2::ZERO {
         return;
     }
-    spawn_missile(&mut commands, &mut meshes, &mut materials, player_pos, direction, true);
+    let damage_multiplier = player_effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
+    spawn_missile(&mut commands, &mut meshes, &mut materials, player_pos, direction, true, damage_multiplier);
 }
 
 pub fn monster_fire_missiles(
     time: Res<Time>,
     player_query: Single<&Transform, With<Player>>,
-    mut monster_query: Query<(&Transform, &mut MonsterShootTimer), With<Monster>>,
+    mut monster_query: Query<(&Transform, &mut MonsterShootTimer, Option<&StatusEffects>), With<Monster>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     let player_pos = player_query.translation.truncate();
 
-    for (transform, mut timer) in monster_query.iter_mut() {
+    for (transform, mut timer, effects) in monster_query.iter_mut() {
         timer.0 -= time.delta_secs();
         if timer.0 > 0.0 {
             continue;
@@ -188,7 +194,8 @@ pub fn monster_fire_missiles(
         }
 
         let direction = (player_pos - monster_pos).normalize_or_zero();
-        spawn_missile(&mut commands, &mut meshes, &mut materials, monster_pos, direction, false);
+        let damage_multiplier = effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
+        spawn_missile(&mut commands, &mut meshes, &mut materials, monster_pos, direction, false, damage_multiplier);
     }
 }
 
@@ -210,6 +217,15 @@ pub struct MissileHitEvent {
     pub hit_entity: Entity,
     pub direction: Vec2,
     pub fired_by_player: bool,
+    pub damage_multiplier: f32,
+}
+
+/// Fired when a missile is deflected by the Displacing status effect.
+/// The entity receives perpendicular knockback but no damage.
+#[derive(Event)]
+pub struct MissileDodgedEvent {
+    pub hit_entity: Entity,
+    pub direction: Vec2,
 }
 
 /// For each missile, sweep the collision shape along the path the missile travelled this frame
@@ -224,9 +240,12 @@ pub fn detect_missile_hits(
     spatial_query: SpatialQuery,
     missiles: Query<(&Transform, &LinearVelocity, &MagicMissile)>,
     cooldown_query: Query<&KnockbackCooldown>,
+    status_query: Query<&StatusEffects>,
 ) {
+    let mut rng = rand::thread_rng();
     for (transform, missile_vel, missile) in missiles.iter() {
         let fired_by_player = missile.fired_by_player;
+        let damage_multiplier = missile.damage_multiplier;
         let current_pos = transform.translation.truncate();
         let current_vel = missile_vel.0;
         let current_dir = current_vel.normalize_or_zero();
@@ -283,11 +302,26 @@ pub fn detect_missile_hits(
                 if cooldown_query.get(hit).is_ok_and(|c| c.0 > 0.0) {
                     continue;
                 }
-                commands.trigger(MissileHitEvent {
-                    hit_entity: hit,
-                    direction: seg_dir,
-                    fired_by_player,
-                });
+                let disp_strength = status_query
+                    .get(hit)
+                    .map(|e| e.displacing_strength())
+                    .unwrap_or(0.0);
+                if disp_strength > 0.0 && rng.gen_range(0.0_f32..1.0) < disp_strength {
+                    // Displaced away from missile: apply perpendicular knockback, no damage.
+                    let perp = Vec2::new(-seg_dir.y, seg_dir.x);
+                    let sign = if rng.gen_range(0.0_f32..1.0) > 0.5 { 1.0 } else { -1.0 };
+                    commands.trigger(MissileDodgedEvent {
+                        hit_entity: hit,
+                        direction: perp * sign,
+                    });
+                } else {
+                    commands.trigger(MissileHitEvent {
+                        hit_entity: hit,
+                        direction: seg_dir,
+                        fired_by_player,
+                        damage_multiplier,
+                    });
+                }
             }
         }
     }
@@ -295,6 +329,17 @@ pub fn detect_missile_hits(
 
 pub fn apply_knockback_on_hit(
     trigger: On<MissileHitEvent>,
+    mut commands: Commands,
+    mut query: Query<&mut LinearVelocity, (Without<MagicMissile>, With<RigidBody>)>,
+) {
+    let event = trigger.event();
+    let Ok(mut vel) = query.get_mut(event.hit_entity) else { return };
+    vel.0 += event.direction * KNOCKBACK_SPEED;
+    commands.entity(event.hit_entity).try_insert(KnockbackCooldown(KNOCKBACK_COOLDOWN));
+}
+
+pub fn apply_dodge(
+    trigger: On<MissileDodgedEvent>,
     mut commands: Commands,
     mut query: Query<&mut LinearVelocity, (Without<MagicMissile>, With<RigidBody>)>,
 ) {
@@ -351,7 +396,7 @@ pub fn apply_damage_on_hit(
     let Some(ref mut stats) = stats_opt else { return };
 
     let was_alive = stats.hp > 0.0;
-    stats.hp -= MISSILE_DAMAGE;
+    stats.hp -= MISSILE_DAMAGE * event.damage_multiplier;
 
     if is_monster {
         if event.fired_by_player {

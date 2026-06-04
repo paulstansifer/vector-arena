@@ -9,8 +9,9 @@ use bevy::{prelude::*, time::Real};
 use crate::{
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     dungeon::terrain::{DungeonState, random_in_playable_area},
-    monster::Stats,
+    monster::{Monster, Stats},
     player::{ExplorationGoal, Player},
+    status_effect::{StatusEffects, random_status_effect},
     ui::MessageLog,
 };
 
@@ -180,9 +181,10 @@ fn find_and_remove_item(
 pub fn execute_item_command(
     mut palette: ResMut<CommandPaletteState>,
     mut player_query: Query<
-        (Entity, &mut Inventory, &mut Stats, &mut Position, &mut Transform, &mut LinearVelocity),
-        With<Player>,
+        (Entity, &mut Inventory, &mut Stats, &mut Position, &mut Transform, &mut LinearVelocity, &mut StatusEffects),
+        (With<Player>, Without<Monster>),
     >,
+    mut monster_status_query: Query<&mut StatusEffects, (With<Monster>, Without<Player>)>,
     dungeon_state: Res<DungeonState>,
     mut log: ResMut<MessageLog>,
     mut commands: Commands,
@@ -190,7 +192,7 @@ pub fn execute_item_command(
 ) {
     let Some(cmd) = palette.pending_command.take() else { return };
 
-    let Ok((entity, mut inventory, mut stats, mut position, mut transform, mut velocity)) =
+    let Ok((entity, mut inventory, mut stats, mut position, mut transform, mut velocity, mut player_effects)) =
         player_query.single_mut()
     else {
         return;
@@ -209,6 +211,9 @@ pub fn execute_item_command(
                 let gained = 20.0_f32.min(stats.max_hp - stats.hp);
                 stats.hp = (stats.hp + 20.0).min(stats.max_hp);
                 log.push(format!("You quaff {}. (+{} HP)", item_name(item, 1), gained as i32));
+                let mut rng = rand::thread_rng();
+                let (kind, duration) = random_status_effect(&mut rng);
+                player_effects.add(kind, duration);
             }
         }
         ["r", letter_str] => {
