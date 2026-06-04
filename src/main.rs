@@ -16,9 +16,10 @@ use vector_arena::{
     effects::{
         crumble_terrain::{Fragile, handle_right_click_excavation},
         projectile::{
-            apply_missile_knockback, execute_missile_command, init_trail_meshes,
-            monster_fire_missiles, register_missile_command, spawn_missile_trails,
-            tick_knockback_cooldowns, update_hit_flash, update_missile_trails, update_missiles,
+            apply_damage_on_hit, apply_hit_flash_on_hit, apply_knockback_on_hit,
+            detect_missile_hits, execute_missile_command, init_trail_meshes, monster_fire_missiles,
+            register_missile_command, spawn_missile_trails, tick_knockback_cooldowns,
+            update_hit_flash, update_missile_trails, update_missiles,
         },
         rope,
     },
@@ -81,8 +82,11 @@ fn main() {
         .add_systems(Update, update_missiles)
         .add_systems(Update, spawn_missile_trails)
         .add_systems(Update, update_missile_trails)
-        .add_systems(Update, update_hit_flash.before(apply_missile_knockback))
-        .add_systems(Update, apply_missile_knockback.before(spawn_missile_trails))
+        .add_observer(apply_knockback_on_hit)
+        .add_observer(apply_hit_flash_on_hit)
+        .add_observer(apply_damage_on_hit)
+        .add_systems(Update, update_hit_flash.before(detect_missile_hits))
+        .add_systems(Update, detect_missile_hits.before(spawn_missile_trails))
         .add_systems(Update, tick_knockback_cooldowns)
         .add_systems(Update, pickup_items)
         .add_systems(Update, animate_pickup)

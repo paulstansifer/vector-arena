@@ -21,14 +21,17 @@ use vector_arena::{
 /// Verifies that a magic missile aimed at a stationary monster registers a hit when fired from
 /// various starting distances.
 ///
-/// `apply_missile_knockback` polls missile positions once per frame via `shape_intersections`.
+/// `detect_missile_hits` sweeps missile positions once per frame via `shape_intersections`.
 /// The missile travels ~58 units per 60 Hz frame, but the combined hit radius (missile 4 +
 /// monster 10 = 14 units) is far narrower.
 #[test]
 fn missile_hits_monster_at_various_distances() {
     use vector_arena::{
         command_palette::LetterMap,
-        effects::projectile::{MagicMissile, MISSILE_SPEED, apply_missile_knockback},
+        effects::projectile::{
+            MagicMissile, MISSILE_SPEED, apply_damage_on_hit, apply_hit_flash_on_hit,
+            apply_knockback_on_hit, detect_missile_hits,
+        },
         monster::{Monster, Stats},
         ui::MessageLog,
     };
@@ -45,7 +48,10 @@ fn missile_hits_monster_at_various_distances() {
         app.init_asset::<ColorMaterial>();
         app.init_resource::<MessageLog>();
         app.init_resource::<LetterMap>();
-        app.add_systems(Update, apply_missile_knockback);
+        app.add_systems(Update, detect_missile_hits);
+        app.add_observer(apply_knockback_on_hit);
+        app.add_observer(apply_hit_flash_on_hit);
+        app.add_observer(apply_damage_on_hit);
 
         // Monster at origin.
         let monster = app
