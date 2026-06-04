@@ -22,7 +22,8 @@ pub fn manage_time_scale(
     keyboard: Res<ButtonInput<Key>>,
 ) {
     let any_missile = missile_query.iter().next().is_some();
-    let spacebar_held = keyboard.pressed(Key::Character(".".into()));
+    let period_held = keyboard.pressed(Key::Character(".".into()));
+
 
     if any_missile {
         time.set_relative_speed(TIME_SCALE_MISSILE);
@@ -31,7 +32,7 @@ pub fn manage_time_scale(
         fixed_time.set_timestep(Duration::from_secs_f64(1.0 / (256.0 / TIME_SCALE_MISSILE as f64)));
     } else {
         fixed_time.set_timestep(Duration::from_secs_f64(1.0 / 64.0));
-        if move_target.active || spacebar_held {
+        if move_target.active || period_held {
             time.set_relative_speed(1.0);
         } else {
             time.set_relative_speed(0.0);

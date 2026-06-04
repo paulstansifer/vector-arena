@@ -114,7 +114,6 @@ impl PaletteRegistry {
                         || input.starts_with(&format!("{} ", cmd.key))
                     {
                         entries.extend(targeting_sub_completions(
-                            input,
                             &cmd.key,
                             target_verb,
                             goto_state,
@@ -174,7 +173,7 @@ pub fn resolve_location_letter(
     }
     let c = rest.chars().next()?;
     match c {
-        c if c.is_uppercase() => {
+        c if c.is_uppercase() || c.is_digit(10) => {
             let entity = letter_map.entity_for_letter(c)?;
             monster_query.get(entity).ok().map(|(_, _, _, tf)| tf.translation.truncate())
         }
@@ -189,7 +188,6 @@ pub fn resolve_location_letter(
 /// Shared completion body for LocationTarget commands.
 /// `prefix` is the command key ("g", "z", …); `location_verb` is "Go to", "Zap at", etc.
 pub fn targeting_sub_completions(
-    input: &str,
     prefix: &str,
     location_verb: &str,
     goto_state: &GotoState,
@@ -202,74 +200,30 @@ pub fn targeting_sub_completions(
         current_fov.map_or(true, |fov| fov.contains(&geo::Point::new(pos.x, pos.y)))
     };
 
-    let trimmed = input.trim_end();
-
-    // Sub-menu: just the prefix, no target specified yet.
-    if trimmed == prefix {
-        let mut entries: Vec<PaletteEntry> = monster_query
-            .iter()
-            .filter_map(|(entity, stats, state, tf)| {
-                let letter = letter_map.letter_for_monster(entity)?;
-                in_fov(tf.translation.truncate()).then(|| PaletteEntry {
-                    key: format!("{prefix} {letter}"),
-                    description: monster_desc(stats, state),
-                    icon: None,
-                    is_complete: true,
-                })
-            })
-            .collect();
-        for (i, _) in goto_state.labels.iter().enumerate() {
-            let letter = ('a' as u8 + i as u8) as char;
-            entries.push(PaletteEntry {
+    // Always build the full sub-menu so arrow keys can navigate among all targets.
+    let mut entries: Vec<PaletteEntry> = monster_query
+        .iter()
+        .filter_map(|(entity, stats, state, tf)| {
+            let letter = letter_map.letter_for_monster(entity)?;
+            in_fov(tf.translation.truncate()).then(|| PaletteEntry {
                 key: format!("{prefix} {letter}"),
-                description: format!("{location_verb} location {letter}"),
-                icon: None,
-                is_complete: true,
-            });
-        }
-        entries.sort_by(|a, b| a.key.cmp(&b.key));
-        return entries;
-    }
-
-    // Single-target: "{prefix} X"
-    let space_pos = prefix.len();
-    if input.len() < space_pos + 2 || input.chars().nth(space_pos) != Some(' ') {
-        return vec![];
-    }
-    let target = input[space_pos + 1..].trim();
-    let mut target_chars = target.chars();
-    let Some(c) = target_chars.next() else { return vec![] };
-    if target_chars.next().is_some() {
-        return vec![];
-    }
-    match c {
-        c if c.is_uppercase() => {
-            let Some(entity) = letter_map.entity_for_letter(c) else { return vec![] };
-            let Ok((_, stats, state, tf)) = monster_query.get(entity) else { return vec![] };
-            if !in_fov(tf.translation.truncate()) {
-                return vec![];
-            }
-            vec![PaletteEntry {
-                key: format!("{prefix} {c}"),
                 description: monster_desc(stats, state),
                 icon: None,
                 is_complete: true,
-            }]
-        }
-        c if c.is_lowercase() => {
-            let idx = (c as u8).wrapping_sub(b'a') as usize;
-            if idx >= goto_state.labels.len() {
-                return vec![];
-            }
-            vec![PaletteEntry {
-                key: format!("{prefix} {c}"),
-                description: format!("{location_verb} location {c}"),
-                icon: None,
-                is_complete: true,
-            }]
-        }
-        _ => vec![],
+            })
+        })
+        .collect();
+    for (i, _) in goto_state.labels.iter().enumerate() {
+        let letter = ('a' as u8 + i as u8) as char;
+        entries.push(PaletteEntry {
+            key: format!("{prefix} {letter}"),
+            description: format!("{location_verb} location {letter}"),
+            icon: None,
+            is_complete: true,
+        });
     }
+    entries.sort_by(|a, b| a.key.cmp(&b.key));
+    entries
 }
 
 fn monster_desc(stats: &Stats, state: &MonsterState) -> String {
@@ -550,6 +504,10 @@ fn render_command_palette(
                     if completions.iter().any(|e| !e.is_complete && e.key == trimmed) {
                         palette.input = trimmed + " ";
                         move_cursor_to_end(ctx, te_id, palette.input.chars().count());
+                    } else if let Some(entry) =
+                        completions.iter().find(|e| e.is_complete && e.key == trimmed)
+                    {
+                        action = PaletteUiAction::Execute(entry.key.clone());
                     }
                 }
                 palette.selected_idx = sync_selection(&palette.input, completions);
@@ -700,7 +658,7 @@ impl LetterMap {
         if let Some(&letter) = self.monsters.get(&entity) {
             return Some(letter);
         }
-        for letter in 'A'..='Z' {
+        for letter in ('1'..='9').chain('A'..'Z') {
             if !self.monsters.values().any(|&l| l == letter) {
                 self.monsters.insert(entity, letter);
                 return Some(letter);
