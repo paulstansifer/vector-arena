@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+use bevy_mesh::VertexAttributeValues;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 use bevy_svg::prelude::{Svg, Svg2d};
 
@@ -151,7 +152,19 @@ fn load_svg_handle(
             return None;
         }
     };
-    let mesh = svg.tessellate();
+    let mut mesh = svg.tessellate();
+    // After Y-flip in bevy_svg, vertices span (0,0)–(w,−h). Shift so they're centered at
+    // the origin, matching the old SVG layout that had translate(-half,−half) on the layer.
+    if let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
+    {
+        let ox = -svg.size.x / 2.0;
+        let oy = svg.size.y / 2.0;
+        for p in positions.iter_mut() {
+            p[0] += ox;
+            p[1] += oy;
+        }
+    }
     svg.mesh = meshes.add(mesh);
     let handle = svgs.add(svg);
     cache.svg_handles.insert(key, handle.clone());

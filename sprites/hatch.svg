@@ -25,8 +25,8 @@
      inkscape:document-units="mm"
      showgrid="false"
      inkscape:zoom="14.638496"
-     inkscape:cx="21.416134"
-     inkscape:cy="23.397212"
+     inkscape:cx="21.484448"
+     inkscape:cy="23.465525"
      inkscape:window-width="2560"
      inkscape:window-height="1380"
      inkscape:window-x="0"
@@ -40,7 +40,7 @@
      inkscape:groupmode="layer"
      id="layer1">
     <rect
-       style="fill:#ac9d93;fill-opacity:1;stroke:#000000;stroke-width:0.347122;stroke-dasharray:none"
+       style="fill:#ac9d93;fill-opacity:1;stroke:#000000;stroke-width:0.79375;stroke-dasharray:none"
        id="rect7956"
        width="11.16955"
        height="11.16955"
@@ -48,8 +48,8 @@
        y="0.76522505" />
     <path
        id="rect8010"
-       style="fill:#ac9d93;stroke:#000000;stroke-width:0.396875"
-       d="m 4.6559424,11.312334 v -1.151127 h 3.388115 v 1.151127"
+       style="fill:#ac9d93;stroke:#000000;stroke-width:0.79375;stroke-dasharray:none"
+       d="M 4.6559424,10.254 V 9.1028736 h 3.388115 V 10.254"
        sodipodi:nodetypes="cccc" />
   </g>
 </svg>
