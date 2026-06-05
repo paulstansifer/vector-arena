@@ -59,9 +59,9 @@ pub fn populate(
     commands.spawn((
         DespawnOnExit(GameState::InLevel),
         (Player, initial_inventory, initial_stats, StatusEffects::default()),
-        Mesh2d(meshes.add(Circle::new(AGENT_RADIUS))),
-        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.15, 0.65, 0.95)))),
-        Transform::from_translation(player_position.extend(fov::MOVABLE_Z)),
+        SvgSprite { svg_path: "sprites/wizard.svg".into(), param: None },
+        Transform::from_translation(player_position.extend(fov::MOVABLE_Z))
+            .with_scale(Vec3::splat(0.4)),
         RigidBody::Dynamic,
         Collider::circle(AGENT_RADIUS),
         ColliderDensity(8.0),
@@ -141,53 +141,16 @@ pub fn populate(
 
 fn spawn_staircase(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<ColorMaterial>,
+    _meshes: &mut Assets<Mesh>,
+    _materials: &mut Assets<ColorMaterial>,
     position: Vec2,
 ) {
-    const SIZE: f32 = 18.0;
-    const LINE_W: f32 = 2.5;
-    const LINE_L: f32 = 24.0;
-    const LINE_SPACING: f32 = 6.0;
-
-    let bg_mat = materials.add(ColorMaterial::from(Color::srgb(0.25, 0.18, 0.06)));
-    let line_mat = materials.add(ColorMaterial::from(Color::srgb(0.60, 0.45, 0.15)));
-
-    let bg_mesh = meshes.add(Rectangle::new(SIZE, SIZE));
-    let line_mesh = meshes.add(Rectangle::new(LINE_W, LINE_L));
-
-    let staircase = commands
-        .spawn((
-            DespawnOnExit(GameState::InLevel),
-            Staircase,
-            Transform::from_translation(position.extend(fov::ON_FLOOR_Z)),
-            Visibility::default(),
-        ))
-        .id();
-
-    let bg_child = commands
-        .spawn((
-            DespawnOnExit(GameState::InLevel),
-            Mesh2d(bg_mesh),
-            MeshMaterial2d(bg_mat),
-            Transform::default(),
-        ))
-        .id();
-    commands.entity(staircase).add_child(bg_child);
-
-    // 3 parallel hatch lines at 45°, spaced along the perpendicular (-45°) direction.
-    let perp = Vec2::new(1.0, -1.0).normalize();
-    for i in [-1i32, 0, 1] {
-        let offset = perp * (i as f32 * LINE_SPACING);
-        let line_child = commands
-            .spawn((
-                DespawnOnExit(GameState::InLevel),
-                Mesh2d(line_mesh.clone()),
-                MeshMaterial2d(line_mat.clone()),
-                Transform::from_translation(offset.extend(1.0))
-                    .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)),
-            ))
-            .id();
-        commands.entity(staircase).add_child(line_child);
-    }
+    commands.spawn((
+        DespawnOnExit(GameState::InLevel),
+        Staircase,
+        SvgSprite { svg_path: "sprites/hatch.svg".into(), param: None },
+        Transform::from_translation(position.extend(fov::ON_FLOOR_Z))
+            .with_scale(Vec3::splat(0.4)),
+        Visibility::default(),
+    ));
 }

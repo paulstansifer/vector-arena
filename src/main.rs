@@ -31,7 +31,7 @@ use vector_arena::{
     player::{
         Player, advance_exploration, directional_move_system,
         execute_descend_command, execute_stop_command, move_player, register_player_commands,
-        set_target_on_click,
+        rotate_player_to_velocity, set_target_on_click,
     },
     populate_level,
     sprite::SpritePlugin,
@@ -77,6 +77,7 @@ fn main() {
         .add_systems(Update, set_target_on_click)
         .add_systems(Update, move_player)
         .add_systems(Update, directional_move_system.after(move_player))
+        .add_systems(Update, rotate_player_to_velocity.after(move_player))
         .add_systems(Update, advance_exploration.after(move_player))
         .add_systems(Update, execute_stop_command)
         .add_systems(Update, execute_descend_command)

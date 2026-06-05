@@ -20,6 +20,18 @@ use crate::{
     ui::MessageLog,
 };
 
+pub fn rotate_player_to_velocity(
+    mut query: Query<(&LinearVelocity, &mut Rotation), With<Player>>,
+) {
+    for (velocity, mut rotation) in &mut query {
+        if velocity.length_squared() > 1.0 {
+            // Wizard sprite faces up (+Y); atan2 gives angle from +X, so offset by -PI/2.
+            let angle = velocity.y.atan2(velocity.x) - std::f32::consts::FRAC_PI_2;
+            *rotation = Rotation::radians(angle);
+        }
+    }
+}
+
 // How far (in world units) to search for the nearest navmesh point when a
 // destination lands off the mesh (e.g. too close to a wall).
 const NAVMESH_SNAP_RADIUS: f32 = 80.0;
