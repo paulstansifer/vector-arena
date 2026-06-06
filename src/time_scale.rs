@@ -4,8 +4,7 @@
 // under the time dilation.
 use std::time::Duration;
 
-use bevy::input::keyboard::Key;
-use bevy::prelude::*;
+use bevy::{input::keyboard::Key, prelude::*};
 
 use crate::{
     effects::projectile::MagicMissile,
@@ -23,7 +22,6 @@ pub fn manage_time_scale(
 ) {
     let any_missile = missile_query.iter().next().is_some();
     let period_held = keyboard.pressed(Key::Character(".".into()));
-
 
     if any_missile {
         time.set_relative_speed(TIME_SCALE_MISSILE);

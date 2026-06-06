@@ -100,13 +100,8 @@ fn test_fov_point_explosion() {
             );
             exploration_state.0 = new_exp;
             if let Some(pw) = &pw {
-                pw.show(make_frame(
-                    &terrain_geometry.solid_rock,
-                    &exploration_state.0,
-                    *pt,
-                ));
+                pw.show(make_frame(&terrain_geometry.solid_rock, &exploration_state.0, *pt));
             }
-
         }
         if extra_pass % 2 == 0 {
             println!("Extra pass {extra_pass} points: {}", exploration_state.0.coords_count());

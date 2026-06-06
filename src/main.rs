@@ -16,10 +16,10 @@ use vector_arena::{
     effects::{
         crumble_terrain::{Fragile, handle_right_click_excavation},
         projectile::{
-            apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit,
-            apply_knockback_on_hit, detect_missile_hits, execute_missile_command, init_trail_meshes,
-            monster_fire_missiles, register_missile_command, spawn_missile_trails,
-            tick_knockback_cooldowns, update_hit_flash, update_missile_trails, update_missiles,
+            apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit, apply_knockback_on_hit,
+            detect_missile_hits, execute_missile_command, init_trail_meshes, monster_fire_missiles,
+            register_missile_command, spawn_missile_trails, tick_knockback_cooldowns,
+            update_hit_flash, update_missile_trails, update_missiles,
         },
         rope,
     },
@@ -29,12 +29,12 @@ use vector_arena::{
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
     player::{
-        Player, advance_exploration, directional_move_system,
-        execute_descend_command, execute_stop_command, move_player, register_player_commands,
-        rotate_player_to_velocity, set_target_on_click,
+        Player, advance_exploration, directional_move_system, execute_descend_command,
+        execute_stop_command, move_player, register_player_commands, rotate_player_to_velocity,
+        set_target_on_click,
     },
     populate_level,
-    sprite::{self, SpritePlugin},
+    sprite::SpritePlugin,
     status_effect::{apply_confusion_to_velocity, tick_status_effects},
     time_scale::manage_time_scale,
     ui::{MessageLog, UiPlugin, enable_ui_input_absorption},
@@ -87,8 +87,7 @@ fn main() {
         .add_systems(Update, apply_confusion_to_velocity.after(nav::apply_agent_velocity).after(directional_move_system))
         .add_systems(Update, nav::sync_island_nav_mesh)
         .add_systems(Update, fov::update_fov)
-        .add_systems(Update, fov::init_staircase_fog_copies.after(sprite::insert_svg_components))
-        .add_systems(Update, fov::update_staircase_fog_copy.after(fov::update_fov).after(fov::init_staircase_fog_copies))
+        .add_systems(Update, fov::update_staircase_fog_copy.after(fov::update_fov))
         .add_systems(Update, handle_right_click_excavation.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, sync_dungeon_to_entities)
         .add_systems(Update, execute_missile_command)

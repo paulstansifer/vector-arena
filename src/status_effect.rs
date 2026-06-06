@@ -133,9 +133,7 @@ impl StatusEffects {
             .fold(0.0_f32, f32::max)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.0.is_empty() }
 }
 
 /// Ticks durations down, advances confused wander directions, and removes expired effects.

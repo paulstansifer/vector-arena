@@ -83,7 +83,10 @@ pub fn compute_goto_assignments(
         item_query.iter().map(|tf| tf.translation.truncate()).filter(|&p| is_explored(p));
     let mut candidates: Vec<Vec2> = map_points.chain(item_points).collect();
     candidates.sort_by(|a, b| {
-        player_pos.distance(*a).partial_cmp(&player_pos.distance(*b)).unwrap_or(std::cmp::Ordering::Equal)
+        player_pos
+            .distance(*a)
+            .partial_cmp(&player_pos.distance(*b))
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
     candidates.dedup_by(|a, b| a.distance(*b) < 1.0);
 

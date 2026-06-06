@@ -9,8 +9,9 @@ use rand::Rng;
 use std::collections::HashSet;
 
 use crate::{
-    AGENT_RADIUS, GameLayer, GameState, fov,
+    AGENT_RADIUS, GameLayer, GameState,
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
+    fov,
     item::{Item, ItemKind, item_name},
     monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
     player::Player,
@@ -85,7 +86,12 @@ impl MonsterShootTimer {
 }
 
 impl MagicMissile {
-    pub fn new(fired_by_player: bool, initial_pos: Vec2, initial_vel: Vec2, damage_multiplier: f32) -> Self {
+    pub fn new(
+        fired_by_player: bool,
+        initial_pos: Vec2,
+        initial_vel: Vec2,
+        damage_multiplier: f32,
+    ) -> Self {
         Self {
             distance_traveled: 0.0,
             fired_by_player,
@@ -166,13 +172,24 @@ pub fn execute_missile_command(
         return;
     }
     let damage_multiplier = player_effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
-    spawn_missile(&mut commands, &mut meshes, &mut materials, player_pos, direction, true, damage_multiplier);
+    spawn_missile(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        player_pos,
+        direction,
+        true,
+        damage_multiplier,
+    );
 }
 
 pub fn monster_fire_missiles(
     time: Res<Time>,
     player_query: Single<&Transform, With<Player>>,
-    mut monster_query: Query<(&Transform, &mut MonsterShootTimer, Option<&StatusEffects>), With<Monster>>,
+    mut monster_query: Query<
+        (&Transform, &mut MonsterShootTimer, Option<&StatusEffects>),
+        With<Monster>,
+    >,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -195,7 +212,15 @@ pub fn monster_fire_missiles(
 
         let direction = (player_pos - monster_pos).normalize_or_zero();
         let damage_multiplier = effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
-        spawn_missile(&mut commands, &mut meshes, &mut materials, monster_pos, direction, false, damage_multiplier);
+        spawn_missile(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            monster_pos,
+            direction,
+            false,
+            damage_multiplier,
+        );
     }
 }
 
@@ -252,25 +277,22 @@ pub fn detect_missile_hits(
 
         // Build the swept segments for this frame using the same logic as spawn_missile_trails.
         // Each entry is (segment_origin, unit_direction, length).
-        let segments: Vec<(Vec2, Vec2, f32)> =
-            if let (Some(last_pos), Some(last_vel)) =
-                (missile.last_trail_pos, missile.last_trail_vel)
-            {
-                let last_dir = last_vel.normalize_or_zero();
-                if let Some(contact) =
-                    bounce_contact(last_pos, last_dir, current_pos, current_dir)
-                {
-                    vec![
-                        (last_pos, last_dir, (contact - last_pos).length()),
-                        (contact, current_dir, (current_pos - contact).length()),
-                    ]
-                } else {
-                    vec![(last_pos, current_dir, (current_pos - last_pos).length())]
-                }
+        let segments: Vec<(Vec2, Vec2, f32)> = if let (Some(last_pos), Some(last_vel)) =
+            (missile.last_trail_pos, missile.last_trail_vel)
+        {
+            let last_dir = last_vel.normalize_or_zero();
+            if let Some(contact) = bounce_contact(last_pos, last_dir, current_pos, current_dir) {
+                vec![
+                    (last_pos, last_dir, (contact - last_pos).length()),
+                    (contact, current_dir, (current_pos - contact).length()),
+                ]
             } else {
-                // No previous position recorded yet; fall back to a point check.
-                vec![(current_pos, current_dir, 0.0)]
-            };
+                vec![(last_pos, current_dir, (current_pos - last_pos).length())]
+            }
+        } else {
+            // No previous position recorded yet; fall back to a point check.
+            vec![(current_pos, current_dir, 0.0)]
+        };
 
         for (seg_origin, seg_dir, seg_len) in segments {
             let hits: Vec<Entity> = if seg_len < 0.5 {
@@ -302,18 +324,14 @@ pub fn detect_missile_hits(
                 if cooldown_query.get(hit).is_ok_and(|c| c.0 > 0.0) {
                     continue;
                 }
-                let disp_strength = status_query
-                    .get(hit)
-                    .map(|e| e.displacing_strength())
-                    .unwrap_or(0.0);
+                let disp_strength =
+                    status_query.get(hit).map(|e| e.displacing_strength()).unwrap_or(0.0);
                 if disp_strength > 0.0 && rng.gen_range(0.0_f32..1.0) < disp_strength {
                     // Displaced away from missile: apply perpendicular knockback, no damage.
                     let perp = Vec2::new(-seg_dir.y, seg_dir.x);
                     let sign = if rng.gen_range(0.0_f32..1.0) > 0.5 { 1.0 } else { -1.0 };
-                    commands.trigger(MissileDodgedEvent {
-                        hit_entity: hit,
-                        direction: perp * sign,
-                    });
+                    commands
+                        .trigger(MissileDodgedEvent { hit_entity: hit, direction: perp * sign });
                 } else {
                     commands.trigger(MissileHitEvent {
                         hit_entity: hit,
@@ -362,9 +380,8 @@ pub fn apply_hit_flash_on_hit(
     let Ok((mat_opt, existing_flash)) = query.get(event.hit_entity) else { return };
     let Some(mh) = mat_opt else { return };
     // Preserve the resting color across rapid re-hits.
-    let base_color = existing_flash
-        .map(|f| f.base_color)
-        .or_else(|| materials.get(&mh.0).map(|m| m.color));
+    let base_color =
+        existing_flash.map(|f| f.base_color).or_else(|| materials.get(&mh.0).map(|m| m.color));
     if let Some(base) = base_color {
         if let Some(mat) = materials.get_mut(&mh.0) {
             mat.color = Color::WHITE;
@@ -416,10 +433,9 @@ pub fn apply_damage_on_hit(
                 let kind = drop.0;
                 let pos = transform.translation.truncate().extend(fov::ON_FLOOR_Z);
                 let (svg_path, param) = match kind {
-                    ItemKind::Potion(color) => (
-                        "sprites/potion.svg".to_string(),
-                        SpriteParam::Color(potion_hex(color)),
-                    ),
+                    ItemKind::Potion(color) => {
+                        ("sprites/potion.svg".to_string(), SpriteParam::Color(potion_hex(color)))
+                    }
                     ItemKind::Scroll(name) => (
                         "sprites/scroll.svg".to_string(),
                         SpriteParam::Text(scroll_letter(name).to_string()),

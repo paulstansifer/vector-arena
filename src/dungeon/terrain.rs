@@ -4,15 +4,16 @@
 // `sync_dungeon_to_entities` is a system that rebuilds both whenever DungeonState
 // changes (e.g. after excavation). Navmesh types and conversion live in `nav`.
 use avian2d::prelude::*;
-use bevy::prelude::*;
+use bevy::{math::Vec2, prelude::*};
 use bevy_mesh::{Indices, PrimitiveTopology};
 use geo::{
     BoundingRect, Buffer, Contains, MultiPolygon,
-    algorithm::buffer::BufferStyle,
-    algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay},
+    algorithm::{
+        buffer::BufferStyle,
+        triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay},
+    },
     buffer::{LineCap, LineJoin},
 };
-use bevy::math::Vec2;
 use rand::Rng;
 
 /// Convert the terrain geometry to a Bevy mesh for rendering.
@@ -83,10 +84,12 @@ pub struct PointsOfInterest {
 
 /// Returns a random point inside `playable_area`, eroded by `AGENT_RADIUS` so results
 /// are never right against the wall. Returns `None` after 1000 failed attempts.
-pub fn random_in_playable_area(playable_area: &MultiPolygon<f32>, rng: &mut impl Rng) -> Option<Vec2> {
-    let style = BufferStyle::new(-crate::AGENT_RADIUS)
-        .line_cap(LineCap::Square)
-        .line_join(LineJoin::Bevel);
+pub fn random_in_playable_area(
+    playable_area: &MultiPolygon<f32>,
+    rng: &mut impl Rng,
+) -> Option<Vec2> {
+    let style =
+        BufferStyle::new(-crate::AGENT_RADIUS).line_cap(LineCap::Square).line_join(LineJoin::Bevel);
     let eroded = playable_area.buffer_with_style(style);
     let bbox = eroded.bounding_rect()?;
     for _ in 0..1000 {

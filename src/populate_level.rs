@@ -8,7 +8,7 @@ use geo::{MultiPolygon, Rect};
 use rand::prelude::*;
 
 use crate::{
-    AGENT_RADIUS, FogCopyNeedsInit, GameLayer, GameState, Staircase, StaircaseFogCopy,
+    AGENT_RADIUS, GameLayer, GameState, Staircase, StaircaseFogCopy,
     dungeon::terrain::random_in_playable_area,
     effects::projectile::MonsterShootTimer,
     fov,
@@ -33,7 +33,10 @@ pub fn populate(
 ) {
     let mut rng = rand::thread_rng();
 
-    let room_center = |r: &Rect<f32>| { let c = r.center(); Vec2::new(c.x, c.y) };
+    let room_center = |r: &Rect<f32>| {
+        let c = r.center();
+        Vec2::new(c.x, c.y)
+    };
 
     // Pick the player's room by index so we can exclude it when placing the staircase.
     let player_room_idx = if rooms.is_empty() { 0 } else { rng.gen_range(0..rooms.len()) };
@@ -82,7 +85,6 @@ pub fn populate(
 
     let monster_mesh = meshes.add(Circle::new(AGENT_RADIUS));
 
-
     // One more monster per depth level (2 at depth 1, 3 at depth 2, …).
     let monster_count = (depth as usize + 1).min(non_player_centers.len());
     for &position in non_player_centers.iter().take(monster_count) {
@@ -90,7 +92,12 @@ pub fn populate(
         let monster = commands
             .spawn((
                 DespawnOnExit(GameState::InLevel),
-                (Monster, MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) }, Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() }, StatusEffects::default()),
+                (
+                    Monster,
+                    MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
+                    Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
+                    StatusEffects::default(),
+                ),
                 WorldTooltip::default(),
                 MonsterShootTimer::new(),
                 Mesh2d(monster_mesh.clone()),
@@ -141,24 +148,31 @@ pub fn populate(
 
 fn spawn_staircase(
     commands: &mut Commands,
-    _meshes: &mut Assets<Mesh>,
-    _materials: &mut Assets<ColorMaterial>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ColorMaterial>,
     position: Vec2,
 ) {
     commands.spawn((
         DespawnOnExit(GameState::InLevel),
         Staircase,
         SvgSprite { svg_path: "sprites/hatch.svg".into(), param: None },
-        Transform::from_translation(position.extend(fov::ON_FLOOR_Z))
-            .with_scale(Vec3::splat(0.4)),
+        Transform::from_translation(position.extend(fov::ON_FLOOR_Z)).with_scale(Vec3::splat(0.4)),
         Visibility::default(),
+    ));
+    // Hatch fill color (#ac9d93); the fog-copy mesh is rewritten each frame by
+    // update_staircase_fog_copy via geo difference against the FOV polygon.
+    let fog_color = materials.add(ColorMaterial::from(Color::srgb(0.675, 0.616, 0.576)));
+    let fog_mesh = meshes.add(Mesh::new(
+        bevy_mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
     ));
     commands.spawn((
         DespawnOnExit(GameState::InLevel),
         StaircaseFogCopy,
-        FogCopyNeedsInit,
-        Transform::from_translation(position.extend(fov::TERRAIN_Z))
-            .with_scale(Vec3::splat(0.4)),
         Visibility::default(),
+        Mesh2d(fog_mesh),
+        MeshMaterial2d(fog_color),
+        // We need to subtract the FOV, so this needs an absolute location
+        Transform::from_translation(Vec3::new(0.0,0.0,fov::TERRAIN_Z)),
     ));
 }

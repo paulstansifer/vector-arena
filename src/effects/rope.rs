@@ -4,8 +4,7 @@
 // Endpoints near a static surface are pinned with VerletLocked; endpoints near a
 // dynamic body get a RopeEndAnchor that tracks the body's movement each frame.
 use avian2d::prelude::*;
-use bevy::input::keyboard::Key;
-use bevy::prelude::*;
+use bevy::{input::keyboard::Key, prelude::*};
 use bevy_verlet::prelude::*;
 
 use crate::{GameLayer, GameState, fov::MOVABLE_Z};

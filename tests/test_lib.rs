@@ -188,10 +188,7 @@ pub mod preview {
                             }),
                             ..default()
                         })
-                        .set(bevy::winit::WinitPlugin {
-                            run_on_any_thread: true,
-                            ..default()
-                        }),
+                        .set(bevy::winit::WinitPlugin { run_on_any_thread: true, ..default() }),
                 )
                 .insert_resource(WindowedRx(Mutex::new(rx)))
                 .insert_resource(CamCenter(camera_center))

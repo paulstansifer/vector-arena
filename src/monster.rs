@@ -9,12 +9,8 @@ use geo::{Contains, Intersects};
 use bevy_egui::egui;
 
 use crate::{
-    command_palette::CommandPaletteState,
-    dungeon::terrain::DungeonState,
-    fov::CurrentFovState,
-    item::ItemKind,
-    player::Player,
-    status_effect::StatusEffects,
+    command_palette::CommandPaletteState, dungeon::terrain::DungeonState, fov::CurrentFovState,
+    item::ItemKind, player::Player, status_effect::StatusEffects,
 };
 
 pub const MONSTER_SPEED: f32 = 80.0;
@@ -157,7 +153,10 @@ fn tick_state(
 }
 
 pub fn refresh_monster_tooltips(
-    mut query: Query<(Entity, &Stats, &MonsterState, &mut crate::ui::WorldTooltip, Option<&StatusEffects>), With<Monster>>,
+    mut query: Query<
+        (Entity, &Stats, &MonsterState, &mut crate::ui::WorldTooltip, Option<&StatusEffects>),
+        With<Monster>,
+    >,
     letter_map: Res<crate::command_palette::LetterMap>,
 ) {
     for (entity, stats, state, mut tooltip, effects) in query.iter_mut() {
@@ -300,4 +299,3 @@ pub fn render_monster_markers(
         );
     }
 }
-

@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use avian2d::prelude::LinearVelocity;
 use bevy::{input::keyboard::Key, prelude::*};
-use bevy_egui::egui;
-use bevy_egui::egui::PointerButton;
+use bevy_egui::{egui, egui::PointerButton};
 use bevy_landmass::prelude::AgentTarget2d;
 
 use crate::{
@@ -70,8 +69,7 @@ impl PaletteRegistry {
         let trimmed = input.trim_end();
         self.commands.iter().any(|cmd| {
             matches!(cmd.kind, PaletteCommandKind::LocationTarget { .. })
-                && (trimmed == cmd.key
-                    || trimmed.starts_with(&format!("{} ", cmd.key)))
+                && (trimmed == cmd.key || trimmed.starts_with(&format!("{} ", cmd.key)))
         })
     }
 
@@ -98,7 +96,10 @@ impl PaletteRegistry {
                         }),
                         [k] | [k, _] if *k == cmd.key.as_str() => {
                             entries.extend(inventory_entries(
-                                &cmd.key, inventory, *item_filter, letter_map,
+                                &cmd.key,
+                                inventory,
+                                *item_filter,
+                                letter_map,
                             ));
                         }
                         _ => {}
@@ -283,7 +284,10 @@ pub fn open_palette_system(
                 .find_map(|k| if let Key::Character(ch) = k { Some(ch) } else { None })
                 .and_then(|ch| {
                     let is_monster = ch.len() == 1
-                        && ch.chars().next().is_some_and(|c| letter_map.entity_for_letter(c).is_some());
+                        && ch
+                            .chars()
+                            .next()
+                            .is_some_and(|c| letter_map.entity_for_letter(c).is_some());
                     if is_monster {
                         return Some(format!("g {ch} "));
                     }
@@ -318,7 +322,6 @@ pub fn open_palette_system(
         state.input.clear();
     }
 }
-
 
 pub fn palette_system(
     mut contexts: bevy_egui::EguiContexts,
@@ -412,12 +415,9 @@ pub fn palette_system(
             && !ctx.is_pointer_over_area()
         {
             let world_pos = ctx.pointer_latest_pos().and_then(|egui::Pos2 { x, y }| {
-                camera_query
-                    .single()
-                    .ok()
-                    .and_then(|(cam, cam_tf)| {
-                        cam.viewport_to_world_2d(cam_tf, bevy::math::Vec2::new(x, y)).ok()
-                    })
+                camera_query.single().ok().and_then(|(cam, cam_tf)| {
+                    cam.viewport_to_world_2d(cam_tf, bevy::math::Vec2::new(x, y)).ok()
+                })
             });
             if let Some(world_pos) = world_pos {
                 let key = palette.input.split_whitespace().next().unwrap_or("").to_string();
@@ -755,9 +755,8 @@ mod tests {
     fn quaff_uses_stable_letters() {
         let inv = test_inventory();
         let letter_map = test_letter_map();
-        let entries = inventory_entries(
-            "q", &inv, |i| matches!(i, ItemKind::Potion(_)), &letter_map,
-        );
+        let entries =
+            inventory_entries("q", &inv, |i| matches!(i, ItemKind::Potion(_)), &letter_map);
         assert_eq!(keys(&entries), ["q a", "q c"]);
         assert_eq!(entries[0].description, "2 Red potions");
         assert_eq!(entries[1].description, "a Blue potion");
@@ -767,9 +766,8 @@ mod tests {
     fn read_uses_stable_letters() {
         let inv = test_inventory();
         let letter_map = test_letter_map();
-        let entries = inventory_entries(
-            "r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map,
-        );
+        let entries =
+            inventory_entries("r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map);
         assert_eq!(keys(&entries), ["r b", "r d"]);
         assert_eq!(entries[0].description, "2 scrolls titled 'Readme'");
         assert_eq!(entries[1].description, "a scroll titled 'Agents'");
@@ -781,12 +779,24 @@ mod tests {
         let inv = test_inventory();
         let letter_map = test_letter_map();
 
-        let root_q = inventory_entries("q", &inv, |i| matches!(i, ItemKind::Potion(_)), &letter_map);
-        let root_r = inventory_entries("r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map);
+        let root_q =
+            inventory_entries("q", &inv, |i| matches!(i, ItemKind::Potion(_)), &letter_map);
+        let root_r =
+            inventory_entries("r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map);
         // Simulate root level: ["q", "r"] as non-complete stubs
         let root = vec![
-            PaletteEntry { key: "q".into(), description: "".into(), icon: None, is_complete: false },
-            PaletteEntry { key: "r".into(), description: "".into(), icon: None, is_complete: false },
+            PaletteEntry {
+                key: "q".into(),
+                description: "".into(),
+                icon: None,
+                is_complete: false,
+            },
+            PaletteEntry {
+                key: "r".into(),
+                description: "".into(),
+                icon: None,
+                is_complete: false,
+            },
         ];
         let after_down = press_down("", &root); // → "r"... wait, down from "" lands on first: "q"
         // Actually press_down("", &root) → current=0 (not found → 0), new=(0+1)%2=1 → "r"
@@ -813,8 +823,18 @@ mod tests {
 
         // Back to root after backspace: two commands available
         let root = vec![
-            PaletteEntry { key: "q".into(), description: "".into(), icon: None, is_complete: false },
-            PaletteEntry { key: "r".into(), description: "".into(), icon: None, is_complete: false },
+            PaletteEntry {
+                key: "q".into(),
+                description: "".into(),
+                icon: None,
+                is_complete: false,
+            },
+            PaletteEntry {
+                key: "r".into(),
+                description: "".into(),
+                icon: None,
+                is_complete: false,
+            },
         ];
         assert_eq!(root.len(), 2);
 

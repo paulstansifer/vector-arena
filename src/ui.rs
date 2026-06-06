@@ -96,7 +96,10 @@ impl Plugin for UiPlugin {
 fn ui_system(
     mut contexts: EguiContexts,
     mut ui_state: ResMut<UiState>,
-    player_query: Query<(&crate::monster::Stats, &Inventory, &Transform, Option<&StatusEffects>), With<Player>>,
+    player_query: Query<
+        (&crate::monster::Stats, &Inventory, &Transform, Option<&StatusEffects>),
+        With<Player>,
+    >,
     staircase_q: Query<&Transform, With<crate::Staircase>>,
     message_log: Res<MessageLog>,
     mut app_exit: MessageWriter<AppExit>,
@@ -128,7 +131,15 @@ fn ui_system(
         false
     };
 
-    let hud = render_hud(ctx, stats, &item_counts, player_effects, depth.0, near_staircase, &sprite_textures);
+    let hud = render_hud(
+        ctx,
+        stats,
+        &item_counts,
+        player_effects,
+        depth.0,
+        near_staircase,
+        &sprite_textures,
+    );
     if hud.toggle_menu {
         ui_state.menu_open = !ui_state.menu_open;
     }
@@ -426,9 +437,14 @@ fn show_world_entity_tooltip(
                     continue;
                 }
             }
-            make_egui_tooltip(ctx, egui::Id::new(("world_tooltip", tooltip.0.as_str())), mouse_pos, |ui| {
-                ui.label(&tooltip.0);
-            });
+            make_egui_tooltip(
+                ctx,
+                egui::Id::new(("world_tooltip", tooltip.0.as_str())),
+                mouse_pos,
+                |ui| {
+                    ui.label(&tooltip.0);
+                },
+            );
             return Ok(());
         }
     }

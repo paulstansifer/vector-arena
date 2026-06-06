@@ -20,9 +20,7 @@ use crate::{
     ui::MessageLog,
 };
 
-pub fn rotate_player_to_velocity(
-    mut query: Query<(&LinearVelocity, &mut Rotation), With<Player>>,
-) {
+pub fn rotate_player_to_velocity(mut query: Query<(&LinearVelocity, &mut Rotation), With<Player>>) {
     for (velocity, mut rotation) in &mut query {
         if velocity.length_squared() > 1.0 {
             // Wizard sprite faces up (+Y); atan2 gives angle from +X, so offset by -PI/2.
@@ -310,7 +308,10 @@ pub fn execute_descend_command(
     palette.pending_command = None;
     let Ok(player_tf) = player_query.single() else { return };
     let player_pos = player_tf.translation.truncate();
-    if staircase_query.iter().any(|tf| tf.translation.truncate().distance(player_pos) <= DESCEND_RANGE) {
+    if staircase_query
+        .iter()
+        .any(|tf| tf.translation.truncate().distance(player_pos) <= DESCEND_RANGE)
+    {
         next_state.set(GameState::Descend);
     } else {
         message_log.push("You are not near the staircase.".to_string());
@@ -321,7 +322,14 @@ pub fn directional_move_system(
     keyboard: Res<ButtonInput<Key>>,
     palette: Res<CommandPaletteState>,
     mut player_query: Query<
-        (Entity, &Transform, &mut LinearVelocity, &mut MoveTarget, &mut AgentTarget2d, Option<&StatusEffects>),
+        (
+            Entity,
+            &Transform,
+            &mut LinearVelocity,
+            &mut MoveTarget,
+            &mut AgentTarget2d,
+            Option<&StatusEffects>,
+        ),
         With<Player>,
     >,
     mut commands: Commands,
@@ -362,4 +370,3 @@ pub fn directional_move_system(
     *agent_target = AgentTarget2d::None;
     commands.entity(entity).remove::<ExplorationGoal>();
 }
-

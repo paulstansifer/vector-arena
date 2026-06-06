@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use bevy_mesh::VertexAttributeValues;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
+use bevy_mesh::VertexAttributeValues;
 use bevy_svg::prelude::{Svg, Svg2d};
 
 use crate::item::{ALL_ITEM_KINDS, Item, ItemKind, PotionColor, ScrollName};
@@ -87,7 +87,8 @@ fn parameterize_svg(bytes: &[u8], param: Option<&SpriteParam>) -> Vec<u8> {
             s = s.replace("#ff00ff", hex).replace("#FF00FF", hex);
         }
         SpriteParam::Text(text) => {
-            s = s.replace("&amp;", text)
+            s = s
+                .replace("&amp;", text)
                 .replace("font-family:'Arial'", "font-family:'Liberation Sans'");
         }
     }
@@ -171,7 +172,10 @@ fn load_svg_handle(
     Some(handle)
 }
 
-fn rasterize_svg_centered(bytes: &[u8], options: &resvg::usvg::Options) -> Option<egui::ColorImage> {
+fn rasterize_svg_centered(
+    bytes: &[u8],
+    options: &resvg::usvg::Options,
+) -> Option<egui::ColorImage> {
     let tree = match resvg::usvg::Tree::from_data(bytes, options) {
         Ok(t) => t,
         Err(e) => {

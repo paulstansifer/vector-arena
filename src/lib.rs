@@ -37,11 +37,6 @@ pub struct Staircase;
 #[derive(bevy::prelude::Component)]
 pub struct StaircaseFogCopy;
 
-/// Marker on a `StaircaseFogCopy` entity before its mesh/material have been wired up.
-/// Removed once `init_staircase_fog_copies` runs.
-#[derive(bevy::prelude::Component)]
-pub struct FogCopyNeedsInit;
-
 #[derive(bevy::prelude::Resource)]
 pub struct DungeonDepth(pub u32);
 

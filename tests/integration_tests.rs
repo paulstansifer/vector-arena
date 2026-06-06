@@ -29,7 +29,7 @@ fn missile_hits_monster_at_various_distances() {
     use vector_arena::{
         command_palette::LetterMap,
         effects::projectile::{
-            MagicMissile, MISSILE_SPEED, apply_damage_on_hit, apply_hit_flash_on_hit,
+            MISSILE_SPEED, MagicMissile, apply_damage_on_hit, apply_hit_flash_on_hit,
             apply_knockback_on_hit, detect_missile_hits,
         },
         monster::{Monster, Stats},
@@ -107,8 +107,8 @@ fn missile_hits_monster_at_various_distances() {
 
     assert!(
         failures.is_empty(),
-        "missile missed the monster at distances {failures:?}\n\
-         (missile travels ~{:.0} units/frame; hit window is ~14 units wide)",
+        "missile missed the monster at distances {failures:?}\n(missile travels ~{:.0} \
+         units/frame; hit window is ~14 units wide)",
         MISSILE_SPEED / 60.0,
     );
 }

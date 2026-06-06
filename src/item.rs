@@ -5,7 +5,6 @@
 use avian2d::prelude::{LinearVelocity, Position};
 use bevy::{prelude::*, time::Real};
 
-
 use crate::{
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     dungeon::terrain::{DungeonState, random_in_playable_area},
@@ -181,7 +180,15 @@ fn find_and_remove_item(
 pub fn execute_item_command(
     mut palette: ResMut<CommandPaletteState>,
     mut player_query: Query<
-        (Entity, &mut Inventory, &mut Stats, &mut Position, &mut Transform, &mut LinearVelocity, &mut StatusEffects),
+        (
+            Entity,
+            &mut Inventory,
+            &mut Stats,
+            &mut Position,
+            &mut Transform,
+            &mut LinearVelocity,
+            &mut StatusEffects,
+        ),
         (With<Player>, Without<Monster>),
     >,
     mut monster_status_query: Query<&mut StatusEffects, (With<Monster>, Without<Player>)>,
@@ -192,8 +199,15 @@ pub fn execute_item_command(
 ) {
     let Some(cmd) = palette.pending_command.take() else { return };
 
-    let Ok((entity, mut inventory, mut stats, mut position, mut transform, mut velocity, mut player_effects)) =
-        player_query.single_mut()
+    let Ok((
+        entity,
+        mut inventory,
+        mut stats,
+        mut position,
+        mut transform,
+        mut velocity,
+        mut player_effects,
+    )) = player_query.single_mut()
     else {
         return;
     };
@@ -224,7 +238,9 @@ pub fn execute_item_command(
                 |i| matches!(i, ItemKind::Scroll(_)),
                 item_kind,
             ) {
-                if let Some(dest) = random_in_playable_area(&dungeon_state.playable_area, &mut rand::thread_rng()) {
+                if let Some(dest) =
+                    random_in_playable_area(&dungeon_state.playable_area, &mut rand::thread_rng())
+                {
                     position.0 = dest;
                     transform.translation.x = dest.x;
                     transform.translation.y = dest.y;
@@ -239,4 +255,3 @@ pub fn execute_item_command(
         }
     }
 }
-

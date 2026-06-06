@@ -5,9 +5,6 @@
 // FOV each frame. `Opaque`/`OpaqueVertices` mark sight-blocking entities; doors use local-space
 // polygon vertices so they cast correct shadows as they swing.
 use bevy::prelude::*;
-use bevy::asset::RenderAssetUsages;
-use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
-use bevy_svg::prelude::{Svg, Svg2d};
 use geo::{
     BooleanOps, Buffer, Contains, Intersects, Line as GeoLine, LineString, MultiPolygon, Polygon,
     Simplify,
@@ -15,7 +12,7 @@ use geo::{
 use std::ops::Range;
 
 use crate::{
-    FogCopyNeedsInit, GameState, Staircase, StaircaseFogCopy, WorldBounds,
+    GameState, Staircase, StaircaseFogCopy, WorldBounds,
     dungeon::terrain::{self, DungeonState},
     player::Player,
     status_effect::StatusEffects,
@@ -290,95 +287,28 @@ pub fn update_fov(
     *meshes.get_mut(&never_explored_mesh_handle.0).unwrap() = new_ne;
 }
 
-/// Once the staircase's Svg2d is available, equip the fog copy with its own Mesh2d
-/// (empty initially) and the same SVG as its material. After this runs, the fog copy
-/// owns its mesh independently from the staircase.
-pub fn init_staircase_fog_copies(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    fog_copy_query: Query<Entity, (With<StaircaseFogCopy>, With<FogCopyNeedsInit>)>,
-    staircase_query: Query<&Svg2d, With<Staircase>>,
-) {
-    let Ok(svg2d) = staircase_query.single() else { return };
-    let svg_handle = svg2d.0.clone();
-
-    for entity in &fog_copy_query {
-        let fog_mesh_handle = meshes.add(Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::default(),
-        ));
-        commands.entity(entity)
-            .insert((
-                Mesh2d(fog_mesh_handle),
-                MeshMaterial2d(svg_handle.clone()),
-            ))
-            .remove::<FogCopyNeedsInit>();
-    }
-}
-
-/// Each frame, rewrites the fog copy mesh to contain only those triangles from the
-/// staircase SVG whose centroid (in world space) lies outside the current FOV polygon.
-/// Triangles inside FOV are dropped, so the fog copy never renders over visible geometry.
+/// Each frame, computes the staircase's bounding square minus the current FOV polygon
+/// and writes the result into the fog copy's mesh. When fully in FOV the result is empty
+/// (nothing renders); when fully in fog it's the full square; at the boundary it's exact.
 pub fn update_staircase_fog_copy(
-    staircase_query: Query<(&Transform, &Svg2d), With<Staircase>>,
-    fog_copy_query: Query<&Mesh2d, (With<StaircaseFogCopy>, Without<FogCopyNeedsInit>)>,
-    svgs: Res<Assets<Svg>>,
+    staircase_query: Query<&Transform, With<Staircase>>,
+    fog_copy_query: Query<&Mesh2d, With<StaircaseFogCopy>>,
     mut meshes: ResMut<Assets<Mesh>>,
     current_fov: Res<CurrentFovState>,
 ) {
-    let Ok((stair_tf, svg2d)) = staircase_query.single() else { return };
+    let Ok(stair_tf) = staircase_query.single() else { return };
     let Ok(fog_mesh_2d) = fog_copy_query.single() else { return };
-    let Some(svg) = svgs.get(&svg2d.0) else { return };
 
-    // Clone the triangle data out of the source mesh before taking a mutable borrow.
-    let (src_positions, src_colors, src_indices) = {
-        let src = match meshes.get(&svg.mesh) {
-            Some(m) => m,
-            None => return,
-        };
-        let positions = match src.attribute(Mesh::ATTRIBUTE_POSITION) {
-            Some(VertexAttributeValues::Float32x3(v)) => v.clone(),
-            _ => return,
-        };
-        let colors = match src.attribute(Mesh::ATTRIBUTE_COLOR) {
-            Some(VertexAttributeValues::Float32x4(v)) => v.clone(),
-            _ => return,
-        };
-        let indices = match src.indices() {
-            Some(Indices::U32(v)) => v.clone(),
-            _ => return,
-        };
-        (positions, colors, indices)
-    };
-
-    let mut new_positions: Vec<[f32; 3]> = Vec::new();
-    let mut new_colors: Vec<[f32; 4]> = Vec::new();
-    let mut new_indices: Vec<u32> = Vec::new();
-
-    let scale = stair_tf.scale.truncate();
-    let origin = stair_tf.translation.truncate();
-
-    for tri in src_indices.chunks(3) {
-        let [i, j, k] = [tri[0] as usize, tri[1] as usize, tri[2] as usize];
-        let p0 = Vec2::new(src_positions[i][0], src_positions[i][1]);
-        let p1 = Vec2::new(src_positions[j][0], src_positions[j][1]);
-        let p2 = Vec2::new(src_positions[k][0], src_positions[k][1]);
-
-        let centroid_local = (p0 + p1 + p2) / 3.0;
-        let centroid_world = origin + centroid_local * scale;
-
-        if !current_fov.0.contains(&geo::Point::new(centroid_world.x, centroid_world.y)) {
-            let base = new_positions.len() as u32;
-            new_positions.extend([src_positions[i], src_positions[j], src_positions[k]]);
-            new_colors.extend([src_colors[i], src_colors[j], src_colors[k]]);
-            new_indices.extend([base, base + 1, base + 2]);
-        }
-    }
+    let pos = stair_tf.translation.truncate();
+    let half = 11.0_f32;
+    let staircase_sq = MultiPolygon::new(vec![
+        geo::Rect::new((pos.x - half, pos.y - half), (pos.x + half, pos.y + half)).to_polygon(),
+    ]);
+    // Awkwardly duplicate the hack we do to actually display the FOV:
+    let fog_area = staircase_sq.difference(&current_fov.0.buffer(-1.0).buffer(5.0));
 
     if let Some(fog_mesh) = meshes.get_mut(&fog_mesh_2d.0) {
-        fog_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, new_positions);
-        fog_mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, new_colors);
-        fog_mesh.insert_indices(Indices::U32(new_indices));
+        *fog_mesh = terrain::geometry_to_mesh(&fog_area);
     }
 }
 
