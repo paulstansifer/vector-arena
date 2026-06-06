@@ -7,11 +7,11 @@
   * Investigate `validate()` failures in [nav.rs](src/nav.rs) when terrain is destroyed.
   * Make `ItemKind` data-driven instead of a hardcoded enum (see the TODO in [item.rs](src/item.rs)).
   * I've seen `buffer_with_style` in fov.rs crash (I was jammed against a door; no idea how to reproduce). Let's test when `buffer` crashes and see if we can prevent it.
+  * Sometimes bouncing off a monster causes the player to wedge into terrain and get stuck (perhaps just enable terrain collision?)
   * Items should stay on their current letter (either Nethack-style or Angband-style)
   * "i" should look at all inventory (and give the option of using any items)
-  * "d" should descend
-  * "." should cancel movement
   * Use less than half a megabyte worth of font for the scrolls.
+  
 
   # Larger projects
   * Think about how to break this into a library + game definition

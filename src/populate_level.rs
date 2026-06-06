@@ -8,7 +8,7 @@ use geo::{MultiPolygon, Rect};
 use rand::prelude::*;
 
 use crate::{
-    AGENT_RADIUS, GameLayer, GameState, Staircase,
+    AGENT_RADIUS, FogCopyNeedsInit, GameLayer, GameState, Staircase, StaircaseFogCopy,
     dungeon::terrain::random_in_playable_area,
     effects::projectile::MonsterShootTimer,
     fov,
@@ -150,6 +150,14 @@ fn spawn_staircase(
         Staircase,
         SvgSprite { svg_path: "sprites/hatch.svg".into(), param: None },
         Transform::from_translation(position.extend(fov::ON_FLOOR_Z))
+            .with_scale(Vec3::splat(0.4)),
+        Visibility::default(),
+    ));
+    commands.spawn((
+        DespawnOnExit(GameState::InLevel),
+        StaircaseFogCopy,
+        FogCopyNeedsInit,
+        Transform::from_translation(position.extend(fov::TERRAIN_Z))
             .with_scale(Vec3::splat(0.4)),
         Visibility::default(),
     ));

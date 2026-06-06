@@ -5,6 +5,9 @@
 // FOV each frame. `Opaque`/`OpaqueVertices` mark sight-blocking entities; doors use local-space
 // polygon vertices so they cast correct shadows as they swing.
 use bevy::prelude::*;
+use bevy::asset::RenderAssetUsages;
+use bevy_mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
+use bevy_svg::prelude::{Svg, Svg2d};
 use geo::{
     BooleanOps, Buffer, Contains, Intersects, Line as GeoLine, LineString, MultiPolygon, Polygon,
     Simplify,
@@ -12,7 +15,7 @@ use geo::{
 use std::ops::Range;
 
 use crate::{
-    GameState, Staircase, WorldBounds,
+    FogCopyNeedsInit, GameState, Staircase, StaircaseFogCopy, WorldBounds,
     dungeon::terrain::{self, DungeonState},
     player::Player,
     status_effect::StatusEffects,
@@ -229,7 +232,6 @@ pub fn update_fov(
     fov_mesh_query: Query<&Mesh2d, With<FovMeshMarker>>,
     never_explored_query: Query<&Mesh2d, (With<NeverExploredMeshMarker>, Without<FovMeshMarker>)>,
     opaque_query: Query<(&GlobalTransform, &OpaqueVertices)>,
-    staircase_query: Query<&Transform, With<Staircase>>,
     mut meshes: ResMut<Assets<Mesh>>,
     dungeon_state: Res<DungeonState>,
     bounds: Res<WorldBounds>,
@@ -274,23 +276,12 @@ pub fn update_fov(
     }
     let obstacles = geo::MultiPolygon::new(obstacle_polys);
 
-    // If the staircase position is no longer in the never-explored area it has been seen
-    // before; pass it so the fog mesh gets a hole there revealing it below movable things.
-    let seen_staircase: Vec<Vec2> = staircase_query
-        .iter()
-        .filter_map(|tf| {
-            let p = tf.translation.truncate();
-            if !exploration_state.0.contains(&geo::Point::new(p.x, p.y)) { Some(p) } else { None }
-        })
-        .collect();
-
     let (new_exp, new_fov, new_ne, new_fov_poly) = update_fov_from_pov(
         origin,
         radius,
         &obstacles,
         &bounds,
         &exploration_state.0,
-        &seen_staircase,
     );
 
     exploration_state.0 = new_exp;
@@ -299,13 +290,104 @@ pub fn update_fov(
     *meshes.get_mut(&never_explored_mesh_handle.0).unwrap() = new_ne;
 }
 
+/// Once the staircase's Svg2d is available, equip the fog copy with its own Mesh2d
+/// (empty initially) and the same SVG as its material. After this runs, the fog copy
+/// owns its mesh independently from the staircase.
+pub fn init_staircase_fog_copies(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    fog_copy_query: Query<Entity, (With<StaircaseFogCopy>, With<FogCopyNeedsInit>)>,
+    staircase_query: Query<&Svg2d, With<Staircase>>,
+) {
+    let Ok(svg2d) = staircase_query.single() else { return };
+    let svg_handle = svg2d.0.clone();
+
+    for entity in &fog_copy_query {
+        let fog_mesh_handle = meshes.add(Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        ));
+        commands.entity(entity)
+            .insert((
+                Mesh2d(fog_mesh_handle),
+                MeshMaterial2d(svg_handle.clone()),
+            ))
+            .remove::<FogCopyNeedsInit>();
+    }
+}
+
+/// Each frame, rewrites the fog copy mesh to contain only those triangles from the
+/// staircase SVG whose centroid (in world space) lies outside the current FOV polygon.
+/// Triangles inside FOV are dropped, so the fog copy never renders over visible geometry.
+pub fn update_staircase_fog_copy(
+    staircase_query: Query<(&Transform, &Svg2d), With<Staircase>>,
+    fog_copy_query: Query<&Mesh2d, (With<StaircaseFogCopy>, Without<FogCopyNeedsInit>)>,
+    svgs: Res<Assets<Svg>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    current_fov: Res<CurrentFovState>,
+) {
+    let Ok((stair_tf, svg2d)) = staircase_query.single() else { return };
+    let Ok(fog_mesh_2d) = fog_copy_query.single() else { return };
+    let Some(svg) = svgs.get(&svg2d.0) else { return };
+
+    // Clone the triangle data out of the source mesh before taking a mutable borrow.
+    let (src_positions, src_colors, src_indices) = {
+        let src = match meshes.get(&svg.mesh) {
+            Some(m) => m,
+            None => return,
+        };
+        let positions = match src.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(VertexAttributeValues::Float32x3(v)) => v.clone(),
+            _ => return,
+        };
+        let colors = match src.attribute(Mesh::ATTRIBUTE_COLOR) {
+            Some(VertexAttributeValues::Float32x4(v)) => v.clone(),
+            _ => return,
+        };
+        let indices = match src.indices() {
+            Some(Indices::U32(v)) => v.clone(),
+            _ => return,
+        };
+        (positions, colors, indices)
+    };
+
+    let mut new_positions: Vec<[f32; 3]> = Vec::new();
+    let mut new_colors: Vec<[f32; 4]> = Vec::new();
+    let mut new_indices: Vec<u32> = Vec::new();
+
+    let scale = stair_tf.scale.truncate();
+    let origin = stair_tf.translation.truncate();
+
+    for tri in src_indices.chunks(3) {
+        let [i, j, k] = [tri[0] as usize, tri[1] as usize, tri[2] as usize];
+        let p0 = Vec2::new(src_positions[i][0], src_positions[i][1]);
+        let p1 = Vec2::new(src_positions[j][0], src_positions[j][1]);
+        let p2 = Vec2::new(src_positions[k][0], src_positions[k][1]);
+
+        let centroid_local = (p0 + p1 + p2) / 3.0;
+        let centroid_world = origin + centroid_local * scale;
+
+        if !current_fov.0.contains(&geo::Point::new(centroid_world.x, centroid_world.y)) {
+            let base = new_positions.len() as u32;
+            new_positions.extend([src_positions[i], src_positions[j], src_positions[k]]);
+            new_colors.extend([src_colors[i], src_colors[j], src_colors[k]]);
+            new_indices.extend([base, base + 1, base + 2]);
+        }
+    }
+
+    if let Some(fog_mesh) = meshes.get_mut(&fog_mesh_2d.0) {
+        fog_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, new_positions);
+        fog_mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, new_colors);
+        fog_mesh.insert_indices(Indices::U32(new_indices));
+    }
+}
+
 pub fn update_fov_from_pov(
     origin: Vec2,
     radius: f32,
     solid_rock: &MultiPolygon<f32>,
     bounds: &WorldBounds,
     exploration: &MultiPolygon<f32>,
-    remembered_positions: &[Vec2],
 ) -> (MultiPolygon<f32>, Mesh, Mesh, MultiPolygon<f32>) {
     let fov_poly = fov_arc(origin, radius, None, solid_rock);
     let fov_multi = MultiPolygon::new(vec![fov_poly]);
@@ -319,17 +401,7 @@ pub fn update_fov_from_pov(
 
     // The negative buffer is a bit of a hack to remove little erroneous rays that sometimes sneak through the terrain.
     // The positive buffer allows looking at the walls.
-    let mut dark_area = bg_poly.difference(&fov_multi.buffer(-1.0).buffer(5.0));
-
-    // Cut holes in the fog at positions of previously-seen floor markers so they remain
-    // visible through the grey overlay even when outside the current FOV.
-    for &pos in remembered_positions {
-        let half = 11.0_f32;
-        let hole = MultiPolygon::new(vec![
-            geo::Rect::new((pos.x - half, pos.y - half), (pos.x + half, pos.y + half)).to_polygon(),
-        ]);
-        dark_area = dark_area.difference(&hole);
-    }
+    let dark_area = bg_poly.difference(&fov_multi.buffer(-1.0).buffer(5.0));
 
     (
         exploration.intersection(&dark_area).simplify(1e-1),

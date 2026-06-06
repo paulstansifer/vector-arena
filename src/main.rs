@@ -34,7 +34,7 @@ use vector_arena::{
         rotate_player_to_velocity, set_target_on_click,
     },
     populate_level,
-    sprite::SpritePlugin,
+    sprite::{self, SpritePlugin},
     status_effect::{apply_confusion_to_velocity, tick_status_effects},
     time_scale::manage_time_scale,
     ui::{MessageLog, UiPlugin, enable_ui_input_absorption},
@@ -87,6 +87,8 @@ fn main() {
         .add_systems(Update, apply_confusion_to_velocity.after(nav::apply_agent_velocity).after(directional_move_system))
         .add_systems(Update, nav::sync_island_nav_mesh)
         .add_systems(Update, fov::update_fov)
+        .add_systems(Update, fov::init_staircase_fog_copies.after(sprite::insert_svg_components))
+        .add_systems(Update, fov::update_staircase_fog_copy.after(fov::update_fov).after(fov::init_staircase_fog_copies))
         .add_systems(Update, handle_right_click_excavation.run_if(not(egui_wants_any_pointer_input)))
         .add_systems(Update, sync_dungeon_to_entities)
         .add_systems(Update, execute_missile_command)
