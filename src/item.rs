@@ -191,7 +191,6 @@ pub fn execute_item_command(
         ),
         (With<Player>, Without<Monster>),
     >,
-    mut monster_status_query: Query<&mut StatusEffects, (With<Monster>, Without<Player>)>,
     dungeon_state: Res<DungeonState>,
     mut log: ResMut<MessageLog>,
     mut commands: Commands,

@@ -6,8 +6,7 @@
 // polygon vertices so they cast correct shadows as they swing.
 use bevy::prelude::*;
 use geo::{
-    BooleanOps, Buffer, Contains, Intersects, Line as GeoLine, LineString, MultiPolygon, Polygon,
-    Simplify,
+    BooleanOps, Buffer, Intersects, Line as GeoLine, LineString, MultiPolygon, Polygon, Simplify,
 };
 use std::ops::Range;
 
@@ -273,13 +272,8 @@ pub fn update_fov(
     }
     let obstacles = geo::MultiPolygon::new(obstacle_polys);
 
-    let (new_exp, new_fov, new_ne, new_fov_poly) = update_fov_from_pov(
-        origin,
-        radius,
-        &obstacles,
-        &bounds,
-        &exploration_state.0,
-    );
+    let (new_exp, new_fov, new_ne, new_fov_poly) =
+        update_fov_from_pov(origin, radius, &obstacles, &bounds, &exploration_state.0);
 
     exploration_state.0 = new_exp;
     current_fov.0 = new_fov_poly;

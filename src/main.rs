@@ -28,12 +28,12 @@ use vector_arena::{
     item::{Inventory, animate_pickup, execute_item_command, pickup_items, register_item_commands},
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
+    objects::{animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions},
     player::{
         Player, advance_exploration, directional_move_system, execute_descend_command,
         execute_stop_command, move_player, register_player_commands, rotate_player_to_velocity,
         set_target_on_click,
     },
-    objects::{animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions},
     populate_level,
     sprite::SpritePlugin,
     status_effect::{apply_confusion_to_velocity, tick_status_effects},

@@ -291,11 +291,9 @@ pub fn explode_sigil(
             }
         }
 
-        let blast_center = triggered
-            .iter()
-            .map(|(_, pos, _, _)| *pos)
-            .fold(Vec2::ZERO, |acc, p| acc + p)
-            / triggered.len() as f32;
+        let blast_center =
+            triggered.iter().map(|(_, pos, _, _)| *pos).fold(Vec2::ZERO, |acc, p| acc + p)
+                / triggered.len() as f32;
         subtract_polygon_from_terrain(
             &mut commands,
             &combined,
