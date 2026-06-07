@@ -14,6 +14,7 @@ use crate::{
     fov,
     item::{ALL_ITEM_KINDS, Inventory, Item, ItemKind, item_name},
     monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterDrop, MonsterState, Stats},
+    objects::spawn_unstable_sigil,
     player::{MoveTarget, PLAYER_SPEED, Player},
     sprite::{SvgSprite, sprite_spec},
     status_effect::StatusEffects,
@@ -143,6 +144,12 @@ pub fn populate(
         ));
     }
 
+    let sigil_count = rng.gen_range(1..=5);
+    for _ in 0..sigil_count {
+        let Some(pt) = random_in_playable_area(playable_area, &mut rng) else { continue };
+        spawn_unstable_sigil(commands, meshes, materials, pt);
+    }
+
     spawn_staircase(commands, meshes, materials, staircase_position);
 }
 
@@ -173,6 +180,6 @@ fn spawn_staircase(
         Mesh2d(fog_mesh),
         MeshMaterial2d(fog_color),
         // We need to subtract the FOV, so this needs an absolute location
-        Transform::from_translation(Vec3::new(0.0,0.0,fov::TERRAIN_Z)),
+        Transform::from_translation(Vec3::new(0.0, 0.0, fov::TERRAIN_Z)),
     ));
 }

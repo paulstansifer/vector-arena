@@ -33,6 +33,7 @@ use vector_arena::{
         execute_stop_command, move_player, register_player_commands, rotate_player_to_velocity,
         set_target_on_click,
     },
+    objects::{animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions},
     populate_level,
     sprite::SpritePlugin,
     status_effect::{apply_confusion_to_velocity, tick_status_effects},
@@ -102,6 +103,10 @@ fn main() {
         .add_systems(Update, update_hit_flash.before(detect_missile_hits))
         .add_systems(Update, detect_missile_hits.before(spawn_missile_trails))
         .add_systems(Update, tick_knockback_cooldowns)
+        .add_systems(Update, animate_sigil)
+        .add_systems(Update, detect_sigil_contact)
+        .add_systems(Update, explode_sigil.after(detect_sigil_contact))
+        .add_systems(Update, tick_sigil_explosions)
         .add_systems(Update, pickup_items)
         .add_systems(Update, animate_pickup)
         .add_systems(Update, manage_time_scale.after(move_player))

@@ -60,6 +60,9 @@ pub fn create_circle_polygon(center: Vec2, radius: f32, points: usize) -> Polygo
 /// Subtracts an input polygon from the terrain geometry, updates the playable area,
 /// regenerates the visuals, collider, and navmesh, and spawns dynamic Rubble objects
 /// from the intersection.
+/// `outward_impulse`: if `Some((origin, speed))`, each rubble piece receives an
+/// additional velocity directed away from `origin` at the given speed, on top of
+/// the normal small random tumble.
 pub fn subtract_polygon_from_terrain(
     commands: &mut Commands,
     input_polygon: &MultiPolygon<f32>,
@@ -70,6 +73,7 @@ pub fn subtract_polygon_from_terrain(
     meshes: &mut Assets<Mesh>,
     nav_meshes: &mut Assets<NavMesh2d>,
     rubble_material: &Handle<ColorMaterial>,
+    outward_impulse: Option<(Vec2, f32)>,
 ) {
     // Calculate the intersection of the input polygon and the current terrain walls
     let intersection = dungeon_state.solid_rock.intersection(input_polygon);
@@ -209,9 +213,12 @@ pub fn subtract_polygon_from_terrain(
 
                     let mut rng = rand::thread_rng();
                     let angle: f32 = rng.gen_range(0.0..std::f32::consts::TAU);
-                    let speed: f32 = rng.gen_range(10.0..30.0);
-                    let velocity =
-                        LinearVelocity(Vec2::new(angle.cos() * speed, angle.sin() * speed));
+                    let random_speed: f32 = rng.gen_range(10.0..30.0);
+                    let random_vel = Vec2::new(angle.cos(), angle.sin()) * random_speed;
+                    let directed_vel = outward_impulse.map_or(Vec2::ZERO, |(origin, speed)| {
+                        (center - origin).normalize_or_zero() * speed
+                    });
+                    let velocity = LinearVelocity(random_vel + directed_vel);
 
                     commands.spawn((
                         DespawnOnExit(GameState::InLevel),
@@ -296,5 +303,6 @@ pub fn handle_right_click_excavation(
         &mut meshes,
         &mut nav_meshes,
         &rubble_material.0,
+        None,
     );
 }
