@@ -77,7 +77,6 @@ fn test_fov_point_explosion() {
             &terrain_geometry.solid_rock,
             &world_bounds,
             &exploration_state.0,
-            &[],
         );
         exploration_state.0 = new_exp;
         if let Some(pw) = &pw {
@@ -96,7 +95,6 @@ fn test_fov_point_explosion() {
                 &terrain_geometry.solid_rock,
                 &world_bounds,
                 &exploration_state.0,
-                &[],
             );
             exploration_state.0 = new_exp;
             if let Some(pw) = &pw {

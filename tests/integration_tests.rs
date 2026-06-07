@@ -75,7 +75,7 @@ fn missile_hits_monster_at_various_distances() {
         // Missile at (-distance, 0) aimed right (+X) toward the monster.
         let missile_vel = Vec2::new(MISSILE_SPEED, 0.0);
         app.world_mut().spawn((
-            MagicMissile::new(true, Vec2::new(-distance, 0.0), missile_vel),
+            MagicMissile::new(true, Vec2::new(-distance, 0.0), missile_vel, 1.0),
             RigidBody::Dynamic,
             Collider::circle(4.0),
             CollisionLayers::new(GameLayer::Missile, GameLayer::Wall),
