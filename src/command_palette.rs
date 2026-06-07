@@ -547,6 +547,16 @@ fn render_command_palette(
 
             ui.separator();
 
+            if targeting {
+                ui.label(
+                    egui::RichText::new("select an onscreen target letter or click to target")
+                        .italics()
+                        .color(egui::Color32::from_rgb(140, 140, 170))
+                        .size(11.0),
+                );
+                return;
+            }
+
             if completions.is_empty() {
                 ui.label(
                     egui::RichText::new("nothing applicable").italics().color(egui::Color32::WHITE),
@@ -562,8 +572,7 @@ fn render_command_palette(
             for (i, entry) in completions.iter().enumerate() {
                 let is_selected = selected_idx == i;
                 let row_size = egui::vec2(ui.available_width(), row_height);
-                let (row_rect, row_response) =
-                    ui.allocate_exact_size(row_size, egui::Sense::click());
+                let (row_rect, _) = ui.allocate_exact_size(row_size, egui::Sense::hover());
 
                 if is_selected {
                     ui.painter().rect_filled(
@@ -598,10 +607,17 @@ fn render_command_palette(
                     is_selected,
                 ));
 
-                if row_response.hovered() {
+                // Use raw pointer input rather than row_response.hovered()/clicked():
+                // egui's Label widget steals hover ownership, which would cause
+                // response.clicked() to silently return false over the text area.
+                let (hovered, clicked) = ui.input(|inp| {
+                    let in_row = inp.pointer.hover_pos().is_some_and(|p| row_rect.contains(p));
+                    (in_row, in_row && inp.pointer.button_clicked(PointerButton::Primary))
+                });
+                if hovered {
                     hovered_idx = Some(i);
                 }
-                if row_response.clicked() {
+                if clicked {
                     clicked_idx = Some(i);
                 }
             }
@@ -616,16 +632,6 @@ fn render_command_palette(
                 } else {
                     PaletteUiAction::Navigate(entry.key.clone() + " ")
                 };
-            }
-
-            if targeting {
-                ui.separator();
-                ui.label(
-                    egui::RichText::new("select an onscreen target letter or click to target")
-                        .italics()
-                        .color(egui::Color32::from_rgb(140, 140, 170))
-                        .size(11.0),
-                );
             }
         });
 
