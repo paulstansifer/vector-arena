@@ -19,7 +19,7 @@ const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
 const DOOR_PROB: f32 = 0.25 * 0.0;
 const DOUBLE_DOOR_PROB: f32 = 0.75 * 0.0;
 /// Probability a room gets a special variant (high for testing)
-const SPECIAL_ROOM_PROB: f32 = 0.4;
+const SPECIAL_ROOM_PROB: f32 = 0.15;
 
 pub struct TerrainGeometry {
     pub solid_rock: MultiPolygon<f32>,
@@ -228,6 +228,63 @@ fn is_double_width_corridor_connection(
     false
 }
 
+const MERGE_PROB: f64 = 0.20;
+
+// Returns a set of connection-point keys (x_bits, y_bits) that should be fully opened between
+// two adjacent rooms, removing the wall between them.
+fn find_merged_room_connections(
+    bsp: &[(Partition, PartitionRole)],
+    rng: &mut impl Rng,
+) -> HashSet<(u32, u32)> {
+    let mut merged = HashSet::new();
+    for i in 0..bsp.len() {
+        if !matches!(bsp[i].1, PartitionRole::Room { .. }) {
+            continue;
+        }
+        for j in (i + 1)..bsp.len() {
+            if !matches!(bsp[j].1, PartitionRole::Room { .. }) {
+                continue;
+            }
+            let conns_i = partition_connections(&bsp[i].0);
+            let conns_j = partition_connections(&bsp[j].0);
+            let shared: Vec<_> = conns_i
+                .iter()
+                .filter(|c1| conns_j.iter().any(|c2| c1.x == c2.x && c1.y == c2.y))
+                .collect();
+            if !shared.is_empty() && rng.gen_bool(MERGE_PROB) {
+                for conn in shared {
+                    merged.insert((conn.x.to_bits(), conn.y.to_bits()));
+                }
+            }
+        }
+    }
+    merged
+}
+
+fn is_merged_connection(connection: &ConnectionPoint, merged: &HashSet<(u32, u32)>) -> bool {
+    merged.contains(&(connection.x.to_bits(), connection.y.to_bits()))
+}
+
+// Returns a polygon that fills the entire gap from the room's edge to the partition boundary on
+// the given connection side, spanning the full perpendicular extent of the room.
+fn open_full_wall(room: &Rect<f32>, connection: ConnectionPoint) -> Polygon<f32> {
+    let rect = match connection.side {
+        ConnectionSide::Left => {
+            Rect::new((connection.x, room.min().y), (room.min().x, room.max().y))
+        }
+        ConnectionSide::Right => {
+            Rect::new((room.max().x, room.min().y), (connection.x, room.max().y))
+        }
+        ConnectionSide::Bottom => {
+            Rect::new((room.min().x, connection.y), (room.max().x, room.min().y))
+        }
+        ConnectionSide::Top => {
+            Rect::new((room.min().x, room.max().y), (room.max().x, connection.y))
+        }
+    };
+    rect.to_polygon()
+}
+
 // For rooms, shrink at least PADDING away from the edges (respecting MIN_ROOM_SIZE), adding hallways out to the edge.
 // For corridors, if there are two connections, draw a straight hallway between them; otherwise, draw hallways from all connections to the center point.
 // Returns rooms, a multipolygon representing passable space, doors, and corridor endpoints.
@@ -235,6 +292,8 @@ fn render(
     bsp: &[(Partition, PartitionRole)],
     rng: &mut impl Rng,
 ) -> (Vec<Rect<f32>>, MultiPolygon<f32>, Vec<DoorGeometry>, Vec<Vec2>) {
+    let merged_connections = find_merged_room_connections(bsp, rng);
+
     let mut rooms = Vec::new();
     let mut playables = MultiPolygon::new(vec![]);
     let mut doors = Vec::new();
@@ -265,23 +324,32 @@ fn render(
                         for connection in
                             partition_connections(partition).into_iter().filter(is_live)
                         {
-                            let is_double = is_double_width_corridor_connection(&connection, bsp);
-                            let width =
-                                if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
-                            union_all(
-                                &mut region,
-                                connect_room_to_connection(&room, connection, width),
-                            );
+                            if is_merged_connection(&connection, &merged_connections) {
+                                region = region.union(&MultiPolygon::new(vec![open_full_wall(
+                                    &room, connection,
+                                )]));
+                            } else {
+                                let is_double =
+                                    is_double_width_corridor_connection(&connection, bsp);
+                                let width =
+                                    if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                                union_all(
+                                    &mut region,
+                                    connect_room_to_connection(&room, connection, width),
+                                );
 
-                            let door_prob = if is_double { DOUBLE_DOOR_PROB } else { DOOR_PROB };
-                            if rng.gen_bool(door_prob as f64) {
-                                let room_entry = room_entry_point(&room, connection);
-                                if is_double {
-                                    let (d1, d2) = create_double_door(connection.side, room_entry);
-                                    doors.push(d1);
-                                    doors.push(d2);
-                                } else {
-                                    doors.push(create_door(connection.side, room_entry));
+                                let door_prob =
+                                    if is_double { DOUBLE_DOOR_PROB } else { DOOR_PROB };
+                                if rng.gen_bool(door_prob as f64) {
+                                    let room_entry = room_entry_point(&room, connection);
+                                    if is_double {
+                                        let (d1, d2) =
+                                            create_double_door(connection.side, room_entry);
+                                        doors.push(d1);
+                                        doors.push(d2);
+                                    } else {
+                                        doors.push(create_door(connection.side, room_entry));
+                                    }
                                 }
                             }
                         }
@@ -291,11 +359,18 @@ fn render(
                         for connection in
                             partition_connections(partition).into_iter().filter(is_live)
                         {
-                            let is_double = is_double_width_corridor_connection(&connection, bsp);
-                            let width =
-                                if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
-                            let entry = oval_entry_point(&room, connection, width);
-                            union_all(&mut region, connect_to_entry(entry, connection, width));
+                            if is_merged_connection(&connection, &merged_connections) {
+                                region = region.union(&MultiPolygon::new(vec![open_full_wall(
+                                    &room, connection,
+                                )]));
+                            } else {
+                                let is_double =
+                                    is_double_width_corridor_connection(&connection, bsp);
+                                let width =
+                                    if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                                let entry = oval_entry_point(&room, connection, width);
+                                union_all(&mut region, connect_to_entry(entry, connection, width));
+                            }
                         }
                     }
                     RoomVariant::Colonnade => {
@@ -303,13 +378,20 @@ fn render(
                         for connection in
                             partition_connections(partition).into_iter().filter(is_live)
                         {
-                            let is_double = is_double_width_corridor_connection(&connection, bsp);
-                            let width =
-                                if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
-                            union_all(
-                                &mut region,
-                                connect_room_to_connection(&room, connection, width),
-                            );
+                            if is_merged_connection(&connection, &merged_connections) {
+                                region = region.union(&MultiPolygon::new(vec![open_full_wall(
+                                    &room, connection,
+                                )]));
+                            } else {
+                                let is_double =
+                                    is_double_width_corridor_connection(&connection, bsp);
+                                let width =
+                                    if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                                union_all(
+                                    &mut region,
+                                    connect_room_to_connection(&room, connection, width),
+                                );
+                            }
                         }
                         for col in colonnade_columns(&room) {
                             region = region.difference(&MultiPolygon::new(vec![col.to_polygon()]));
