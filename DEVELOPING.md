@@ -15,6 +15,7 @@ src/
 ├── nav.rs                    # Landmass→Avian2D velocity bridge + navmesh triangulation
 ├── fov.rs                    # FOV raycasting, exploration tracking, mesh overlays
 ├── item.rs                   # Items, inventory, pickup animation, use dialog dispatch
+├── object.rs                 # Objects that can't be picked up (currently just unstable sigils)
 ├── populate_level.rs         # Spawns player, monsters, items, and the down staircase into rooms
 ├── time_scale.rs             # Global virtual-time scaling (bullet-time / pause / normal)
 ├── ui.rs                     # egui HUD: message log, stat bars, inventory, menu
@@ -76,18 +77,17 @@ Items      → proximity check, animate pickup into inventory
 
 Physics    → Avian2D step
 
-Time scale → 0.0× idle | 1.0× moving | 0.05× (bullet-time) while missiles exist
 ```
 
 ---
 
-## Time Scale Summary
+## Time scale
 
 | Situation               | Virtual time scale  |
 | ----------------------- | ------------------- |
 | Player idle (no target) | 0.0× (paused)       |
 | Player moving           | 1.0×                |
-| Any missile in flight   | 0.05× (bullet-time) |
+| Any missile in flight   | 0.5× (bullet-time)  |
 
 Item pickup animations and the physics fixed-timestep are both adjusted to remain smooth regardless of scale.
 
