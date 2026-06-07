@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use crate::{
     AGENT_RADIUS, GameLayer, GameState,
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
+    effects::crumble_terrain::Rubble,
     fov,
     item::{Item, ItemKind, item_name},
     monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
@@ -372,7 +373,9 @@ pub fn apply_hit_flash_on_hit(
     mut commands: Commands,
     query: Query<
         (Option<&MeshMaterial2d<ColorMaterial>>, Option<&HitFlash>),
-        (Without<MagicMissile>, With<RigidBody>),
+        // (a) it would be weird for rubble to hit-flash
+        // (b) all rubble shares the same texture, and it gets stuck!
+        (Without<MagicMissile>, With<RigidBody>, Without<Rubble>),
     >,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {

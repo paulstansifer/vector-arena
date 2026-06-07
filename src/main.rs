@@ -283,7 +283,7 @@ fn spawn_game_world(
     }
 
     commands.insert_resource(WorldBounds { width: window_width, height: window_height });
-    let rubble_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.45, 0.42)));
+    let rubble_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.5, 0.5)));
     commands
         .insert_resource(vector_arena::effects::crumble_terrain::RubbleMaterial(rubble_material));
 
