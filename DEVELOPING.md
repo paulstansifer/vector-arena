@@ -18,6 +18,7 @@ src/
 ├── object.rs                 # Objects that can't be picked up (currently just unstable sigils)
 ├── populate_level.rs         # Spawns player, monsters, items, and the down staircase into rooms
 ├── time_scale.rs             # Global virtual-time scaling (bullet-time / pause / normal)
+├── indicator.rs              # Visual-only temporary effects (like hitflash)
 ├── ui.rs                     # egui HUD: message log, stat bars, inventory, menu
 ├── command_palette.rs        # General interface for complex user commands
 ├── dungeon/

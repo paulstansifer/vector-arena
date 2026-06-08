@@ -14,7 +14,7 @@ use bevy::input::keyboard::Key;
 use crate::{
     GameState, Staircase,
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
-    dungeon::terrain::DungeonState,
+    dungeon::terrain::{DungeonState, TorporMultiplier},
     fov::{ExplorationState, find_exploration_waypoint},
     status_effect::StatusEffects,
     ui::MessageLog,
@@ -210,13 +210,14 @@ pub fn move_player(
             Option<&AgentDesiredVelocity2d>,
             &mut AgentTarget2d,
             Option<&StatusEffects>,
+            Option<&TorporMultiplier>,
         ),
         With<Player>,
     >,
     archipelago_query: Query<&Archipelago2d>,
     time: Res<Time>,
 ) {
-    for (mut forces, transform, mut move_target, desired_velocity, mut agent_target, effects) in
+    for (mut forces, transform, mut move_target, desired_velocity, mut agent_target, effects, torpor) in
         query.iter_mut()
     {
         let current_speed = forces.linear_velocity().length();
@@ -250,7 +251,8 @@ pub fn move_player(
             _ => snap_to_navmesh(current, &archipelago_query) - current,
         };
 
-        let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0);
+        let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0)
+            * torpor.map(|t| t.get()).unwrap_or(1.0);
         let desired_dir = direction.normalize_or_zero();
         let current_vel = forces.linear_velocity();
         // TODO: test this more. Not sure this has any effect, or the desired effect.
@@ -335,7 +337,15 @@ pub fn directional_move_system(
     keyboard: Res<ButtonInput<Key>>,
     palette: Res<CommandPaletteState>,
     mut player_query: Query<
-        (Entity, Forces, &Transform, &mut MoveTarget, &mut AgentTarget2d, Option<&StatusEffects>),
+        (
+            Entity,
+            Forces,
+            &Transform,
+            &mut MoveTarget,
+            &mut AgentTarget2d,
+            Option<&StatusEffects>,
+            Option<&TorporMultiplier>,
+        ),
         With<Player>,
     >,
     mut commands: Commands,
@@ -361,7 +371,7 @@ pub fn directional_move_system(
     if dir == Vec2::ZERO {
         return;
     }
-    let Ok((entity, mut forces, transform, mut move_target, mut agent_target, effects)) =
+    let Ok((entity, mut forces, transform, mut move_target, mut agent_target, effects, torpor)) =
         player_query.single_mut()
     else {
         return;
@@ -371,7 +381,8 @@ pub fn directional_move_system(
     move_target.origin = pos;
     move_target.active = true;
     move_target.time_set = time.elapsed();
-    let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0);
+    let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0)
+        * torpor.map(|t| t.get()).unwrap_or(1.0);
     let desired_vel = dir * PLAYER_DIRECTIONAL_SPEED * speed_mult;
     let correction = desired_vel - forces.linear_velocity();
     forces.reset_accumulated_linear_acceleration();

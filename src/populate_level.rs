@@ -9,7 +9,7 @@ use rand::prelude::*;
 
 use crate::{
     AGENT_RADIUS, GameLayer, GameState, Staircase, StaircaseFogCopy,
-    dungeon::terrain::random_in_playable_area,
+    dungeon::terrain::{TorporMultiplier, random_in_playable_area},
     effects::projectile::MonsterShootTimer,
     fov,
     item::{ALL_ITEM_KINDS, Inventory, Item, ItemKind, item_name},
@@ -62,7 +62,7 @@ pub fn populate(
 
     commands.spawn((
         DespawnOnExit(GameState::InLevel),
-        (Player, initial_inventory, initial_stats, StatusEffects::default()),
+        (Player, initial_inventory, initial_stats, StatusEffects::default(), TorporMultiplier(1.0)),
         SvgSprite { svg_path: "sprites/wizard.svg".into(), param: None },
         Transform::from_translation(player_position.extend(fov::MOVABLE_Z))
             .with_scale(Vec3::splat(0.4)),
@@ -98,6 +98,7 @@ pub fn populate(
                     MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
                     Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
                     StatusEffects::default(),
+                    TorporMultiplier(1.0),
                 ),
                 WorldTooltip::default(),
                 MonsterShootTimer::new(),

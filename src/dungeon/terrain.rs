@@ -7,7 +7,7 @@ use avian2d::prelude::*;
 use bevy::{math::Vec2, prelude::*};
 use bevy_mesh::{Indices, PrimitiveTopology};
 use geo::{
-    BoundingRect, Buffer, Contains, MultiPolygon,
+    BoundingRect, Buffer, Contains, MultiPolygon, Polygon,
     algorithm::{
         buffer::BufferStyle,
         triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay},
@@ -65,10 +65,34 @@ pub fn geometry_to_collider(geometry: &MultiPolygon<f32>) -> Collider {
 #[derive(Component)]
 pub struct TerrainMarker;
 
+pub const TORPOR_FACTOR: f32 = 0.25;
+
+#[derive(Component, Default)]
+pub struct TorporMultiplier(pub f32);
+
+impl TorporMultiplier {
+    pub fn get(&self) -> f32 { self.0 }
+}
+
 #[derive(Resource)]
 pub struct DungeonState {
     pub solid_rock: MultiPolygon<f32>,
     pub playable_area: MultiPolygon<f32>,
+    pub torpor_zones: Vec<Polygon<f32>>,
+}
+
+pub fn torpor_factor_at(pos: Vec2, dungeon_state: &DungeonState) -> f32 {
+    let p = geo::Point::new(pos.x, pos.y);
+    if dungeon_state.torpor_zones.iter().any(|z| z.contains(&p)) { TORPOR_FACTOR } else { 1.0 }
+}
+
+pub fn update_torpor_multipliers(
+    dungeon_state: Res<DungeonState>,
+    mut query: Query<(&Transform, &mut TorporMultiplier)>,
+) {
+    for (transform, mut mult) in query.iter_mut() {
+        mult.0 = torpor_factor_at(transform.translation.truncate(), &dungeon_state);
+    }
 }
 
 #[derive(Resource)]

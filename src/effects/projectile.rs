@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use rand::Rng;
 use std::collections::HashSet;
 
+use crate::dungeon::terrain::TorporMultiplier;
 use crate::indicator::HitFlash;
 use crate::{
     AGENT_RADIUS, GameLayer, GameState,
@@ -119,6 +120,7 @@ fn spawn_missile(
             last_trail_pos: Some(spawn_pos),
             last_trail_vel: Some(direction * MISSILE_SPEED),
         },
+        TorporMultiplier(1.0),
         Mesh2d(meshes.add(Circle::new(4.0))),
         MeshMaterial2d(materials.add(ColorMaterial::from(color))),
         Transform::from_translation(spawn_pos.extend(fov::MOVABLE_Z + 1.0)),
@@ -228,6 +230,18 @@ pub fn update_missiles(
         missile.distance_traveled += velocity.length() * time.delta_secs();
         if missile.distance_traveled >= MISSILE_MAX_DISTANCE {
             commands.entity(entity).despawn();
+        }
+    }
+}
+
+// TODO: this doesn't belong here (except that missiles are currently the main thing affected)
+pub fn apply_torpor_to_non_agents(
+    mut query: Query<(&TorporMultiplier, &mut LinearVelocity), Without<bevy_landmass::Agent2d>>,
+) {
+    for (torpor, mut vel) in query.iter_mut() {
+        let dir = vel.0.normalize_or_zero();
+        if dir != Vec2::ZERO {
+            vel.0 = dir * MISSILE_SPEED * torpor.get();
         }
     }
 }

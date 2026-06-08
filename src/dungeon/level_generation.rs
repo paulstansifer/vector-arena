@@ -27,6 +27,7 @@ pub struct TerrainGeometry {
     pub rooms: Vec<Rect<f32>>,
     pub corridor_ends: Vec<Vec2>,
     pub doors: Vec<DoorGeometry>,
+    pub torpor_zones: Vec<Polygon<f32>>,
 }
 
 #[derive(Clone, Copy)]
@@ -111,7 +112,8 @@ impl TerrainGeometry {
         allocated_partitions: Vec<(Partition, PartitionRole)>,
         rng: &mut impl Rng,
     ) -> Self {
-        let (rooms, playable_area, doors, corridor_ends) = render(&allocated_partitions, rng);
+        let (rooms, playable_area, doors, corridor_ends, torpor_zones) =
+            render(&allocated_partitions, rng);
 
         // The terrain is the bounds minus the playable area
         let earth = Rect::<f32>::new((0.0, 0.0), (width, height));
@@ -141,7 +143,16 @@ impl TerrainGeometry {
             })
             .collect();
 
-        TerrainGeometry { solid_rock: geometry, playable_area, rooms, corridor_ends, doors }
+        let torpor_zones =
+            torpor_zones.into_iter().map(|p| p.translate(offset_x, offset_y)).collect();
+        TerrainGeometry {
+            solid_rock: geometry,
+            playable_area,
+            rooms,
+            corridor_ends,
+            doors,
+            torpor_zones,
+        }
     }
 }
 
@@ -153,6 +164,7 @@ pub enum RoomVariant {
     Normal,
     Oval,
     Colonnade,
+    Torpor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -291,13 +303,14 @@ fn open_full_wall(room: &Rect<f32>, connection: ConnectionPoint) -> Polygon<f32>
 fn render(
     bsp: &[(Partition, PartitionRole)],
     rng: &mut impl Rng,
-) -> (Vec<Rect<f32>>, MultiPolygon<f32>, Vec<DoorGeometry>, Vec<Vec2>) {
+) -> (Vec<Rect<f32>>, MultiPolygon<f32>, Vec<DoorGeometry>, Vec<Vec2>, Vec<Polygon<f32>>) {
     let merged_connections = find_merged_room_connections(bsp, rng);
 
     let mut rooms = Vec::new();
     let mut playables = MultiPolygon::new(vec![]);
     let mut doors = Vec::new();
     let mut corridor_ends_set: HashSet<(u32, u32)> = HashSet::new();
+    let mut torpor_zones: Vec<Polygon<f32>> = Vec::new();
 
     // Avoid hallway stubs leading to nothing.
     let empty_connections: Vec<(f32, f32)> = bsp
@@ -397,6 +410,38 @@ fn render(
                             region = region.difference(&MultiPolygon::new(vec![col.to_polygon()]));
                         }
                     }
+                    RoomVariant::Torpor => {
+                        region = region.union(&room.to_polygon());
+                        for connection in
+                            partition_connections(partition).into_iter().filter(is_live)
+                        {
+                            if is_merged_connection(&connection, &merged_connections) {
+                                region = region.union(&MultiPolygon::new(vec![open_full_wall(
+                                    &room, connection,
+                                )]));
+                            } else {
+                                let is_double =
+                                    is_double_width_corridor_connection(&connection, bsp);
+                                let width =
+                                    if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                                union_all(
+                                    &mut region,
+                                    connect_room_to_connection(&room, connection, width),
+                                );
+                                if rng.gen_bool(DOOR_PROB as f64) {
+                                    let room_entry = room_entry_point(&room, connection);
+                                    doors.push(create_door(connection.side, room_entry));
+                                }
+                            }
+                        }
+                        let inner = Rect::new(
+                            (room.min().x + CORRIDOR_WIDTH, room.min().y + CORRIDOR_WIDTH),
+                            (room.max().x - CORRIDOR_WIDTH, room.max().y - CORRIDOR_WIDTH),
+                        );
+                        if inner.width() > 0.0 && inner.height() > 0.0 {
+                            torpor_zones.push(inner.to_polygon());
+                        }
+                    }
                 }
             }
             PartitionRole::Corridor { double_width } => {
@@ -445,7 +490,7 @@ fn render(
         playables = playables.difference(&MultiPolygon::new(vec![hinge_rect.to_polygon()]));
     }
 
-    (rooms, playables, doors, corridor_ends)
+    (rooms, playables, doors, corridor_ends, torpor_zones)
 }
 
 #[derive(Copy, Clone)]
@@ -560,9 +605,8 @@ fn room_entry_point(room: &Rect<f32>, connection: ConnectionPoint) -> (f32, f32)
 
 fn random_room_variant(rng: &mut impl Rng) -> RoomVariant {
     if rng.gen_bool(SPECIAL_ROOM_PROB as f64) {
-        RoomVariant::Colonnade
         // TODO: oval rooms cause big performance problems. Investigate.
-        // if rng.gen_bool(0.5) { RoomVariant::Oval } else { RoomVariant::Colonnade }
+        if rng.gen_bool(0.5) { RoomVariant::Colonnade } else { RoomVariant::Torpor }
     } else {
         RoomVariant::Normal
     }

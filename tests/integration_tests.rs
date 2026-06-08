@@ -179,7 +179,8 @@ fn test_player_can_path_within_room_and_to_other_room() {
     app.add_systems(Update, (move_player, mock_physics_system).chain());
 
     let mut nav_meshes = app.world_mut().resource_mut::<Assets<NavMesh2d>>();
-    let valid_nav_mesh = playable_area_to_nav_mesh(&terrain_geometry.playable_area);
+    let valid_nav_mesh =
+        playable_area_to_nav_mesh(&terrain_geometry.playable_area, &terrain_geometry.torpor_zones);
     let nav_mesh_handle = nav_meshes.add(NavMesh2d { nav_mesh: valid_nav_mesh });
 
     let archipelago_id = app

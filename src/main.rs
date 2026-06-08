@@ -11,6 +11,7 @@ use vector_arena::{
         terrain::{
             DungeonCollider, DungeonState, DungeonVisuals, PointsOfInterest, TerrainMarker,
             geometry_to_collider, geometry_to_mesh, sync_dungeon_to_entities,
+            update_torpor_multipliers,
         },
     },
     indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
@@ -18,9 +19,9 @@ use vector_arena::{
         crumble_terrain::{Fragile, handle_right_click_excavation},
         projectile::{
             apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit, apply_knockback_on_hit,
-            detect_missile_hits, execute_missile_command, init_trail_meshes, monster_fire_missiles,
-            register_missile_command, spawn_missile_trails, tick_knockback_cooldowns,
-            update_missile_trails, update_missiles,
+            apply_torpor_to_non_agents, detect_missile_hits, execute_missile_command,
+            init_trail_meshes, monster_fire_missiles, register_missile_command,
+            spawn_missile_trails, tick_knockback_cooldowns, update_missile_trails, update_missiles,
         },
         rope,
     },
@@ -28,7 +29,7 @@ use vector_arena::{
     goto,
     item::{Inventory, animate_pickup, execute_item_command, pickup_items, register_item_commands},
     monster::{self, Stats},
-    nav::{self, DungeonNavMesh, NavMeshIslandMarker, playable_area_to_nav_mesh},
+    nav::{self, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
     objects::{animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions},
     player::{
         Player, advance_exploration, directional_move_system, execute_descend_command,
@@ -75,9 +76,10 @@ fn main() {
         .add_systems(OnEnter(GameState::Descend), on_enter_descend)
         .add_systems(OnExit(GameState::InLevel), save_player_on_exit)
         .add_systems(Update, tick_status_effects)
+        .add_systems(Update, update_torpor_multipliers)
         .add_systems(Update, execute_item_command)
         .add_systems(Update, set_target_on_click)
-        .add_systems(Update, move_player)
+        .add_systems(Update, move_player.after(update_torpor_multipliers))
         .add_systems(Update, directional_move_system.after(move_player))
         .add_systems(Update, rotate_player_to_velocity.after(move_player))
         .add_systems(Update, advance_exploration.after(move_player))
@@ -85,7 +87,7 @@ fn main() {
         .add_systems(Update, execute_descend_command)
         .add_systems(Update, monster::update_monster_ai)
         .add_systems(Update, monster::refresh_monster_tooltips.after(monster::update_monster_ai))
-        .add_systems(Update, nav::apply_agent_velocity)
+        .add_systems(Update, nav::apply_agent_velocity.after(update_torpor_multipliers))
         .add_systems(Update, apply_confusion_to_velocity.after(nav::apply_agent_velocity).after(directional_move_system))
         .add_systems(Update, nav::sync_island_nav_mesh)
         .add_systems(Update, fov::update_fov)
@@ -95,6 +97,7 @@ fn main() {
         .add_systems(Update, execute_missile_command)
         .add_systems(Update, monster_fire_missiles)
         .add_systems(Update, update_missiles)
+        .add_systems(Update, apply_torpor_to_non_agents.after(update_torpor_multipliers).after(update_missiles))
         .add_systems(Update, spawn_missile_trails)
         .add_systems(Update, update_missile_trails)
         .add_observer(apply_knockback_on_hit)
@@ -205,19 +208,20 @@ fn spawn_game_world(
     monster_letters: &mut LetterMap,
 ) {
     // Create the archipelago (the "world" for landmass pathfinding)
-    let archipelago_id = commands
-        .spawn((
-            DespawnOnExit(GameState::InLevel),
-            Archipelago2d::new(ArchipelagoOptions::from_agent_radius(AGENT_RADIUS)),
-        ))
-        .id();
+    let mut archipelago = Archipelago2d::new(ArchipelagoOptions::from_agent_radius(AGENT_RADIUS));
+    archipelago
+        .set_type_index_cost(1, TORPOR_NAV_COST)
+        .expect("torpor nav cost is positive");
+    let archipelago_id =
+        commands.spawn((DespawnOnExit(GameState::InLevel), archipelago)).id();
 
     let terrain_geometry = TerrainGeometry::new(window_width, window_height);
 
     // Build the underlying canonical state, visuals, collider, and navmesh
     let terrain_mesh = geometry_to_mesh(&terrain_geometry.solid_rock);
     let terrain_collider = geometry_to_collider(&terrain_geometry.solid_rock);
-    let valid_nav_mesh = playable_area_to_nav_mesh(&terrain_geometry.playable_area);
+    let valid_nav_mesh =
+        playable_area_to_nav_mesh(&terrain_geometry.playable_area, &terrain_geometry.torpor_zones);
 
     let terrain_mesh_handle = meshes.add(terrain_mesh);
     let nav_mesh_handle = nav_meshes.add(NavMesh2d { nav_mesh: valid_nav_mesh });
@@ -225,6 +229,7 @@ fn spawn_game_world(
     let dungeon_state = DungeonState {
         solid_rock: terrain_geometry.solid_rock.clone(),
         playable_area: terrain_geometry.playable_area.clone(),
+        torpor_zones: terrain_geometry.torpor_zones.clone(),
     };
     let dungeon_visuals = DungeonVisuals(terrain_mesh_handle.clone());
     let dungeon_collider = DungeonCollider(terrain_collider.clone());
@@ -253,6 +258,18 @@ fn spawn_game_world(
             ]),
         ))
         .id();
+
+    let torpor_material =
+        materials.add(ColorMaterial::from(Color::srgba(0.3, 0.7, 1.0, 0.35)));
+    for zone in &terrain_geometry.torpor_zones {
+        let mesh = geometry_to_mesh(&geo::MultiPolygon::new(vec![zone.clone()]));
+        commands.spawn((
+            DespawnOnExit(GameState::InLevel),
+            Mesh2d(meshes.add(mesh)),
+            MeshMaterial2d(torpor_material.clone()),
+            Transform::from_translation(Vec3::new(0.0, 0.0, crate::fov::TERRAIN_Z + 0.1)),
+        ));
+    }
 
     let door_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.25, 0.1)));
     for door in &terrain_geometry.doors {

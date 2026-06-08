@@ -94,7 +94,8 @@ pub fn subtract_polygon_from_terrain(
     dungeon_collider.0 = geometry_to_collider(&new_terrain);
 
     // Update the navmesh Resource
-    let valid_nav_mesh = playable_area_to_nav_mesh(&new_playable_area);
+    let valid_nav_mesh =
+        playable_area_to_nav_mesh(&new_playable_area, &dungeon_state.torpor_zones);
     dungeon_nav_mesh.0 = nav_meshes.add(NavMesh2d { nav_mesh: valid_nav_mesh });
 
     // Break up the rubble before shrinking
