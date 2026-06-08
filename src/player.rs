@@ -43,11 +43,13 @@ fn snap_to_navmesh(point: Vec2, archipelago_query: &Query<&Archipelago2d>) -> Ve
         .unwrap_or(point)
 }
 
-pub const PLAYER_SPEED: f32 = 480.0;
+pub const PLAYER_SPEED: f32 = 320.0;
 pub const STOP_THRESHOLD: f32 = 8.0;
 // When holding down the directional keys.
 // Max speed feels too fast! But maybe we should implement acceleration.
 pub const PLAYER_DIRECTIONAL_SPEED: f32 = 240.0;
+// 60.0 would be near-instant steering response
+const PLAYER_STEERING_GAIN: f32 = 40.0;
 
 #[derive(Component)]
 pub struct Player;
@@ -74,8 +76,6 @@ impl MoveTarget {
         self.time_set = now;
     }
 }
-
-fn lerp(start: f32, end: f32, t: f32) -> f32 { start + (end - start) * t }
 
 pub fn set_target_on_click(
     window: Single<&Window>,
@@ -204,8 +204,8 @@ pub fn advance_exploration(
 pub fn move_player(
     mut query: Query<
         (
+            Forces,
             &Transform,
-            &mut LinearVelocity,
             &mut MoveTarget,
             Option<&AgentDesiredVelocity2d>,
             &mut AgentTarget2d,
@@ -215,15 +215,18 @@ pub fn move_player(
     >,
     time: Res<Time>,
 ) {
-    for (transform, mut velocity, mut move_target, desired_velocity, mut agent_target, effects) in
+    for (mut forces, transform, mut move_target, desired_velocity, mut agent_target, effects) in
         query.iter_mut()
     {
+        let current_speed = forces.linear_velocity().length();
+
         if !move_target.active
-            || (velocity.length() < PLAYER_SPEED / 100.0
-                && (time.elapsed() - move_target.time_set) > Duration::from_millis(100))
+            || (current_speed < PLAYER_SPEED / 100.0
+                && (time.elapsed() - move_target.time_set) > Duration::from_millis(500))
         {
             move_target.active = false;
-            *velocity = LinearVelocity::ZERO;
+            forces.reset_accumulated_linear_acceleration();
+            *forces.linear_velocity_mut() = Vec2::ZERO;
             continue;
         }
 
@@ -231,7 +234,8 @@ pub fn move_player(
         let distance = (move_target.destination - current).length();
 
         if distance <= STOP_THRESHOLD {
-            *velocity = LinearVelocity::ZERO;
+            forces.reset_accumulated_linear_acceleration();
+            *forces.linear_velocity_mut() = Vec2::ZERO;
             move_target.active = false;
             *agent_target = AgentTarget2d::None;
             continue;
@@ -243,16 +247,22 @@ pub fn move_player(
             move_target.destination - current
         };
 
-        // speed up after starting to move:
-        let away_from_origin = (current.distance(move_target.origin) / 60.0).clamp(0.0, 1.0);
-        let adj_speed = lerp(0.25, 1.0, away_from_origin) * PLAYER_SPEED;
-        let new_speed = f32::max(adj_speed, velocity.length());
-        // slow down approaching the target:
-        let adj_speed = lerp(0.25, 1.0, (distance / 60.0).clamp(0.0, 1.0)) * PLAYER_SPEED;
-        let new_speed = f32::min(adj_speed, new_speed);
-
         let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0);
-        velocity.0 = direction.normalize_or_zero() * new_speed * speed_mult;
+        let desired_dir = direction.normalize_or_zero();
+        let current_vel = forces.linear_velocity();
+        // TODO: test this more. Not sure this has any effect, or the desired effect.
+        // Ideally, we'd slow down when cornering is *near*, but that sounds hard.
+        // Reduce speed when cornering: aligned = full speed, perpendicular/opposing = slower.
+        // Only active once moving; from rest, always allow full speed.
+        let cornering_factor = if current_vel.length_squared() > 0.5 {
+            desired_dir.dot(current_vel.normalize_or_zero()).max(0.0)
+        } else {
+            1.0
+        };
+        let desired_vel = desired_dir * PLAYER_SPEED * speed_mult * cornering_factor;
+        let correction = desired_vel - forces.linear_velocity();
+        forces.reset_accumulated_linear_acceleration();
+        forces.apply_linear_acceleration(correction * PLAYER_STEERING_GAIN);
     }
 }
 
@@ -322,14 +332,7 @@ pub fn directional_move_system(
     keyboard: Res<ButtonInput<Key>>,
     palette: Res<CommandPaletteState>,
     mut player_query: Query<
-        (
-            Entity,
-            &Transform,
-            &mut LinearVelocity,
-            &mut MoveTarget,
-            &mut AgentTarget2d,
-            Option<&StatusEffects>,
-        ),
+        (Entity, Forces, &Transform, &mut MoveTarget, &mut AgentTarget2d, Option<&StatusEffects>),
         With<Player>,
     >,
     mut commands: Commands,
@@ -355,7 +358,7 @@ pub fn directional_move_system(
     if dir == Vec2::ZERO {
         return;
     }
-    let Ok((entity, transform, mut velocity, mut move_target, mut agent_target, effects)) =
+    let Ok((entity, mut forces, transform, mut move_target, mut agent_target, effects)) =
         player_query.single_mut()
     else {
         return;
@@ -366,7 +369,10 @@ pub fn directional_move_system(
     move_target.active = true;
     move_target.time_set = time.elapsed();
     let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0);
-    velocity.0 = dir * PLAYER_DIRECTIONAL_SPEED * speed_mult;
+    let desired_vel = dir * PLAYER_DIRECTIONAL_SPEED * speed_mult;
+    let correction = desired_vel - forces.linear_velocity();
+    forces.reset_accumulated_linear_acceleration();
+    forces.apply_linear_acceleration(correction * PLAYER_STEERING_GAIN);
     *agent_target = AgentTarget2d::None;
     commands.entity(entity).remove::<ExplorationGoal>();
 }

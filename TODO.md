@@ -11,6 +11,9 @@
   * Items should stay on their current letter (either Nethack-style or Angband-style)
   * "i" should look at all inventory (and give the option of using any items)
   * Use less than half a megabyte worth of font for the scrolls.
+  * The allocated playable area overlaps the top and bottom bars.
+  * The top bar should slide down when opened.
+  * Place monsters and down staircases in random accessible locations, just like items.
   
 
   # Larger projects
