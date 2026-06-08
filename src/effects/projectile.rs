@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use rand::Rng;
 use std::collections::HashSet;
 
+use crate::indicator::HitFlash;
 use crate::{
     AGENT_RADIUS, GameLayer, GameState,
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
@@ -68,13 +69,6 @@ pub struct MagicMissile {
 
 #[derive(Component)]
 pub struct KnockbackCooldown(f32);
-
-#[derive(Component)]
-pub struct HitFlash {
-    timer: f32,
-    duration: f32,
-    base_color: Color,
-}
 
 #[derive(Component)]
 pub struct MonsterShootTimer(pub f32);
@@ -466,36 +460,6 @@ pub fn apply_damage_on_hit(
 pub fn tick_knockback_cooldowns(time: Res<Time>, mut query: Query<&mut KnockbackCooldown>) {
     for mut cooldown in query.iter_mut() {
         cooldown.0 -= time.delta_secs();
-    }
-}
-
-pub fn update_hit_flash(
-    mut commands: Commands,
-    time: Res<Time<Real>>,
-    mut query: Query<(Entity, &mut HitFlash, &MeshMaterial2d<ColorMaterial>)>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
-    for (entity, mut flash, mat_handle) in query.iter_mut() {
-        flash.timer -= time.delta_secs();
-        if flash.timer <= 0.0 {
-            if let Some(mat) = materials.get_mut(&mat_handle.0) {
-                mat.color = flash.base_color;
-            }
-            commands.entity(entity).remove::<HitFlash>();
-        } else {
-            // t=1 at the moment of impact (white), t=0 when done (base_color)
-            let t = flash.timer / flash.duration;
-            let base = flash.base_color.to_srgba();
-            let color = Color::srgba(
-                base.red + t * (1.0 - base.red),
-                base.green + t * (1.0 - base.green),
-                base.blue + t * (1.0 - base.blue),
-                base.alpha,
-            );
-            if let Some(mat) = materials.get_mut(&mat_handle.0) {
-                mat.color = color;
-            }
-        }
     }
 }
 

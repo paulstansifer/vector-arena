@@ -4,6 +4,7 @@ pub mod dungeon;
 pub mod effects;
 pub mod fov;
 pub mod goto;
+pub mod indicator;
 pub mod item;
 pub mod monster;
 pub mod nav;

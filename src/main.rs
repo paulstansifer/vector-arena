@@ -1,6 +1,6 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
-use bevy_egui::input::egui_wants_any_pointer_input;
+use bevy_egui::{EguiPrimaryContextPass, input::egui_wants_any_pointer_input};
 use bevy_landmass::{NavMeshHandle, prelude::*};
 
 use vector_arena::{
@@ -13,13 +13,14 @@ use vector_arena::{
             geometry_to_collider, geometry_to_mesh, sync_dungeon_to_entities,
         },
     },
+    indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
     effects::{
         crumble_terrain::{Fragile, handle_right_click_excavation},
         projectile::{
             apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit, apply_knockback_on_hit,
             detect_missile_hits, execute_missile_command, init_trail_meshes, monster_fire_missiles,
             register_missile_command, spawn_missile_trails, tick_knockback_cooldowns,
-            update_hit_flash, update_missile_trails, update_missiles,
+            update_missile_trails, update_missiles,
         },
         rope,
     },
@@ -101,6 +102,8 @@ fn main() {
         .add_observer(apply_hit_flash_on_hit)
         .add_observer(apply_damage_on_hit)
         .add_systems(Update, update_hit_flash.before(detect_missile_hits))
+        .add_systems(Update, tick_state_indicators)
+        .add_systems(EguiPrimaryContextPass, render_state_indicators)
         .add_systems(Update, detect_missile_hits.before(spawn_missile_trails))
         .add_systems(Update, tick_knockback_cooldowns)
         .add_systems(Update, animate_sigil)

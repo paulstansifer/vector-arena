@@ -9,8 +9,9 @@ use geo::{Contains, Intersects};
 use bevy_egui::egui;
 
 use crate::{
-    command_palette::CommandPaletteState, dungeon::terrain::DungeonState, fov::CurrentFovState,
-    item::ItemKind, player::Player, status_effect::StatusEffects,
+    command_palette::CommandPaletteState, dungeon::terrain::DungeonState,
+    indicator::StateIndicator, fov::CurrentFovState, item::ItemKind, player::Player,
+    status_effect::StatusEffects,
 };
 
 pub const MONSTER_SPEED: f32 = 80.0;
@@ -227,6 +228,7 @@ pub fn update_monster_ai(
             !solid_rock.intersects(&seg)
         };
 
+        let old_label = state.label();
         tick_state(
             &mut state,
             &mut target,
@@ -240,6 +242,15 @@ pub fn update_monster_ai(
             dt,
             &mut rand::thread_rng(),
         );
+        if state.label() != old_label {
+            let ch = match &*state {
+                MonsterState::Seeking { .. } | MonsterState::Distracted { .. } => '!',
+                MonsterState::Sleeping { .. } => 's',
+                MonsterState::Tired { .. } => 't',
+                MonsterState::Wandering { .. } => 'w',
+            };
+            commands.entity(entity).insert(StateIndicator::new(ch, 1.5));
+        }
     }
 }
 
