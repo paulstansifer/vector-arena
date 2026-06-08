@@ -213,6 +213,7 @@ pub fn move_player(
         ),
         With<Player>,
     >,
+    archipelago_query: Query<&Archipelago2d>,
     time: Res<Time>,
 ) {
     for (mut forces, transform, mut move_target, desired_velocity, mut agent_target, effects) in
@@ -241,10 +242,12 @@ pub fn move_player(
             continue;
         }
 
-        let direction = if let Some(dv) = desired_velocity {
-            dv.velocity()
-        } else {
-            move_target.destination - current
+        let direction = match desired_velocity {
+            Some(dv) if dv.velocity() != Vec2::ZERO => dv.velocity(),
+            // Zero desired velocity means Landmass has no path (player is off the navmesh
+            // or destination unreachable). Steer toward the nearest navmesh point so the
+            // player works their way back onto the mesh and pathfinding can resume.
+            _ => snap_to_navmesh(current, &archipelago_query) - current,
         };
 
         let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0);
