@@ -367,6 +367,19 @@ pub fn directional_move_system(
     if keyboard.pressed(Key::Character("l".into())) || keyboard.pressed(Key::ArrowRight) {
         dir += Vec2::new(1.0, 0.0);
     }
+    if keyboard.pressed(Key::Character("y".into())) {
+        dir += Vec2::new(-1.0, -1.0);
+    }
+    if keyboard.pressed(Key::Character("u".into())) {
+        dir += Vec2::new(1.0, -1.0);
+    }
+    if keyboard.pressed(Key::Character("b".into())) {
+        dir += Vec2::new(-1.0, -1.0);
+    }
+    if keyboard.pressed(Key::Character("n".into())) {
+        dir += Vec2::new(1.0, -1.0);
+    }
+
     let dir = dir.normalize_or_zero();
     if dir == Vec2::ZERO {
         return;
