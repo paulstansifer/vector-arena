@@ -2,8 +2,11 @@
 // Owns the navmesh types (DungeonNavMesh, NavMeshIslandMarker) and the
 // function that converts playable geometry into a Landmass nav mesh.
 // Also applies landmass-computed desired velocity to Avian2D LinearVelocity
-// for monsters each frame, and syncs the DungeonNavMesh resource to the island entity.
-use crate::{dungeon::terrain::{TORPOR_FACTOR, TorporMultiplier}, player};
+// for all agents each frame, and syncs the DungeonNavMesh resource to the island entity.
+use crate::{
+    dungeon::terrain::{TORPOR_FACTOR, TorporMultiplier},
+    status_effect::StatusEffects,
+};
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
@@ -13,7 +16,21 @@ use geo::{
 };
 use std::{collections::HashMap, sync::Arc};
 
-const AGENT_STEERING_GAIN: f32 = 60.0;
+pub const STEERING_GAIN: f32 = 40.0;
+pub const STOP_THRESHOLD: f32 = 8.0;
+
+const NAVMESH_SNAP_RADIUS: f32 = 80.0;
+
+/// Find the nearest point on the navmesh to `point`, within NAVMESH_SNAP_RADIUS.
+/// Returns `point` unchanged if no navmesh is reachable (e.g. not yet loaded).
+pub fn snap_to_navmesh(point: Vec2, archipelago_query: &Query<&Archipelago2d>) -> Vec2 {
+    archipelago_query
+        .iter()
+        .next()
+        .and_then(|a| a.sample_point(point, &NAVMESH_SNAP_RADIUS).ok())
+        .map(|s| s.point())
+        .unwrap_or(point)
+}
 
 #[derive(Component)]
 pub struct NavMeshIslandMarker;
@@ -120,18 +137,63 @@ pub fn sync_island_nav_mesh(
     }
 }
 
-/// Apply landmass's desired velocity as actual movement on agents.
-pub fn apply_agent_velocity(
-    mut agents: Query<
-        (Forces, &AgentDesiredVelocity2d, Option<&TorporMultiplier>),
-        Without<player::Player>,
-    >,
+/// Apply landmass's desired velocity as actual movement for all agents (player and monsters).
+/// Uses the direction from AgentDesiredVelocity2d with the speed from AgentSettings.desired_speed,
+/// then scales by StatusEffects and TorporMultiplier. Applies a cornering slowdown and stops the
+/// agent when it arrives at a Point target. When off-navmesh with an active target, steers toward
+/// the nearest navmesh point so pathfinding can resume.
+pub fn apply_nav_velocity(
+    mut agents: Query<(
+        Forces,
+        &Transform,
+        &LinearVelocity,
+        &AgentDesiredVelocity2d,
+        &AgentSettings,
+        &AgentTarget2d,
+        Option<&TorporMultiplier>,
+        Option<&StatusEffects>,
+    )>,
+    archipelago_query: Query<&Archipelago2d>,
 ) {
-    for (mut forces, desired_velocity, torpor) in agents.iter_mut() {
-        let torpor_mult = torpor.map(|t| t.get()).unwrap_or(1.0);
-        let desired = desired_velocity.velocity() * torpor_mult;
+    for (mut forces, transform, linear_vel, desired_velocity, settings, agent_target, torpor, effects) in
+        agents.iter_mut()
+    {
+        let pos = transform.translation.truncate();
+        let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0)
+            * torpor.map(|t| t.get()).unwrap_or(1.0);
+
+        // Stop when close enough to a Point target.
+        if let AgentTarget2d::Point(target) = *agent_target {
+            if pos.distance(target) <= STOP_THRESHOLD {
+                let correction = Vec2::ZERO - forces.linear_velocity();
+                forces.reset_accumulated_linear_acceleration();
+                forces.apply_linear_acceleration(correction * STEERING_GAIN);
+                continue;
+            }
+        }
+
+        let nav_vel = desired_velocity.velocity();
+        let desired_dir = if nav_vel != Vec2::ZERO {
+            nav_vel.normalize_or_zero()
+        } else if !matches!(*agent_target, AgentTarget2d::None) {
+            // Off-navmesh: steer toward nearest navmesh point so pathfinding can resume.
+            let snapped = snap_to_navmesh(pos, &archipelago_query);
+            (snapped - pos).normalize_or_zero()
+        } else {
+            Vec2::ZERO
+        };
+
+        // Reduce speed when cornering sharply; full speed from rest or when going straight.
+        let current_vel = linear_vel.0;
+        let cornering = if current_vel.length_squared() > 0.5 && desired_dir != Vec2::ZERO {
+            desired_dir.dot(current_vel.normalize_or_zero()).max(0.0)
+        } else {
+            1.0
+        };
+
+        let desired = desired_dir * settings.desired_speed * speed_mult * cornering;
         let correction = desired - forces.linear_velocity();
         forces.reset_accumulated_linear_acceleration();
-        forces.apply_linear_acceleration(correction * AGENT_STEERING_GAIN);
+        forces.apply_linear_acceleration(correction * STEERING_GAIN);
     }
 }

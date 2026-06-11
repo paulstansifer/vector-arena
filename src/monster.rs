@@ -83,7 +83,6 @@ fn tick_state(
     dist_to_player: f32,
     should_seek: bool,
     blind_strength: f32,
-    speed_multiplier: f32,
     dt: f32,
     rng: &mut impl rand::Rng,
 ) {
@@ -100,7 +99,7 @@ fn tick_state(
         MonsterState::Sleeping { timer } => {
             *target = AgentTarget2d::None;
             settings.desired_speed = 0.0;
-            settings.max_speed = MONSTER_SPEED * speed_multiplier * 1.2;
+            settings.max_speed = MONSTER_SPEED * 1.2;
             *timer -= dt;
             if *timer <= 0.0 {
                 *state = MonsterState::Wandering { target: random_wander_target(monster_pos, rng) };
@@ -109,16 +108,16 @@ fn tick_state(
         MonsterState::Wandering { target: wander_pos } => {
             let wt = *wander_pos;
             *target = AgentTarget2d::Point(wt);
-            settings.desired_speed = MONSTER_WANDER_SPEED * speed_multiplier;
-            settings.max_speed = settings.desired_speed * 1.2;
+            settings.desired_speed = MONSTER_WANDER_SPEED;
+            settings.max_speed = MONSTER_WANDER_SPEED * 1.2;
             if monster_pos.distance(wt) < WANDER_ARRIVE_DIST {
                 *state = MonsterState::Sleeping { timer: rng.gen_range(2.0..5.0) };
             }
         }
         MonsterState::Seeking { timer } => {
             *target = AgentTarget2d::Entity(player_entity);
-            settings.desired_speed = MONSTER_SPEED * speed_multiplier;
-            settings.max_speed = settings.desired_speed * 1.2;
+            settings.desired_speed = MONSTER_SPEED;
+            settings.max_speed = MONSTER_SPEED * 1.2;
             *timer -= dt;
             if *timer <= 0.0 && dist_to_player > FOCUS_DIST {
                 *state = MonsterState::Tired { timer: rng.gen_range(2.0..3.0) };
@@ -127,8 +126,8 @@ fn tick_state(
         MonsterState::Distracted { target: dist_pos } => {
             let dp = *dist_pos;
             *target = AgentTarget2d::Point(dp);
-            settings.desired_speed = MONSTER_SPEED * speed_multiplier;
-            settings.max_speed = settings.desired_speed * 1.2;
+            settings.desired_speed = MONSTER_SPEED;
+            settings.max_speed = MONSTER_SPEED * 1.2;
             if monster_pos.distance(dp) < WANDER_ARRIVE_DIST {
                 *state = if rng.gen_bool(0.5) {
                     MonsterState::Wandering { target: random_wander_target(monster_pos, rng) }
@@ -140,7 +139,7 @@ fn tick_state(
         MonsterState::Tired { timer } => {
             *target = AgentTarget2d::None;
             settings.desired_speed = 0.0;
-            settings.max_speed = MONSTER_SPEED * speed_multiplier * 1.2;
+            settings.max_speed = MONSTER_SPEED * 1.2;
             *timer -= dt;
             if *timer <= 0.0 {
                 *state = if rng.gen_bool(0.5) {
@@ -214,7 +213,6 @@ pub fn update_monster_ai(
         }
 
         let blind_strength = effects.map(|e| e.blind_strength()).unwrap_or(0.0);
-        let speed_multiplier = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0);
 
         // Blind monsters have a reduced seek range (scaled toward 0).
         let effective_seek_range = MONSTER_SEEK_RANGE * (1.0 - blind_strength);
@@ -238,7 +236,6 @@ pub fn update_monster_ai(
             dist_to_player,
             missile_alerted || has_los,
             blind_strength,
-            speed_multiplier,
             dt,
             &mut rand::thread_rng(),
         );

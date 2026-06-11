@@ -16,6 +16,7 @@ use crate::{
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     dungeon::terrain::{DungeonState, TorporMultiplier},
     fov::{ExplorationState, find_exploration_waypoint},
+    nav::{STEERING_GAIN, STOP_THRESHOLD, snap_to_navmesh},
     status_effect::StatusEffects,
     ui::MessageLog,
 };
@@ -30,26 +31,10 @@ pub fn rotate_player_to_velocity(mut query: Query<(&LinearVelocity, &mut Rotatio
     }
 }
 
-// How far (in world units) to search for the nearest navmesh point when a
-// destination lands off the mesh (e.g. too close to a wall).
-const NAVMESH_SNAP_RADIUS: f32 = 80.0;
-
-fn snap_to_navmesh(point: Vec2, archipelago_query: &Query<&Archipelago2d>) -> Vec2 {
-    archipelago_query
-        .iter()
-        .next()
-        .and_then(|a| a.sample_point(point, &NAVMESH_SNAP_RADIUS).ok())
-        .map(|s| s.point())
-        .unwrap_or(point)
-}
-
 pub const PLAYER_SPEED: f32 = 320.0;
-pub const STOP_THRESHOLD: f32 = 8.0;
 // When holding down the directional keys.
 // Max speed feels too fast! But maybe we should implement acceleration.
 pub const PLAYER_DIRECTIONAL_SPEED: f32 = 240.0;
-// 60.0 would be near-instant steering response
-const PLAYER_STEERING_GAIN: f32 = 40.0;
 
 #[derive(Component)]
 pub struct Player;
@@ -204,31 +189,28 @@ pub fn advance_exploration(
 pub fn move_player(
     mut query: Query<
         (
-            Forces,
+            &LinearVelocity,
             &Transform,
             &mut MoveTarget,
-            Option<&AgentDesiredVelocity2d>,
             &mut AgentTarget2d,
-            Option<&StatusEffects>,
-            Option<&TorporMultiplier>,
+            &mut AgentSettings,
         ),
         With<Player>,
     >,
-    archipelago_query: Query<&Archipelago2d>,
     time: Res<Time>,
 ) {
-    for (mut forces, transform, mut move_target, desired_velocity, mut agent_target, effects, torpor) in
+    for (linear_vel, transform, mut move_target, mut agent_target, mut settings) in
         query.iter_mut()
     {
-        let current_speed = forces.linear_velocity().length();
+        let current_speed = linear_vel.length();
 
         if !move_target.active
             || (current_speed < PLAYER_SPEED / 100.0
                 && (time.elapsed() - move_target.time_set) > Duration::from_millis(500))
         {
             move_target.active = false;
-            forces.reset_accumulated_linear_acceleration();
-            *forces.linear_velocity_mut() = Vec2::ZERO;
+            settings.desired_speed = 0.0;
+            *agent_target = AgentTarget2d::None;
             continue;
         }
 
@@ -236,38 +218,14 @@ pub fn move_player(
         let distance = (move_target.destination - current).length();
 
         if distance <= STOP_THRESHOLD {
-            forces.reset_accumulated_linear_acceleration();
-            *forces.linear_velocity_mut() = Vec2::ZERO;
+            settings.desired_speed = 0.0;
             move_target.active = false;
             *agent_target = AgentTarget2d::None;
             continue;
         }
 
-        let direction = match desired_velocity {
-            Some(dv) if dv.velocity() != Vec2::ZERO => dv.velocity(),
-            // Zero desired velocity means Landmass has no path (player is off the navmesh
-            // or destination unreachable). Steer toward the nearest navmesh point so the
-            // player works their way back onto the mesh and pathfinding can resume.
-            _ => snap_to_navmesh(current, &archipelago_query) - current,
-        };
-
-        let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0)
-            * torpor.map(|t| t.get()).unwrap_or(1.0);
-        let desired_dir = direction.normalize_or_zero();
-        let current_vel = forces.linear_velocity();
-        // TODO: test this more. Not sure this has any effect, or the desired effect.
-        // Ideally, we'd slow down when cornering is *near*, but that sounds hard.
-        // Reduce speed when cornering: aligned = full speed, perpendicular/opposing = slower.
-        // Only active once moving; from rest, always allow full speed.
-        let cornering_factor = if current_vel.length_squared() > 0.5 {
-            desired_dir.dot(current_vel.normalize_or_zero()).max(0.0)
-        } else {
-            1.0
-        };
-        let desired_vel = desired_dir * PLAYER_SPEED * speed_mult * cornering_factor;
-        let correction = desired_vel - forces.linear_velocity();
-        forces.reset_accumulated_linear_acceleration();
-        forces.apply_linear_acceleration(correction * PLAYER_STEERING_GAIN);
+        settings.desired_speed = PLAYER_SPEED;
+        settings.max_speed = PLAYER_SPEED * 1.2;
     }
 }
 
@@ -399,7 +357,7 @@ pub fn directional_move_system(
     let desired_vel = dir * PLAYER_DIRECTIONAL_SPEED * speed_mult;
     let correction = desired_vel - forces.linear_velocity();
     forces.reset_accumulated_linear_acceleration();
-    forces.apply_linear_acceleration(correction * PLAYER_STEERING_GAIN);
+    forces.apply_linear_acceleration(correction * STEERING_GAIN);
     *agent_target = AgentTarget2d::None;
     commands.entity(entity).remove::<ExplorationGoal>();
 }
