@@ -94,8 +94,7 @@ pub fn subtract_polygon_from_terrain(
     dungeon_collider.0 = geometry_to_collider(&new_terrain);
 
     // Update the navmesh Resource
-    let valid_nav_mesh =
-        playable_area_to_nav_mesh(&new_playable_area, &dungeon_state.torpor_zones);
+    let valid_nav_mesh = playable_area_to_nav_mesh(&new_playable_area, &dungeon_state.torpor_zones);
     dungeon_nav_mesh.0 = nav_meshes.add(NavMesh2d { nav_mesh: valid_nav_mesh });
 
     // Break up the rubble before shrinking
@@ -229,7 +228,10 @@ pub fn subtract_polygon_from_terrain(
                         Transform::from_translation(center.extend(10.0)), // Set Z to 10.0 to render on top
                         RigidBody::Dynamic,
                         rubble_collider,
-                        CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
+                        CollisionLayers::new(
+                            GameLayer::Dynamic,
+                            [GameLayer::Wall, GameLayer::Dynamic],
+                        ),
                         velocity,
                         LinearDamping(1.5),
                         AngularDamping(1.5),

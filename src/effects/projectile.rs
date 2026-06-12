@@ -8,13 +8,13 @@ use bevy::prelude::*;
 use rand::Rng;
 use std::collections::HashSet;
 
-use crate::dungeon::terrain::TorporMultiplier;
-use crate::indicator::HitFlash;
 use crate::{
     AGENT_RADIUS, GameLayer, GameState,
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
+    dungeon::terrain::TorporMultiplier,
     effects::crumble_terrain::Rubble,
     fov,
+    indicator::HitFlash,
     item::{Item, ItemKind, item_name},
     monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
     player::Player,
@@ -41,10 +41,28 @@ pub struct TrailMeshes {
     glow: Handle<Mesh>,
 }
 
-pub fn init_trail_meshes(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
+/// Shared missile mesh/materials, built once at startup. Every missile is an identical 4px
+/// circle in one of two fixed colors, so there's no reason to allocate fresh handles per shot.
+#[derive(Resource)]
+pub struct MissileAssets {
+    mesh: Handle<Mesh>,
+    player_material: Handle<ColorMaterial>,
+    monster_material: Handle<ColorMaterial>,
+}
+
+pub fn init_trail_meshes(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
     commands.insert_resource(TrailMeshes {
         core: meshes.add(Rectangle::new(1.0, TRAIL_CORE_HEIGHT)),
         glow: meshes.add(Rectangle::new(1.0, TRAIL_GLOW_HEIGHT)),
+    });
+    commands.insert_resource(MissileAssets {
+        mesh: meshes.add(Circle::new(4.0)),
+        player_material: materials.add(ColorMaterial::from(Color::srgb(0.4, 0.6, 1.0))),
+        monster_material: materials.add(ColorMaterial::from(Color::srgb(1.0, 0.4, 0.2))),
     });
 }
 
@@ -74,6 +92,10 @@ pub struct KnockbackCooldown(f32);
 #[derive(Component)]
 pub struct MonsterShootTimer(pub f32);
 
+impl Default for MonsterShootTimer {
+    fn default() -> Self { Self::new() }
+}
+
 impl MonsterShootTimer {
     pub fn new() -> Self {
         let mut rng = rand::thread_rng();
@@ -100,29 +122,25 @@ impl MagicMissile {
 
 fn spawn_missile(
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<ColorMaterial>,
+    missile_assets: &MissileAssets,
     origin: Vec2,
     direction: Vec2,
     fired_by_player: bool,
     damage_multiplier: f32,
 ) {
     let spawn_pos = origin + direction * (AGENT_RADIUS + 6.0);
-    let color =
-        if fired_by_player { Color::srgb(0.4, 0.6, 1.0) } else { Color::srgb(1.0, 0.4, 0.2) };
+    let material = if fired_by_player {
+        missile_assets.player_material.clone()
+    } else {
+        missile_assets.monster_material.clone()
+    };
 
     commands.spawn((
         DespawnOnExit(GameState::InLevel),
-        MagicMissile {
-            distance_traveled: 0.0,
-            fired_by_player,
-            damage_multiplier,
-            last_trail_pos: Some(spawn_pos),
-            last_trail_vel: Some(direction * MISSILE_SPEED),
-        },
+        MagicMissile::new(fired_by_player, spawn_pos, direction * MISSILE_SPEED, damage_multiplier),
         TorporMultiplier(1.0),
-        Mesh2d(meshes.add(Circle::new(4.0))),
-        MeshMaterial2d(materials.add(ColorMaterial::from(color))),
+        Mesh2d(missile_assets.mesh.clone()),
+        MeshMaterial2d(material),
         Transform::from_translation(spawn_pos.extend(fov::MOVABLE_Z + 1.0)),
         RigidBody::Dynamic,
         Collider::circle(4.0),
@@ -154,8 +172,7 @@ pub fn execute_missile_command(
     mut palette: ResMut<CommandPaletteState>,
     player_query: Query<(&Transform, Option<&StatusEffects>), With<Player>>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    missile_assets: Res<MissileAssets>,
 ) {
     if palette.pending_command.as_deref() != Some(MISSILE_KEY) {
         return;
@@ -169,15 +186,7 @@ pub fn execute_missile_command(
         return;
     }
     let damage_multiplier = player_effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
-    spawn_missile(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        player_pos,
-        direction,
-        true,
-        damage_multiplier,
-    );
+    spawn_missile(&mut commands, &missile_assets, player_pos, direction, true, damage_multiplier);
 }
 
 pub fn monster_fire_missiles(
@@ -188,8 +197,7 @@ pub fn monster_fire_missiles(
         With<Monster>,
     >,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    missile_assets: Res<MissileAssets>,
 ) {
     let player_pos = player_query.translation.truncate();
 
@@ -199,8 +207,7 @@ pub fn monster_fire_missiles(
             continue;
         }
 
-        let mut rng = rand::thread_rng();
-        timer.0 = rng.gen_range(1.0..2.0);
+        *timer = MonsterShootTimer::new();
 
         let monster_pos = transform.translation.truncate();
         if monster_pos.distance(player_pos) > MONSTER_FIRE_RANGE {
@@ -211,8 +218,7 @@ pub fn monster_fire_missiles(
         let damage_multiplier = effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
         spawn_missile(
             &mut commands,
-            &mut meshes,
-            &mut materials,
+            &missile_assets,
             monster_pos,
             direction,
             false,
@@ -354,15 +360,26 @@ pub fn detect_missile_hits(
     }
 }
 
+/// Shared by the hit and dodge observers: shove the entity along `direction` and start its
+/// re-hit cooldown.
+fn apply_knockback(
+    commands: &mut Commands,
+    query: &mut Query<&mut LinearVelocity, (Without<MagicMissile>, With<RigidBody>)>,
+    hit_entity: Entity,
+    direction: Vec2,
+) {
+    let Ok(mut vel) = query.get_mut(hit_entity) else { return };
+    vel.0 += direction * KNOCKBACK_SPEED;
+    commands.entity(hit_entity).try_insert(KnockbackCooldown(KNOCKBACK_COOLDOWN));
+}
+
 pub fn apply_knockback_on_hit(
     trigger: On<MissileHitEvent>,
     mut commands: Commands,
     mut query: Query<&mut LinearVelocity, (Without<MagicMissile>, With<RigidBody>)>,
 ) {
     let event = trigger.event();
-    let Ok(mut vel) = query.get_mut(event.hit_entity) else { return };
-    vel.0 += event.direction * KNOCKBACK_SPEED;
-    commands.entity(event.hit_entity).try_insert(KnockbackCooldown(KNOCKBACK_COOLDOWN));
+    apply_knockback(&mut commands, &mut query, event.hit_entity, event.direction);
 }
 
 pub fn apply_dodge(
@@ -371,9 +388,7 @@ pub fn apply_dodge(
     mut query: Query<&mut LinearVelocity, (Without<MagicMissile>, With<RigidBody>)>,
 ) {
     let event = trigger.event();
-    let Ok(mut vel) = query.get_mut(event.hit_entity) else { return };
-    vel.0 += event.direction * KNOCKBACK_SPEED;
-    commands.entity(event.hit_entity).try_insert(KnockbackCooldown(KNOCKBACK_COOLDOWN));
+    apply_knockback(&mut commands, &mut query, event.hit_entity, event.direction);
 }
 
 pub fn apply_hit_flash_on_hit(

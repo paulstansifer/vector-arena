@@ -132,14 +132,14 @@ pub fn sync_dungeon_to_entities(
     dungeon_collider: Res<DungeonCollider>,
     mut terrain_query: Query<(&mut Mesh2d, &mut Collider), With<TerrainMarker>>,
 ) {
-    if dungeon_visuals.is_changed() {
-        if let Ok((mut mesh, _)) = terrain_query.single_mut() {
-            mesh.0 = dungeon_visuals.0.clone();
-        }
+    if dungeon_visuals.is_changed()
+        && let Ok((mut mesh, _)) = terrain_query.single_mut()
+    {
+        mesh.0 = dungeon_visuals.0.clone();
     }
-    if dungeon_collider.is_changed() {
-        if let Ok((_, mut collider)) = terrain_query.single_mut() {
-            *collider = dungeon_collider.0.clone();
-        }
+    if dungeon_collider.is_changed()
+        && let Ok((_, mut collider)) = terrain_query.single_mut()
+    {
+        *collider = dungeon_collider.0.clone();
     }
 }

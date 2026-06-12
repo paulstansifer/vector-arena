@@ -127,10 +127,10 @@ pub fn animate_pickup(
         transform.translation.y = pos.y;
         transform.scale = picking_up.initial_scale * (1.0 - t * 0.85);
 
-        if let Some(mat_handle) = mat_handle {
-            if let Some(mat) = materials.get_mut(mat_handle.0.id()) {
-                mat.color = mat.color.with_alpha(1.0 - t);
-            }
+        if let Some(mat_handle) = mat_handle
+            && let Some(mat) = materials.get_mut(mat_handle.0.id())
+        {
+            mat.color = mat.color.with_alpha(1.0 - t);
         }
 
         if picking_up.progress >= 1.0 {
@@ -236,17 +236,15 @@ pub fn execute_item_command(
                 &mut inventory,
                 |i| matches!(i, ItemKind::Scroll(_)),
                 item_kind,
-            ) {
-                if let Some(dest) =
-                    random_in_playable_area(&dungeon_state.playable_area, &mut rand::thread_rng())
-                {
-                    position.0 = dest;
-                    transform.translation.x = dest.x;
-                    transform.translation.y = dest.y;
-                    velocity.0 = Vec2::ZERO;
-                    commands.entity(entity).remove::<ExplorationGoal>();
-                    log.push(format!("You read {}. You are teleported!", item_name(item, 1)));
-                }
+            ) && let Some(dest) =
+                random_in_playable_area(&dungeon_state.playable_area, &mut rand::thread_rng())
+            {
+                position.0 = dest;
+                transform.translation.x = dest.x;
+                transform.translation.y = dest.y;
+                velocity.0 = Vec2::ZERO;
+                commands.entity(entity).remove::<ExplorationGoal>();
+                log.push(format!("You read {}. You are teleported!", item_name(item, 1)));
             }
         }
         _ => {

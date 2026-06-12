@@ -9,9 +9,8 @@ use geo::{Contains, Intersects};
 use bevy_egui::egui;
 
 use crate::{
-    command_palette::CommandPaletteState, dungeon::terrain::DungeonState,
-    indicator::StateIndicator, fov::CurrentFovState, item::ItemKind, player::Player,
-    status_effect::StatusEffects,
+    command_palette::CommandPaletteState, dungeon::terrain::DungeonState, fov::CurrentFovState,
+    indicator::StateIndicator, item::ItemKind, player::Player, status_effect::StatusEffects,
 };
 
 pub const MONSTER_SPEED: f32 = 80.0;
@@ -280,10 +279,10 @@ pub fn render_monster_markers(
     for (entity, transform) in monster_query.iter() {
         let Some(letter) = letter_map.letter_for_monster(entity) else { continue };
         let pos = transform.translation.truncate();
-        if let Some(ref fov) = current_fov {
-            if !fov.0.contains(&geo::Point::new(pos.x, pos.y)) {
-                continue;
-            }
+        if let Some(ref fov) = current_fov
+            && !fov.0.contains(&geo::Point::new(pos.x, pos.y))
+        {
+            continue;
         }
         let Ok(viewport_pos) = camera.world_to_viewport(camera_transform, transform.translation)
         else {

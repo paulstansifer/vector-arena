@@ -432,10 +432,10 @@ fn show_world_entity_tooltip(
     for (transform, tooltip) in entity_query.iter() {
         let pos = transform.translation.truncate();
         if pos.distance(world_pos) < hover_distance {
-            if let Some(ref fov) = current_fov {
-                if !fov.0.contains(&geo::Point::new(pos.x, pos.y)) {
-                    continue;
-                }
+            if let Some(ref fov) = current_fov
+                && !fov.0.contains(&geo::Point::new(pos.x, pos.y))
+            {
+                continue;
             }
             make_egui_tooltip(
                 ctx,

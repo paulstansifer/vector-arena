@@ -14,7 +14,6 @@ use vector_arena::{
             update_torpor_multipliers,
         },
     },
-    indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
     effects::{
         crumble_terrain::{Fragile, handle_right_click_excavation},
         projectile::{
@@ -27,6 +26,7 @@ use vector_arena::{
     },
     fov::{self, OpaqueVertices},
     goto,
+    indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
     item::{Inventory, animate_pickup, execute_item_command, pickup_items, register_item_commands},
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
@@ -209,11 +209,8 @@ fn spawn_game_world(
 ) {
     // Create the archipelago (the "world" for landmass pathfinding)
     let mut archipelago = Archipelago2d::new(ArchipelagoOptions::from_agent_radius(AGENT_RADIUS));
-    archipelago
-        .set_type_index_cost(1, TORPOR_NAV_COST)
-        .expect("torpor nav cost is positive");
-    let archipelago_id =
-        commands.spawn((DespawnOnExit(GameState::InLevel), archipelago)).id();
+    archipelago.set_type_index_cost(1, TORPOR_NAV_COST).expect("torpor nav cost is positive");
+    let archipelago_id = commands.spawn((DespawnOnExit(GameState::InLevel), archipelago)).id();
 
     let terrain_geometry = TerrainGeometry::new(window_width, window_height);
 
@@ -259,8 +256,7 @@ fn spawn_game_world(
         ))
         .id();
 
-    let torpor_material =
-        materials.add(ColorMaterial::from(Color::srgba(0.3, 0.7, 1.0, 0.35)));
+    let torpor_material = materials.add(ColorMaterial::from(Color::srgba(0.3, 0.7, 1.0, 0.35)));
     for zone in &terrain_geometry.torpor_zones {
         let mesh = geometry_to_mesh(&geo::MultiPolygon::new(vec![zone.clone()]));
         commands.spawn((

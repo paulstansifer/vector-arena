@@ -15,16 +15,12 @@ use crate::{
 
 pub const GOTO_KEY: &str = "g";
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct GotoState {
     /// Index 0 = 'a', ..., 25 = 'z'. Indices 7/9/10/11 (h/j/k/l) are reserved for
     /// cardinal directions (left/down/up/right). None = no label assigned.
     pub labels: [Option<Vec2>; 26],
     pub computed: bool,
-}
-
-impl Default for GotoState {
-    fn default() -> Self { Self { labels: [None; 26], computed: false } }
 }
 
 pub fn register_goto_command(mut registry: ResMut<PaletteRegistry>) {
@@ -150,7 +146,7 @@ pub fn render_goto_markers(
 
         painter.circle_filled(screen_pos, radius, circle_color);
 
-        let letter = ('a' as u8 + i as u8) as char;
+        let letter = (b'a' + i as u8) as char;
         painter.text(
             screen_pos,
             egui::Align2::CENTER_CENTER,
@@ -176,17 +172,14 @@ pub fn execute_goto_command(
     palette.pending_command = None;
     let Some(destination) = palette.pending_target.take() else { return };
 
-    match player_query.single_mut() {
-        Ok((entity, transform, mut move_target, mut agent_target)) => {
-            let current_pos = transform.translation.truncate();
-            move_target.destination = destination;
-            move_target.origin = current_pos;
-            move_target.active = true;
-            move_target.time_set = time.elapsed();
-            *agent_target = AgentTarget2d::Point(destination);
-            commands.entity(entity).remove::<ExplorationGoal>();
-        }
-        Err(_) => {}
+    if let Ok((entity, transform, mut move_target, mut agent_target)) = player_query.single_mut() {
+        let current_pos = transform.translation.truncate();
+        move_target.destination = destination;
+        move_target.origin = current_pos;
+        move_target.active = true;
+        move_target.time_set = time.elapsed();
+        *agent_target = AgentTarget2d::Point(destination);
+        commands.entity(entity).remove::<ExplorationGoal>();
     }
 }
 

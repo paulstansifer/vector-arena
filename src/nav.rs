@@ -107,8 +107,7 @@ pub fn playable_area_to_nav_mesh(
         let expand_style = BufferStyle::new(crate::AGENT_RADIUS)
             .line_cap(LineCap::Square)
             .line_join(LineJoin::Bevel);
-        let torpor_mp =
-            MultiPolygon::new(torpor_zones.to_vec()).buffer_with_style(expand_style);
+        let torpor_mp = MultiPolygon::new(torpor_zones.to_vec()).buffer_with_style(expand_style);
         // Two-pass triangulation keeps zone boundaries as exact triangle edges,
         // so no triangle straddles the torpor/non-torpor boundary.
         add_region(&eroded.difference(&torpor_mp), 0);
@@ -130,10 +129,10 @@ pub fn sync_island_nav_mesh(
     dungeon_nav_mesh: Res<DungeonNavMesh>,
     mut island_query: Query<&mut bevy_landmass::NavMeshHandle<TwoD>, With<NavMeshIslandMarker>>,
 ) {
-    if dungeon_nav_mesh.is_changed() {
-        if let Ok(mut nav_mesh_handle) = island_query.single_mut() {
-            nav_mesh_handle.0 = dungeon_nav_mesh.0.clone();
-        }
+    if dungeon_nav_mesh.is_changed()
+        && let Ok(mut nav_mesh_handle) = island_query.single_mut()
+    {
+        nav_mesh_handle.0 = dungeon_nav_mesh.0.clone();
     }
 }
 
@@ -155,21 +154,29 @@ pub fn apply_nav_velocity(
     )>,
     archipelago_query: Query<&Archipelago2d>,
 ) {
-    for (mut forces, transform, linear_vel, desired_velocity, settings, agent_target, torpor, effects) in
-        agents.iter_mut()
+    for (
+        mut forces,
+        transform,
+        linear_vel,
+        desired_velocity,
+        settings,
+        agent_target,
+        torpor,
+        effects,
+    ) in agents.iter_mut()
     {
         let pos = transform.translation.truncate();
         let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0)
             * torpor.map(|t| t.get()).unwrap_or(1.0);
 
         // Stop when close enough to a Point target.
-        if let AgentTarget2d::Point(target) = *agent_target {
-            if pos.distance(target) <= STOP_THRESHOLD {
-                let correction = Vec2::ZERO - forces.linear_velocity();
-                forces.reset_accumulated_linear_acceleration();
-                forces.apply_linear_acceleration(correction * STEERING_GAIN);
-                continue;
-            }
+        if let AgentTarget2d::Point(target) = *agent_target
+            && pos.distance(target) <= STOP_THRESHOLD
+        {
+            let correction = Vec2::ZERO - forces.linear_velocity();
+            forces.reset_accumulated_linear_acceleration();
+            forces.apply_linear_acceleration(correction * STEERING_GAIN);
+            continue;
         }
 
         let nav_vel = desired_velocity.velocity();

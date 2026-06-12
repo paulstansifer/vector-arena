@@ -188,19 +188,12 @@ pub fn advance_exploration(
 
 pub fn move_player(
     mut query: Query<
-        (
-            &LinearVelocity,
-            &Transform,
-            &mut MoveTarget,
-            &mut AgentTarget2d,
-            &mut AgentSettings,
-        ),
+        (&LinearVelocity, &Transform, &mut MoveTarget, &mut AgentTarget2d, &mut AgentSettings),
         With<Player>,
     >,
     time: Res<Time>,
 ) {
-    for (linear_vel, transform, mut move_target, mut agent_target, mut settings) in
-        query.iter_mut()
+    for (linear_vel, transform, mut move_target, mut agent_target, mut settings) in query.iter_mut()
     {
         let current_speed = linear_vel.length();
 

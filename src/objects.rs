@@ -344,30 +344,30 @@ pub fn explode_sigil(
                 vel.0 += dir * EXPLOSION_PUSHBACK_SPEED;
             }
 
-            if dist <= SIGIL_DAMAGE_RADIUS {
-                if let Some(mut stats) = stats_opt {
-                    let was_alive = stats.hp > 0.0;
-                    stats.hp -= SIGIL_DAMAGE;
+            if dist <= SIGIL_DAMAGE_RADIUS
+                && let Some(mut stats) = stats_opt
+            {
+                let was_alive = stats.hp > 0.0;
+                stats.hp -= SIGIL_DAMAGE;
 
-                    if is_player {
-                        player_damaged = true;
-                        stats.hp = stats.hp.max(0.0);
-                    } else if is_monster && was_alive && stats.hp <= 0.0 {
-                        if let Some(drop) = drop_opt {
-                            let kind = drop.0;
-                            let (svg_path, param) = sprite_spec(kind);
-                            commands.spawn((
-                                DespawnOnExit(GameState::InLevel),
-                                Item(kind),
-                                WorldTooltip(item_name(kind, 1).to_string()),
-                                SvgSprite { svg_path: svg_path.into(), param: Some(param) },
-                                Transform::from_translation(ent_pos.extend(fov::ON_FLOOR_Z))
-                                    .with_scale(Vec3::splat(0.4)),
-                            ));
-                        }
-                        monster_letters.release_monster(entity);
-                        commands.entity(entity).despawn();
+                if is_player {
+                    player_damaged = true;
+                    stats.hp = stats.hp.max(0.0);
+                } else if is_monster && was_alive && stats.hp <= 0.0 {
+                    if let Some(drop) = drop_opt {
+                        let kind = drop.0;
+                        let (svg_path, param) = sprite_spec(kind);
+                        commands.spawn((
+                            DespawnOnExit(GameState::InLevel),
+                            Item(kind),
+                            WorldTooltip(item_name(kind, 1).to_string()),
+                            SvgSprite { svg_path: svg_path.into(), param: Some(param) },
+                            Transform::from_translation(ent_pos.extend(fov::ON_FLOOR_Z))
+                                .with_scale(Vec3::splat(0.4)),
+                        ));
                     }
+                    monster_letters.release_monster(entity);
+                    commands.entity(entity).despawn();
                 }
             }
         }

@@ -115,11 +115,11 @@ pub fn spawn_rope(
         };
         if let Some((anchor_entity, proj_point)) = anchor {
             entity_cmd.insert(VerletLocked);
-            if let Ok((gtf, rb)) = anchor_query.get(anchor_entity) {
-                if *rb != RigidBody::Static {
-                    let local = gtf.affine().inverse().transform_point3(proj_point.extend(0.0));
-                    entity_cmd.insert(RopeEndAnchor { tracked: anchor_entity, local });
-                }
+            if let Ok((gtf, rb)) = anchor_query.get(anchor_entity)
+                && *rb != RigidBody::Static
+            {
+                let local = gtf.affine().inverse().transform_point3(proj_point.extend(0.0));
+                entity_cmd.insert(RopeEndAnchor { tracked: anchor_entity, local });
             }
         }
         points.push(entity_cmd.id());
@@ -177,17 +177,16 @@ fn push_rope_out_of_terrain(
         let move_dist = delta.length();
 
         // Swept check: raycast along the movement path to catch tunneling.
-        if move_dist > 1e-5 {
-            if let Ok(dir) = Dir2::new(delta) {
-                if let Some(hit) = spatial_query.cast_ray(old_pos, dir, move_dist, true, &filter) {
-                    let hit_point = old_pos + *dir * hit.distance;
-                    let corrected = (hit_point + hit.normal * (ROPE_COLLISION_RADIUS + 0.5))
-                        .extend(tf.translation.z);
-                    tf.translation = corrected;
-                    point.old_position = Some(corrected);
-                    continue;
-                }
-            }
+        if move_dist > 1e-5
+            && let Ok(dir) = Dir2::new(delta)
+            && let Some(hit) = spatial_query.cast_ray(old_pos, dir, move_dist, true, &filter)
+        {
+            let hit_point = old_pos + *dir * hit.distance;
+            let corrected =
+                (hit_point + hit.normal * (ROPE_COLLISION_RADIUS + 0.5)).extend(tf.translation.z);
+            tf.translation = corrected;
+            point.old_position = Some(corrected);
+            continue;
         }
 
         // Static check: point is inside or too close to terrain without having tunneled.

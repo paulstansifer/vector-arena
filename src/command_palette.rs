@@ -186,7 +186,7 @@ pub fn resolve_location_letter(
     }
     let c = rest.chars().next()?;
     match c {
-        c if c.is_uppercase() || c.is_digit(10) => {
+        c if c.is_uppercase() || c.is_ascii_digit() => {
             let entity = letter_map.entity_for_letter(c)?;
             monster_query.get(entity).ok().map(|(_, _, _, tf)| tf.translation.truncate())
         }
@@ -210,7 +210,7 @@ pub fn targeting_sub_completions(
 ) -> Vec<PaletteEntry> {
     use geo::Contains;
     let in_fov = |pos: Vec2| -> bool {
-        current_fov.map_or(true, |fov| fov.contains(&geo::Point::new(pos.x, pos.y)))
+        current_fov.is_none_or(|fov| fov.contains(&geo::Point::new(pos.x, pos.y)))
     };
 
     // Always build the full sub-menu so arrow keys can navigate among all targets.
@@ -230,7 +230,7 @@ pub fn targeting_sub_completions(
         if opt_pos.is_none() {
             continue;
         }
-        let letter = ('a' as u8 + i as u8) as char;
+        let letter = (b'a' + i as u8) as char;
         let desc = match letter {
             'h' => format!("{location_verb} left"),
             'j' => format!("{location_verb} down"),

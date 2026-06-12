@@ -53,9 +53,7 @@ pub struct StateIndicator {
 }
 
 impl StateIndicator {
-    pub fn new(character: char, duration: f32) -> Self {
-        Self { character, timer: duration }
-    }
+    pub fn new(character: char, duration: f32) -> Self { Self { character, timer: duration } }
 }
 
 pub fn tick_state_indicators(
@@ -87,10 +85,10 @@ pub fn render_state_indicators(
 
     for (transform, indicator) in query.iter() {
         let pos = transform.translation.truncate();
-        if let Some(ref fov) = current_fov {
-            if !fov.0.contains(&geo::Point::new(pos.x, pos.y)) {
-                continue;
-            }
+        if let Some(ref fov) = current_fov
+            && !fov.0.contains(&geo::Point::new(pos.x, pos.y))
+        {
+            continue;
         }
         let Ok(viewport_pos) = camera.world_to_viewport(camera_transform, transform.translation)
         else {

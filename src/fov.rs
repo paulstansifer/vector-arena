@@ -330,7 +330,7 @@ pub fn update_fov_from_pov(
     (
         exploration.intersection(&dark_area).simplify(1e-1),
         terrain::geometry_to_mesh(&dark_area),
-        terrain::geometry_to_mesh(&exploration),
+        terrain::geometry_to_mesh(exploration),
         fov_multi,
     )
 }
