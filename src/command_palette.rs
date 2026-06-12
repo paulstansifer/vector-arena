@@ -239,6 +239,10 @@ pub fn targeting_sub_completions(
             'j' => format!("{location_verb} down"),
             'k' => format!("{location_verb} up"),
             'l' => format!("{location_verb} right"),
+            'y' => format!("{location_verb} up-left"),
+            'u' => format!("{location_verb} up-right"),
+            'b' => format!("{location_verb} down-left"),
+            'n' => format!("{location_verb} down-right"),
             _ => format!("{location_verb} location {letter}"),
         };
         entries.push(PaletteEntry {

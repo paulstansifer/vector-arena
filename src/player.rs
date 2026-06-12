@@ -319,10 +319,10 @@ pub fn directional_move_system(
         dir += Vec2::new(1.0, 0.0);
     }
     if keyboard.pressed(Key::Character("y".into())) {
-        dir += Vec2::new(-1.0, -1.0);
+        dir += Vec2::new(-1.0, 1.0);
     }
     if keyboard.pressed(Key::Character("u".into())) {
-        dir += Vec2::new(1.0, -1.0);
+        dir += Vec2::new(1.0, 1.0);
     }
     if keyboard.pressed(Key::Character("b".into())) {
         dir += Vec2::new(-1.0, -1.0);

@@ -56,24 +56,25 @@ pub fn compute_goto_assignments(
         !exploration_state.0.contains(&geo::Point::new(p.x, p.y))
     };
 
-    // TODO: no ASCII indices!
-    // h/j/k/l (indices 7/9/10/11) are always the four cardinal directions.
-    const H: usize = 7; // left
-    const J: usize = 9; // down
-    const K: usize = 10; // up
-    const L: usize = 11; // right
+    // TODO: this is a bit of a hack!
+    let idx = |c: char| c as usize - 'a' as usize;
+
     let cardinals = [
-        (H, player_pos + Vec2::new(-70.0, 0.0)),
-        (J, player_pos + Vec2::new(0.0, -70.0)),
-        (K, player_pos + Vec2::new(0.0, 70.0)),
-        (L, player_pos + Vec2::new(70.0, 0.0)),
+        (idx('h'), player_pos + Vec2::new(-70.0, 0.0)),
+        (idx('j'), player_pos + Vec2::new(0.0, -70.0)),
+        (idx('k'), player_pos + Vec2::new(0.0, 70.0)),
+        (idx('l'), player_pos + Vec2::new(70.0, 0.0)),
+        (idx('y'), player_pos + Vec2::new(-50.0, 50.0)),
+        (idx('u'), player_pos + Vec2::new(50.0, 50.0)),
+        (idx('b'), player_pos + Vec2::new(-50.0, -50.0)),
+        (idx('n'), player_pos + Vec2::new(50.0, -50.0)),
     ];
     for (idx, pos) in cardinals {
         goto_state.labels[idx] = is_explored(pos).then_some(pos);
     }
 
     // Fill remaining slots with interesting points sorted by distance.
-    let reserved = [H, J, K, L];
+    let reserved: Vec<usize> = cardinals.map(|x| x.0).iter().cloned().collect();
     let map_points = poi.points.iter().copied().filter(|&p| is_explored(p));
     let item_points =
         item_query.iter().map(|tf| tf.translation.truncate()).filter(|&p| is_explored(p));
