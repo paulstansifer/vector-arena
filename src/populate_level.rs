@@ -90,41 +90,16 @@ pub fn populate(
     let monster_count = (depth as usize + 1).min(non_player_centers.len());
     for &position in non_player_centers.iter().take(monster_count) {
         let drop = if rng.gen_bool(0.6) { ALL_ITEM_KINDS.choose(&mut rng).copied() } else { None };
-        let monster = commands
-            .spawn((
-                DespawnOnExit(GameState::InLevel),
-                (
-                    Monster,
-                    MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
-                    Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
-                    StatusEffects::default(),
-                    TorporMultiplier(1.0),
-                ),
-                WorldTooltip::default(),
-                MonsterShootTimer::new(),
-                Mesh2d(monster_mesh.clone()),
-                MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.85, 0.12, 0.12)))),
-                Transform::from_translation(position.extend(fov::MOVABLE_Z)),
-                RigidBody::Dynamic,
-                Collider::circle(AGENT_RADIUS),
-                CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
-                LockedAxes::ROTATION_LOCKED,
-                Agent2dBundle {
-                    agent: Default::default(),
-                    settings: AgentSettings {
-                        radius: AGENT_RADIUS,
-                        desired_speed: MONSTER_SPEED,
-                        max_speed: MONSTER_SPEED * 1.2,
-                    },
-                    archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
-                },
-                AgentTarget2d::None,
-            ))
-            .id();
-        monster_letters.assign_monster(monster);
-        if let Some(kind) = drop {
-            commands.entity(monster).insert(MonsterDrop(kind));
-        }
+        spawn_monster(
+            commands,
+            materials,
+            monster_mesh.clone(),
+            archipelago_id,
+            position,
+            monster_letters,
+            drop,
+            &mut rng,
+        );
     }
 
     let item_count = rng.gen_range(4..=5);
@@ -152,6 +127,56 @@ pub fn populate(
     }
 
     spawn_staircase(commands, meshes, materials, staircase_position);
+}
+
+/// Spawns a single monster (full HP, sleeping) at `position`, registers its palette letter, and
+/// attaches a drop if given. Shared by initial level population and the Summon Monster scroll.
+pub fn spawn_monster(
+    commands: &mut Commands,
+    materials: &mut Assets<ColorMaterial>,
+    monster_mesh: Handle<Mesh>,
+    archipelago_id: Entity,
+    position: Vec2,
+    monster_letters: &mut crate::command_palette::LetterMap,
+    drop: Option<ItemKind>,
+    rng: &mut impl Rng,
+) -> Entity {
+    let monster = commands
+        .spawn((
+            DespawnOnExit(GameState::InLevel),
+            (
+                Monster,
+                MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
+                Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
+                StatusEffects::default(),
+                TorporMultiplier(1.0),
+            ),
+            WorldTooltip::default(),
+            MonsterShootTimer::new(),
+            Mesh2d(monster_mesh),
+            MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.85, 0.12, 0.12)))),
+            Transform::from_translation(position.extend(fov::MOVABLE_Z)),
+            RigidBody::Dynamic,
+            Collider::circle(AGENT_RADIUS),
+            CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
+            LockedAxes::ROTATION_LOCKED,
+            Agent2dBundle {
+                agent: Default::default(),
+                settings: AgentSettings {
+                    radius: AGENT_RADIUS,
+                    desired_speed: MONSTER_SPEED,
+                    max_speed: MONSTER_SPEED * 1.2,
+                },
+                archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
+            },
+            AgentTarget2d::None,
+        ))
+        .id();
+    monster_letters.assign_monster(monster);
+    if let Some(kind) = drop {
+        commands.entity(monster).insert(MonsterDrop(kind));
+    }
+    monster
 }
 
 fn spawn_staircase(

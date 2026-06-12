@@ -126,6 +126,29 @@ pub fn random_in_playable_area(
     None
 }
 
+/// Returns a random point inside `playable_area` (eroded by `AGENT_RADIUS`) whose distance from
+/// `origin` lies within `[min_dist, max_dist]`. Returns `None` after 1000 failed attempts.
+pub fn random_near_player(
+    playable_area: &MultiPolygon<f32>,
+    origin: Vec2,
+    min_dist: f32,
+    max_dist: f32,
+    rng: &mut impl Rng,
+) -> Option<Vec2> {
+    let style =
+        BufferStyle::new(-crate::AGENT_RADIUS).line_cap(LineCap::Square).line_join(LineJoin::Bevel);
+    let eroded = playable_area.buffer_with_style(style);
+    for _ in 0..1000 {
+        let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+        let dist = rng.gen_range(min_dist..max_dist);
+        let p = origin + Vec2::new(angle.cos(), angle.sin()) * dist;
+        if eroded.contains(&geo::Point::new(p.x, p.y)) {
+            return Some(p);
+        }
+    }
+    None
+}
+
 /// Bevy system to sync dungeon visuals and collider from resources to entity components.
 pub fn sync_dungeon_to_entities(
     dungeon_visuals: Res<DungeonVisuals>,

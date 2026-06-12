@@ -8,7 +8,7 @@ use bevy_landmass::prelude::AgentTarget2d;
 use crate::{
     fov::CurrentFovState,
     goto::GotoState,
-    item::{Inventory, ItemKind, item_name},
+    item::{Inventory, ItemIdentities, ItemKind, item_display_name},
     monster::{Monster, MonsterState, Stats},
     player::{ExplorationGoal, MoveTarget, Player},
     sprite::SpriteEguiTextures,
@@ -81,6 +81,7 @@ impl PaletteRegistry {
         goto_state: &GotoState,
         monster_query: &Query<(Entity, &Stats, &MonsterState, &Transform), With<Monster>>,
         current_fov: Option<&geo::MultiPolygon<f32>>,
+        identities: &ItemIdentities,
     ) -> Vec<PaletteEntry> {
         let mut entries = Vec::new();
         for cmd in &self.commands {
@@ -100,6 +101,7 @@ impl PaletteRegistry {
                                 inventory,
                                 *item_filter,
                                 letter_map,
+                                identities,
                             ));
                         }
                         _ => {}
@@ -148,6 +150,7 @@ pub(crate) fn inventory_entries(
     inventory: &Inventory,
     item_filter: fn(ItemKind) -> bool,
     letter_map: &LetterMap,
+    identities: &ItemIdentities,
 ) -> Vec<PaletteEntry> {
     let mut unique: Vec<(ItemKind, u16)> = Vec::new();
     for item in &inventory.0 {
@@ -164,7 +167,7 @@ pub(crate) fn inventory_entries(
         .filter_map(|(item, count)| {
             letter_map.get_item(*item).map(|letter| PaletteEntry {
                 key: format!("{command} {letter}"),
-                description: item_name(*item, *count),
+                description: item_display_name(*item, *count, identities),
                 icon: Some(*item),
                 is_complete: true,
             })
@@ -335,6 +338,7 @@ pub fn palette_system(
     sprite_textures: Res<SpriteEguiTextures>,
     letter_map: Res<LetterMap>,
     monster_query: Query<(Entity, &Stats, &MonsterState, &Transform), With<Monster>>,
+    identities: Res<ItemIdentities>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -354,6 +358,7 @@ pub fn palette_system(
             &goto_state,
             &monster_query,
             fov,
+            &identities,
         );
 
         let screen_rect = ctx.viewport_rect();
@@ -761,8 +766,14 @@ mod tests {
     fn quaff_uses_stable_letters() {
         let inv = test_inventory();
         let letter_map = test_letter_map();
-        let entries =
-            inventory_entries("q", &inv, |i| matches!(i, ItemKind::Potion(_)), &letter_map);
+        let identities = ItemIdentities::default();
+        let entries = inventory_entries(
+            "q",
+            &inv,
+            |i| matches!(i, ItemKind::Potion(_)),
+            &letter_map,
+            &identities,
+        );
         assert_eq!(keys(&entries), ["q a", "q c"]);
         assert_eq!(entries[0].description, "2 Red potions");
         assert_eq!(entries[1].description, "a Blue potion");
@@ -772,8 +783,14 @@ mod tests {
     fn read_uses_stable_letters() {
         let inv = test_inventory();
         let letter_map = test_letter_map();
-        let entries =
-            inventory_entries("r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map);
+        let identities = ItemIdentities::default();
+        let entries = inventory_entries(
+            "r",
+            &inv,
+            |i| matches!(i, ItemKind::Scroll(_)),
+            &letter_map,
+            &identities,
+        );
         assert_eq!(keys(&entries), ["r b", "r d"]);
         assert_eq!(entries[0].description, "2 scrolls titled 'Readme'");
         assert_eq!(entries[1].description, "a scroll titled 'Agents'");
@@ -784,11 +801,22 @@ mod tests {
     fn down_space_down_equals_r_d() {
         let inv = test_inventory();
         let letter_map = test_letter_map();
+        let identities = ItemIdentities::default();
 
-        let root_q =
-            inventory_entries("q", &inv, |i| matches!(i, ItemKind::Potion(_)), &letter_map);
-        let root_r =
-            inventory_entries("r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map);
+        let root_q = inventory_entries(
+            "q",
+            &inv,
+            |i| matches!(i, ItemKind::Potion(_)),
+            &letter_map,
+            &identities,
+        );
+        let root_r = inventory_entries(
+            "r",
+            &inv,
+            |i| matches!(i, ItemKind::Scroll(_)),
+            &letter_map,
+            &identities,
+        );
         // Simulate root level: ["q", "r"] as non-complete stubs
         let root = vec![
             PaletteEntry {
@@ -810,7 +838,13 @@ mod tests {
         let _ = (root_q, root_r); // suppress unused warning
 
         let spaced = after_down + " "; // "r "
-        let read = inventory_entries("r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map);
+        let read = inventory_entries(
+            "r",
+            &inv,
+            |i| matches!(i, ItemKind::Scroll(_)),
+            &letter_map,
+            &identities,
+        );
         let final_input = press_down(&spaced, &read); // → "r d" (second entry)
 
         assert_eq!(final_input, "r d");
@@ -826,6 +860,7 @@ mod tests {
     fn x_backspace_then_down_space_down_equals_r_d() {
         let inv = test_inventory();
         let letter_map = test_letter_map();
+        let identities = ItemIdentities::default();
 
         // Back to root after backspace: two commands available
         let root = vec![
@@ -846,7 +881,13 @@ mod tests {
 
         let after_down = press_down("", &root);
         let spaced = after_down + " ";
-        let read = inventory_entries("r", &inv, |i| matches!(i, ItemKind::Scroll(_)), &letter_map);
+        let read = inventory_entries(
+            "r",
+            &inv,
+            |i| matches!(i, ItemKind::Scroll(_)),
+            &letter_map,
+            &identities,
+        );
         let final_input = press_down(&spaced, &read);
 
         assert_eq!(final_input, "r d");

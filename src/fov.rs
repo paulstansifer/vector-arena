@@ -17,6 +17,8 @@ use crate::{
     status_effect::StatusEffects,
 };
 
+pub const WALL_FOV_DEPTH: f32 = 4.0;
+
 /// Other than solid rock (a special case), this marks things that block line-of-sight
 #[derive(Component)]
 pub struct Opaque;
@@ -299,7 +301,7 @@ pub fn update_staircase_fog_copy(
         geo::Rect::new((pos.x - half, pos.y - half), (pos.x + half, pos.y + half)).to_polygon(),
     ]);
     // Awkwardly duplicate the hack we do to actually display the FOV:
-    let fog_area = staircase_sq.difference(&current_fov.0.buffer(-1.0).buffer(5.0));
+    let fog_area = staircase_sq.difference(&current_fov.0.buffer(-1.0).buffer(1.0 + WALL_FOV_DEPTH));
 
     if let Some(fog_mesh) = meshes.get_mut(&fog_mesh_2d.0) {
         *fog_mesh = terrain::geometry_to_mesh(&fog_area);

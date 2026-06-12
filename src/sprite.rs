@@ -51,6 +51,10 @@ pub fn potion_hex(color: PotionColor) -> String {
         PotionColor::Red => "#cc3333".to_string(),
         PotionColor::Green => "#33cc33".to_string(),
         PotionColor::Blue => "#3366ff".to_string(),
+        PotionColor::Yellow => "#eebb22".to_string(),
+        PotionColor::Purple => "#aa22ff".to_string(),
+        PotionColor::Cyan => "#11eeff".to_string(),
+        PotionColor::Gray => "#777777".to_string(),
     }
 }
 
@@ -59,6 +63,8 @@ pub fn scroll_letter(name: ScrollName) -> &'static str {
         ScrollName::Readme => "R",
         ScrollName::Agents => "A",
         ScrollName::License => "L",
+        ScrollName::DoNotReadme => "D",
+        ScrollName::CodeOfConduct => "C",
     }
 }
 

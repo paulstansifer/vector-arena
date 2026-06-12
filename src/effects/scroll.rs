@@ -1,0 +1,159 @@
+// Scroll effects beyond plain teleportation. `item::execute_item_command` resolves a scroll's
+// identified `ScrollEffect` and, for the four effects below, triggers one of these events; each
+// observer carries its own system access (meshes, archipelago, exploration, monster queries) so
+// the read handler itself stays small.
+use bevy::prelude::*;
+use bevy_landmass::prelude::*;
+use geo::{BooleanOps, Buffer, Intersects, Line as GeoLine, Simplify};
+use rand::{Rng, seq::SliceRandom};
+
+use crate::{
+    AGENT_RADIUS, GameState,
+    command_palette::LetterMap,
+    dungeon::terrain::{self, DungeonState, random_near_player},
+    fov::{self, ExplorationState, NeverExploredMeshMarker, WALL_FOV_DEPTH},
+    item::{ALL_ITEM_KINDS, Item, item_name},
+    monster::Monster,
+    populate_level::spawn_monster,
+    sprite::{SvgSprite, sprite_spec},
+    status_effect::{StatusEffect, StatusEffects},
+    ui::{MessageLog, WorldTooltip},
+};
+
+#[derive(Event)]
+pub struct SummonMonsterEvent {
+    pub origin: Vec2,
+}
+
+#[derive(Event)]
+pub struct MagicMappingEvent;
+
+#[derive(Event)]
+pub struct MonsterConfusionEvent {
+    pub origin: Vec2,
+}
+
+#[derive(Event)]
+pub struct AcquirementEvent {
+    pub origin: Vec2,
+}
+
+/// Spawns a single monster 40–80 units from the reader.
+pub fn on_summon_monster(
+    trigger: On<SummonMonsterEvent>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    archipelago: Single<Entity, With<Archipelago2d>>,
+    dungeon_state: Res<DungeonState>,
+    mut monster_letters: ResMut<LetterMap>,
+    mut log: ResMut<MessageLog>,
+) {
+    let origin = trigger.event().origin;
+    let mut rng = rand::thread_rng();
+    let Some(pos) =
+        random_near_player(&dungeon_state.playable_area, origin, 40.0, 80.0, &mut rng)
+    else {
+        log.push("The summoning fizzles.");
+        return;
+    };
+    let mesh = meshes.add(Circle::new(AGENT_RADIUS));
+    spawn_monster(
+        &mut commands,
+        &mut materials,
+        mesh,
+        *archipelago,
+        pos,
+        &mut monster_letters,
+        None,
+        &mut rng,
+    );
+    log.push("A monster appears!");
+}
+
+/// Marks the whole walkable area (buffered out by `WALL_FOV_DEPTH` so wall edges show) as explored.
+pub fn on_magic_mapping(
+    _trigger: On<MagicMappingEvent>,
+    dungeon_state: Res<DungeonState>,
+    mut exploration: ResMut<ExplorationState>,
+    never_explored: Query<&Mesh2d, With<NeverExploredMeshMarker>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut log: ResMut<MessageLog>,
+) {
+    let mapped = dungeon_state.playable_area.buffer(WALL_FOV_DEPTH);
+    exploration.0 = exploration.0.difference(&mapped).simplify(1e-1);
+    // Rebuild the fog mesh now: `update_fov` skips recomputation while the player is stationary.
+    if let Ok(handle) = never_explored.single()
+        && let Some(mesh) = meshes.get_mut(&handle.0)
+    {
+        *mesh = terrain::geometry_to_mesh(&exploration.0);
+    }
+    log.push("The dungeon layout is revealed!");
+}
+
+/// Confuses every monster in the reader's line of sight.
+pub fn on_monster_confusion(
+    trigger: On<MonsterConfusionEvent>,
+    mut monsters: Query<(&Transform, &mut StatusEffects), With<Monster>>,
+    dungeon_state: Res<DungeonState>,
+    mut log: ResMut<MessageLog>,
+) {
+    let origin = trigger.event().origin;
+    let mut rng = rand::thread_rng();
+    let mut count = 0;
+    for (tf, mut effects) in monsters.iter_mut() {
+        let mpos = tf.translation.truncate();
+        let seg = GeoLine::new(
+            geo::Coord { x: mpos.x, y: mpos.y },
+            geo::Coord { x: origin.x, y: origin.y },
+        );
+        if dungeon_state.solid_rock.intersects(&seg) {
+            continue; // a wall blocks line of sight
+        }
+        let a = rng.gen_range(0.0..std::f32::consts::TAU);
+        effects.add(
+            StatusEffect::Confused { wander_dir: Vec2::new(a.cos(), a.sin()) },
+            rng.gen_range(6.0..10.0),
+        );
+        count += 1;
+    }
+    if count == 0 {
+        log.push("You hear distant cackling, but nothing happens.");
+    } else {
+        log.push(format!("{count} monster(s) become confused!"));
+    }
+}
+
+/// Spawns three random items 20–60 units from the reader.
+pub fn on_acquirement(
+    trigger: On<AcquirementEvent>,
+    mut commands: Commands,
+    dungeon_state: Res<DungeonState>,
+    mut log: ResMut<MessageLog>,
+) {
+    let origin = trigger.event().origin;
+    let mut rng = rand::thread_rng();
+    let mut spawned = 0;
+    for _ in 0..3 {
+        let Some(pos) =
+            random_near_player(&dungeon_state.playable_area, origin, 20.0, 60.0, &mut rng)
+        else {
+            continue;
+        };
+        let Some(&kind) = ALL_ITEM_KINDS.choose(&mut rng) else { continue };
+        let (svg_path, param) = sprite_spec(kind);
+        commands.spawn((
+            DespawnOnExit(GameState::InLevel),
+            Item(kind),
+            WorldTooltip(item_name(kind, 1).to_string()),
+            SvgSprite { svg_path: svg_path.into(), param: Some(param) },
+            Transform::from_translation(pos.extend(fov::ON_FLOOR_Z)).with_scale(Vec3::splat(0.4)),
+        ));
+        spawned += 1;
+    }
+    if spawned == 0 {
+        log.push("The acquirement fizzles.");
+    } else {
+        log.push("Items appear around you!");
+    }
+}

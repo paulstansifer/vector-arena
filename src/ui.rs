@@ -9,7 +9,7 @@ use geo::Contains;
 use crate::{
     DungeonDepth, GameState,
     fov::CurrentFovState,
-    item::{Inventory, ItemKind, item_name},
+    item::{Inventory, ItemIdentities, ItemKind, item_display_name},
     player::Player,
     sprite::SpriteEguiTextures,
     status_effect::StatusEffects,
@@ -106,6 +106,7 @@ fn ui_system(
     mut next_state: ResMut<NextState<GameState>>,
     depth: Res<DungeonDepth>,
     sprite_textures: Res<SpriteEguiTextures>,
+    identities: Res<ItemIdentities>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -139,6 +140,7 @@ fn ui_system(
         depth.0,
         near_staircase,
         &sprite_textures,
+        &identities,
     );
     if hud.toggle_menu {
         ui_state.menu_open = !ui_state.menu_open;
@@ -227,6 +229,7 @@ fn render_hud(
     depth: u32,
     near_staircase: bool,
     sprite_textures: &SpriteEguiTextures,
+    identities: &ItemIdentities,
 ) -> HudActions {
     let mut actions = HudActions::default();
     egui::TopBottomPanel::bottom("hud").show(ctx, |ui| {
@@ -262,7 +265,7 @@ fn render_hud(
             ui.separator();
 
             for (item, count) in item_counts {
-                draw_item_icon(ui, *item, *count, sprite_textures);
+                draw_item_icon(ui, *item, *count, sprite_textures, identities);
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -381,6 +384,7 @@ fn draw_item_icon(
     item: ItemKind,
     count: u16,
     sprite_textures: &SpriteEguiTextures,
+    identities: &ItemIdentities,
 ) {
     let size = BAR_HEIGHT;
     let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
@@ -397,7 +401,7 @@ fn draw_item_icon(
     }
 
     if response.hovered() {
-        response.on_hover_text(item_name(item, count));
+        response.on_hover_text(item_display_name(item, count, identities));
     }
 }
 

@@ -31,6 +31,7 @@ pub const MONSTER_FIRE_RANGE: f32 = 100.0;
 const KNOCKBACK_SPEED: f32 = 600.0;
 const KNOCKBACK_COOLDOWN: f32 = 0.15; // virtual seconds; prevents double-hits per pass
 const MISSILE_DAMAGE: f32 = 5.0;
+pub const MISSILE_MANA_COST: f32 = 2.0;
 const HIT_FLASH_DURATION: f32 = 0.2; // virtual seconds
 const TRAIL_CORE_HEIGHT: f32 = 1.0;
 const TRAIL_GLOW_HEIGHT: f32 = 4.0;
@@ -170,21 +171,27 @@ pub fn register_missile_command(mut registry: ResMut<PaletteRegistry>) {
 /// Fires a player missile toward the resolved target stored in palette.pending_target.
 pub fn execute_missile_command(
     mut palette: ResMut<CommandPaletteState>,
-    player_query: Query<(&Transform, Option<&StatusEffects>), With<Player>>,
+    mut player_query: Query<(&Transform, &mut Stats, Option<&StatusEffects>), With<Player>>,
     mut commands: Commands,
     missile_assets: Res<MissileAssets>,
+    mut message_log: ResMut<MessageLog>,
 ) {
     if palette.pending_command.as_deref() != Some(MISSILE_KEY) {
         return;
     }
     palette.pending_command = None;
     let Some(target_pos) = palette.pending_target.take() else { return };
-    let Ok((player_tf, player_effects)) = player_query.single() else { return };
+    let Ok((player_tf, mut stats, player_effects)) = player_query.single_mut() else { return };
+    if stats.mana < MISSILE_MANA_COST {
+        message_log.push("You don't have enough mana to zap a magic missile.");
+        return;
+    }
     let player_pos = player_tf.translation.truncate();
     let direction = (target_pos - player_pos).normalize_or_zero();
     if direction == Vec2::ZERO {
         return;
     }
+    stats.mana -= MISSILE_MANA_COST;
     let damage_multiplier = player_effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
     spawn_missile(&mut commands, &missile_assets, player_pos, direction, true, damage_multiplier);
 }

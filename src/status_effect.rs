@@ -201,21 +201,3 @@ pub fn apply_confusion_to_velocity(
         }
     }
 }
-
-/// Returns a random status effect kind and duration (for testing via potion quaff).
-pub fn random_status_effect(rng: &mut impl Rng) -> (StatusEffect, f32) {
-    let duration = rng.gen_range(4.0..8.0);
-    let kind = match rng.gen_range(0u32..7) {
-        0 => {
-            let a = rng.gen_range(0.0..std::f32::consts::TAU);
-            StatusEffect::Confused { wander_dir: Vec2::new(a.cos(), a.sin()) }
-        }
-        1 => StatusEffect::Blind,
-        2 => StatusEffect::SpeedMod(2.0),
-        3 => StatusEffect::SpeedMod(0.5),
-        4 => StatusEffect::MissileMod(2.0),
-        5 => StatusEffect::MissileMod(0.5),
-        _ => StatusEffect::Displacing,
-    };
-    (kind, duration)
-}

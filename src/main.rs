@@ -23,11 +23,15 @@ use vector_arena::{
             spawn_missile_trails, tick_knockback_cooldowns, update_missile_trails, update_missiles,
         },
         rope,
+        scroll::{on_acquirement, on_magic_mapping, on_monster_confusion, on_summon_monster},
     },
     fov::{self, OpaqueVertices},
     goto,
     indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
-    item::{Inventory, animate_pickup, execute_item_command, pickup_items, register_item_commands},
+    item::{
+        Inventory, ItemIdentities, animate_pickup, execute_item_command, pickup_items,
+        refresh_item_tooltips, register_item_commands,
+    },
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
     objects::{animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions},
@@ -65,6 +69,7 @@ fn main() {
         .init_state::<GameState>()
         .init_resource::<SavedPlayer>()
         .init_resource::<LetterMap>()
+        .init_resource::<ItemIdentities>()
         .add_systems(Startup, setup)
         .add_systems(Startup, enable_ui_input_absorption)
         .add_systems(Startup, init_trail_meshes)
@@ -78,6 +83,11 @@ fn main() {
         .add_systems(Update, tick_status_effects)
         .add_systems(Update, update_torpor_multipliers)
         .add_systems(Update, execute_item_command)
+        .add_systems(Update, refresh_item_tooltips)
+        .add_observer(on_summon_monster)
+        .add_observer(on_magic_mapping)
+        .add_observer(on_monster_confusion)
+        .add_observer(on_acquirement)
         .add_systems(Update, set_target_on_click)
         .add_systems(Update, move_player.after(update_torpor_multipliers))
         .add_systems(Update, nav::apply_nav_velocity.after(move_player))
@@ -141,10 +151,13 @@ fn on_enter_restart(
     mut message_log: ResMut<MessageLog>,
     mut next_state: ResMut<NextState<GameState>>,
     mut monster_letters: ResMut<LetterMap>,
+    mut identities: ResMut<ItemIdentities>,
 ) {
     message_log.clear();
     depth.0 = 1;
     monster_letters.clear_monsters();
+    // New game: reshuffle which appearance maps to which effect, and forget identifications.
+    identities.randomize(&mut rand::thread_rng());
     spawn_game_world(
         &mut commands,
         &mut meshes,

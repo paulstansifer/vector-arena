@@ -2,19 +2,27 @@
 // When the player walks within PICKUP_RADIUS, a `PickingUp` component is added
 // to the item entity.  The 0.25s ease-in animation runs on `Real` time so it
 // plays at normal speed even during bullet-time.
+use std::collections::{HashMap, HashSet};
+
 use avian2d::prelude::{LinearVelocity, Position};
 use bevy::{prelude::*, time::Real};
+use rand::{Rng, seq::SliceRandom};
 
 use crate::{
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     dungeon::terrain::{DungeonState, random_in_playable_area},
+    effects::scroll::{
+        AcquirementEvent, MagicMappingEvent, MonsterConfusionEvent, SummonMonsterEvent,
+    },
     monster::{Monster, Stats},
     player::{ExplorationGoal, Player},
-    status_effect::{StatusEffects, random_status_effect},
-    ui::MessageLog,
+    status_effect::{StatusEffect, StatusEffects},
+    ui::{MessageLog, WorldTooltip},
 };
 
 // TODO: use the 'strum' crate to get lowercase colors and ALL CAPS scroll titles.
+
+/// The "appearance" name: what the player sees before an item has been identified.
 pub fn item_name(item: ItemKind, count: u16) -> String {
     match item {
         ItemKind::Potion(color) if count == 1 => format!("a {color:?} potion"),
@@ -24,14 +32,38 @@ pub fn item_name(item: ItemKind, count: u16) -> String {
     }
 }
 
+/// The displayed name: once identified, describes the effect ("a Potion of Blindness");
+/// otherwise falls back to the appearance name from `item_name`.
+pub fn item_display_name(item: ItemKind, count: u16, identities: &ItemIdentities) -> String {
+    if !identities.is_identified(item) {
+        return item_name(item, count);
+    }
+    match item {
+        ItemKind::Potion(color) => {
+            let e = identities.potion_effect(color).name();
+            if count == 1 { format!("a Potion of {e}") } else { format!("{count} Potions of {e}") }
+        }
+        ItemKind::Scroll(name) => {
+            let e = identities.scroll_effect(name).name();
+            if count == 1 { format!("a Scroll of {e}") } else { format!("{count} Scrolls of {e}") }
+        }
+    }
+}
+
 const PICKUP_RADIUS: f32 = 22.0;
 const ANIM_SECS: f32 = 0.25;
 
+// Potion colors and scroll titles are *appearances*: their pairing with an effect is
+// randomized each new game (see `ItemIdentities`). There is one appearance per effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PotionColor {
     Red,
     Green,
     Blue,
+    Yellow,
+    Purple,
+    Cyan,
+    Gray,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,6 +71,8 @@ pub enum ScrollName {
     Readme,
     Agents,
     License,
+    DoNotReadme,
+    CodeOfConduct,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,14 +81,159 @@ pub enum ItemKind {
     Scroll(ScrollName),
 }
 
+const ALL_POTION_COLORS: &[PotionColor] = &[
+    PotionColor::Red,
+    PotionColor::Green,
+    PotionColor::Blue,
+    PotionColor::Yellow,
+    PotionColor::Purple,
+    PotionColor::Cyan,
+    PotionColor::Gray,
+];
+
+const ALL_SCROLL_NAMES: &[ScrollName] = &[
+    ScrollName::Readme,
+    ScrollName::Agents,
+    ScrollName::License,
+    ScrollName::DoNotReadme,
+    ScrollName::CodeOfConduct,
+];
+
 pub const ALL_ITEM_KINDS: &[ItemKind] = &[
     ItemKind::Potion(PotionColor::Red),
     ItemKind::Potion(PotionColor::Green),
     ItemKind::Potion(PotionColor::Blue),
+    ItemKind::Potion(PotionColor::Yellow),
+    ItemKind::Potion(PotionColor::Purple),
+    ItemKind::Potion(PotionColor::Cyan),
+    ItemKind::Potion(PotionColor::Gray),
     ItemKind::Scroll(ScrollName::Readme),
     ItemKind::Scroll(ScrollName::Agents),
     ItemKind::Scroll(ScrollName::License),
+    ItemKind::Scroll(ScrollName::DoNotReadme),
+    ItemKind::Scroll(ScrollName::CodeOfConduct),
 ];
+
+/// The hidden effect a potion appearance maps to this game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PotionEffect {
+    Confusion,
+    Blindness,
+    Haste,
+    Slowness,
+    Boosting,
+    Draining,
+    Displacement,
+}
+
+const ALL_POTION_EFFECTS: &[PotionEffect] = &[
+    PotionEffect::Confusion,
+    PotionEffect::Blindness,
+    PotionEffect::Haste,
+    PotionEffect::Slowness,
+    PotionEffect::Boosting,
+    PotionEffect::Draining,
+    PotionEffect::Displacement,
+];
+
+impl PotionEffect {
+    pub fn name(self) -> &'static str {
+        match self {
+            PotionEffect::Confusion => "Confusion",
+            PotionEffect::Blindness => "Blindness",
+            PotionEffect::Haste => "Haste",
+            PotionEffect::Slowness => "Slowness",
+            PotionEffect::Boosting => "Boosting",
+            PotionEffect::Draining => "Draining",
+            PotionEffect::Displacement => "Displacement",
+        }
+    }
+}
+
+/// The hidden effect a scroll appearance maps to this game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScrollEffect {
+    Teleport,
+    SummonMonster,
+    MagicMapping,
+    MonsterConfusion,
+    Acquirement,
+}
+
+const ALL_SCROLL_EFFECTS: &[ScrollEffect] = &[
+    ScrollEffect::Teleport,
+    ScrollEffect::SummonMonster,
+    ScrollEffect::MagicMapping,
+    ScrollEffect::MonsterConfusion,
+    ScrollEffect::Acquirement,
+];
+
+impl ScrollEffect {
+    pub fn name(self) -> &'static str {
+        match self {
+            ScrollEffect::Teleport => "Teleportation",
+            ScrollEffect::SummonMonster => "Monster Summoning",
+            ScrollEffect::MagicMapping => "Magic Mapping",
+            ScrollEffect::MonsterConfusion => "Monster Confusion",
+            ScrollEffect::Acquirement => "Acquirement",
+        }
+    }
+}
+
+/// Per-game roguelike identification state: which appearance maps to which effect (randomized
+/// at the start of every new game) and which item kinds the player has identified by using them.
+#[derive(Resource, Default)]
+pub struct ItemIdentities {
+    potion: HashMap<PotionColor, PotionEffect>,
+    scroll: HashMap<ScrollName, ScrollEffect>,
+    identified: HashSet<ItemKind>,
+}
+
+impl ItemIdentities {
+    /// Reshuffle the appearance→effect pairings and forget all identifications. Call once per
+    /// new game (not on descent).
+    pub fn randomize(&mut self, rng: &mut impl Rng) {
+        self.identified.clear();
+
+        let mut potion_effects = ALL_POTION_EFFECTS.to_vec();
+        potion_effects.shuffle(rng);
+        self.potion = ALL_POTION_COLORS.iter().copied().zip(potion_effects).collect();
+
+        let mut scroll_effects = ALL_SCROLL_EFFECTS.to_vec();
+        scroll_effects.shuffle(rng);
+        self.scroll = ALL_SCROLL_NAMES.iter().copied().zip(scroll_effects).collect();
+    }
+
+    pub fn potion_effect(&self, color: PotionColor) -> PotionEffect {
+        self.potion.get(&color).copied().unwrap_or(PotionEffect::Confusion)
+    }
+
+    pub fn scroll_effect(&self, name: ScrollName) -> ScrollEffect {
+        self.scroll.get(&name).copied().unwrap_or(ScrollEffect::Teleport)
+    }
+
+    pub fn is_identified(&self, item: ItemKind) -> bool { self.identified.contains(&item) }
+
+    pub fn identify(&mut self, item: ItemKind) { self.identified.insert(item); }
+}
+
+/// Maps an identified potion effect to a concrete status effect + duration applied on quaff.
+fn potion_status_effect(effect: PotionEffect, rng: &mut impl Rng) -> (StatusEffect, f32) {
+    let duration = rng.gen_range(4.0..8.0);
+    let kind = match effect {
+        PotionEffect::Confusion => {
+            let a = rng.gen_range(0.0..std::f32::consts::TAU);
+            StatusEffect::Confused { wander_dir: Vec2::new(a.cos(), a.sin()) }
+        }
+        PotionEffect::Blindness => StatusEffect::Blind,
+        PotionEffect::Haste => StatusEffect::SpeedMod(2.0),
+        PotionEffect::Slowness => StatusEffect::SpeedMod(0.5),
+        PotionEffect::Boosting => StatusEffect::MissileMod(2.0),
+        PotionEffect::Draining => StatusEffect::MissileMod(0.5),
+        PotionEffect::Displacement => StatusEffect::Displacing,
+    };
+    (kind, duration)
+}
 
 #[derive(Component)]
 pub struct Item(pub ItemKind);
@@ -108,6 +287,7 @@ pub fn animate_pickup(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut log: ResMut<MessageLog>,
     mut letter_map: ResMut<crate::command_palette::LetterMap>,
+    identities: Res<ItemIdentities>,
 ) {
     // Update target each frame so the item tracks the player if they move.
     let player_pos = player_query.single().map(|t| t.translation.truncate()).ok();
@@ -134,7 +314,7 @@ pub fn animate_pickup(
         }
 
         if picking_up.progress >= 1.0 {
-            log.push(format!("You pick up {}.", item_name(item.0, 1)));
+            log.push(format!("You pick up {}.", item_display_name(item.0, 1, &identities)));
             inventory.0.push(item.0);
             letter_map.get_or_assign_item(item.0);
             commands.entity(entity).despawn();
@@ -195,6 +375,7 @@ pub fn execute_item_command(
     mut log: ResMut<MessageLog>,
     mut commands: Commands,
     letter_map: Res<crate::command_palette::LetterMap>,
+    mut identities: ResMut<ItemIdentities>,
 ) {
     let Some(cmd) = palette.pending_command.take() else { return };
 
@@ -221,34 +402,89 @@ pub fn execute_item_command(
                 |i| matches!(i, ItemKind::Potion(_)),
                 item_kind,
             ) {
+                let ItemKind::Potion(color) = item else { return };
                 let gained = 20.0_f32.min(stats.max_hp - stats.hp);
                 stats.hp = (stats.hp + 20.0).min(stats.max_hp);
-                log.push(format!("You quaff {}. (+{} HP)", item_name(item, 1), gained as i32));
                 let mut rng = rand::thread_rng();
-                let (kind, duration) = random_status_effect(&mut rng);
+                let (kind, duration) =
+                    potion_status_effect(identities.potion_effect(color), &mut rng);
                 player_effects.add(kind, duration);
+                identities.identify(item);
+                log.push(format!(
+                    "You quaff {}. (+{} HP)",
+                    item_display_name(item, 1, &identities),
+                    gained as i32
+                ));
             }
         }
         ["r", letter_str] => {
             let Some(ch) = letter_str.chars().next() else { return };
             let Some(item_kind) = letter_map.item_for_letter(ch) else { return };
-            if let Some(item) = find_and_remove_item(
+            let Some(item) = find_and_remove_item(
                 &mut inventory,
                 |i| matches!(i, ItemKind::Scroll(_)),
                 item_kind,
-            ) && let Some(dest) =
-                random_in_playable_area(&dungeon_state.playable_area, &mut rand::thread_rng())
-            {
-                position.0 = dest;
-                transform.translation.x = dest.x;
-                transform.translation.y = dest.y;
-                velocity.0 = Vec2::ZERO;
-                commands.entity(entity).remove::<ExplorationGoal>();
-                log.push(format!("You read {}. You are teleported!", item_name(item, 1)));
+            ) else {
+                return;
+            };
+            let ItemKind::Scroll(name) = item else { return };
+            let effect = identities.scroll_effect(name);
+            identities.identify(item);
+
+            // Every scroll restores 20 MP in addition to its identified effect.
+            let mana_gained = 20.0_f32.min(stats.max_mana - stats.mana);
+            stats.mana = (stats.mana + 20.0).min(stats.max_mana);
+            let player_pos = transform.translation.truncate();
+            log.push(format!(
+                "You read {}. (+{} MP)",
+                item_display_name(item, 1, &identities),
+                mana_gained as i32
+            ));
+
+            match effect {
+                ScrollEffect::Teleport => {
+                    if let Some(dest) = random_in_playable_area(
+                        &dungeon_state.playable_area,
+                        &mut rand::thread_rng(),
+                    ) {
+                        position.0 = dest;
+                        transform.translation.x = dest.x;
+                        transform.translation.y = dest.y;
+                        velocity.0 = Vec2::ZERO;
+                        commands.entity(entity).remove::<ExplorationGoal>();
+                        log.push("You are teleported!");
+                    }
+                }
+                ScrollEffect::SummonMonster => {
+                    commands.trigger(SummonMonsterEvent { origin: player_pos });
+                }
+                ScrollEffect::MagicMapping => {
+                    commands.trigger(MagicMappingEvent);
+                }
+                ScrollEffect::MonsterConfusion => {
+                    commands.trigger(MonsterConfusionEvent { origin: player_pos });
+                }
+                ScrollEffect::Acquirement => {
+                    commands.trigger(AcquirementEvent { origin: player_pos });
+                }
             }
         }
         _ => {
             palette.pending_command = Some(cmd);
+        }
+    }
+}
+
+/// Keeps ground-item tooltips in sync with the current identification state, so an item dropped
+/// before its kind was identified shows its revealed name once the player learns it.
+pub fn refresh_item_tooltips(
+    identities: Res<ItemIdentities>,
+    mut query: Query<(&Item, &mut WorldTooltip)>,
+) {
+    for (item, mut tooltip) in query.iter_mut() {
+        let name = item_display_name(item.0, 1, &identities);
+        if tooltip.0 != name {
+            tooltip.0 = name;
         }
     }
 }
