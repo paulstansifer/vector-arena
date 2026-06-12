@@ -145,7 +145,6 @@ pub fn apply_nav_velocity(
     mut agents: Query<(
         Forces,
         &Transform,
-        &LinearVelocity,
         &AgentDesiredVelocity2d,
         &AgentSettings,
         &AgentTarget2d,
@@ -154,16 +153,8 @@ pub fn apply_nav_velocity(
     )>,
     archipelago_query: Query<&Archipelago2d>,
 ) {
-    for (
-        mut forces,
-        transform,
-        linear_vel,
-        desired_velocity,
-        settings,
-        agent_target,
-        torpor,
-        effects,
-    ) in agents.iter_mut()
+    for (mut forces, transform, desired_velocity, settings, agent_target, torpor, effects) in
+        agents.iter_mut()
     {
         let pos = transform.translation.truncate();
         let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0)
@@ -191,7 +182,7 @@ pub fn apply_nav_velocity(
         };
 
         // Reduce speed when cornering sharply; full speed from rest or when going straight.
-        let current_vel = linear_vel.0;
+        let current_vel = forces.linear_velocity();
         let cornering = if current_vel.length_squared() > 0.5 && desired_dir != Vec2::ZERO {
             desired_dir.dot(current_vel.normalize_or_zero()).max(0.0)
         } else {
