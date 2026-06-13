@@ -121,11 +121,25 @@ fn read_svg_bytes(svg_path: &str, param: Option<&SpriteParam>) -> Option<Vec<u8>
 
 const EMBEDDED_FONT: &[u8] = include_bytes!("../fonts/LiberationSans-Regular.ttf");
 
+// Building the font database scans every system font (and logs a warning per
+// unloadable face). It never changes, so build it once and share the Arc across
+// all Options, rather than re-scanning on every sprite load.
+fn shared_fontdb() -> std::sync::Arc<resvg::usvg::fontdb::Database> {
+    use std::sync::{Arc, OnceLock};
+    static DB: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
+    DB.get_or_init(|| {
+        let mut db = resvg::usvg::fontdb::Database::new();
+        db.load_font_data(EMBEDDED_FONT.to_vec());
+        #[cfg(not(target_arch = "wasm32"))]
+        db.load_system_fonts();
+        Arc::new(db)
+    })
+    .clone()
+}
+
 fn make_usvg_options() -> resvg::usvg::Options<'static> {
     let mut options = resvg::usvg::Options::default();
-    options.fontdb_mut().load_font_data(EMBEDDED_FONT.to_vec());
-    #[cfg(not(target_arch = "wasm32"))]
-    options.fontdb_mut().load_system_fonts();
+    options.fontdb = shared_fontdb();
     options
 }
 

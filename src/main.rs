@@ -53,10 +53,22 @@ struct SavedPlayer(Option<(Stats, Inventory)>);
 fn main() {
     App::new()
         .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window { title: "Vector Arena".into(), ..default() }),
-                ..default()
-            }),
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window { title: "Vector Arena".into(), ..default() }),
+                    ..default()
+                })
+                .set(bevy::log::LogPlugin {
+                    // Avian logs a benign "Tried to wake body … that does not exist" warning for
+                    // every dynamic body that's still in a sleeping island when the whole level is
+                    // despawned in one frame on level change (rubble, missiles, etc.). Silence just
+                    // that target; keep Bevy's defaults for everything else.
+                    filter: format!(
+                        "{},avian2d::dynamics::solver::islands::sleeping=error",
+                        bevy::log::DEFAULT_FILTER
+                    ),
+                    ..default()
+                }),
             avian2d::PhysicsPlugins::default(),
             Landmass2dPlugin::default(),
             // bevy_landmass::debug::Landmass2dDebugPlugin::default(),
