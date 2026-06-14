@@ -19,6 +19,11 @@ const BAR_WIDTH: f32 = 140.0;
 const BAR_HEIGHT: f32 = 22.0; // 4px taller than egui's default 18px interact_size
 const BAR_ROUNDING: u8 = 3;
 
+/// Exact height of the top message bar (content + egui panel frame margins).
+pub const TOP_PANEL_HEIGHT: f32 = 30.0;
+/// Exact height of the bottom HUD bar; used as `exact_height` so world alignment is guaranteed.
+pub const BOTTOM_PANEL_HEIGHT: f32 = 34.0;
+
 #[derive(Component, Default)]
 pub struct WorldTooltip(pub String);
 
@@ -168,8 +173,11 @@ fn ui_system(
 
 /// Top bar: latest message with optional expanded log. Returns true if the row was clicked.
 fn render_message_bar(ctx: &egui::Context, log: &MessageLog, expanded: bool) -> bool {
-    egui::TopBottomPanel::top("message_bar")
-        .show(ctx, |ui| {
+    let panel = egui::TopBottomPanel::top("message_bar");
+    // Lock the panel to an exact height when collapsed so the level edge aligns precisely.
+    // When expanded, let the panel grow naturally to show the full log.
+    let panel = if expanded { panel } else { panel.exact_height(TOP_PANEL_HEIGHT) };
+    panel.show(ctx, |ui| {
             let latest = log.iter().next_back().unwrap_or("—");
 
             let row_height = ui.spacing().interact_size.y;
@@ -232,7 +240,7 @@ fn render_hud(
     identities: &ItemIdentities,
 ) -> HudActions {
     let mut actions = HudActions::default();
-    egui::TopBottomPanel::bottom("hud").show(ctx, |ui| {
+    egui::TopBottomPanel::bottom("hud").exact_height(BOTTOM_PANEL_HEIGHT).show(ctx, |ui| {
         ui.horizontal(|ui| {
             draw_stat_bar(
                 ui,

@@ -4,7 +4,7 @@ use bevy_egui::{EguiPrimaryContextPass, input::egui_wants_any_pointer_input};
 use bevy_landmass::{NavMeshHandle, prelude::*};
 
 use vector_arena::{
-    AGENT_RADIUS, DungeonDepth, GameLayer, GameState, WorldBounds,
+    AGENT_RADIUS, WORLD_WIDTH, WORLD_HEIGHT, DungeonDepth, GameLayer, GameState, WorldBounds,
     command_palette::{CommandPalettePlugin, LetterMap},
     dungeon::{
         level_generation::TerrainGeometry,
@@ -44,7 +44,7 @@ use vector_arena::{
     sprite::SpritePlugin,
     status_effect::{apply_confusion_to_velocity, tick_status_effects},
     time_scale::manage_time_scale,
-    ui::{MessageLog, UiPlugin, enable_ui_input_absorption},
+    ui::{MessageLog, TOP_PANEL_HEIGHT, BOTTOM_PANEL_HEIGHT, UiPlugin, enable_ui_input_absorption},
 };
 
 #[derive(Resource, Default)]
@@ -55,7 +55,14 @@ fn main() {
         .add_plugins((
             DefaultPlugins
                 .set(WindowPlugin {
-                    primary_window: Some(Window { title: "Vector Arena".into(), ..default() }),
+                    primary_window: Some(Window {
+                        title: "Vector Arena".into(),
+                        resolution: (
+                            WORLD_WIDTH as u32,
+                            (WORLD_HEIGHT + TOP_PANEL_HEIGHT + BOTTOM_PANEL_HEIGHT) as u32,
+                        ).into(),
+                        ..default()
+                    }),
                     ..default()
                 })
                 .set(bevy::log::LogPlugin {
@@ -150,7 +157,10 @@ fn main() {
 
 fn setup(mut commands: Commands) {
     commands.insert_resource(ClearColor(Color::srgb(0.9, 0.9, 0.9)));
-    commands.spawn(Camera2d);
+    // Offset the camera so the world (centered at origin) is centered in the game area between the
+    // two UI bars, not in the middle of the full window.
+    let cam_y = (TOP_PANEL_HEIGHT - BOTTOM_PANEL_HEIGHT) / 2.0;
+    commands.spawn((Camera2d, Transform::from_translation(Vec3::new(0.0, cam_y, 0.0))));
 }
 
 fn on_enter_restart(
@@ -158,7 +168,6 @@ fn on_enter_restart(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut nav_meshes: ResMut<Assets<NavMesh2d>>,
-    window: Single<&Window>,
     mut depth: ResMut<DungeonDepth>,
     mut message_log: ResMut<MessageLog>,
     mut next_state: ResMut<NextState<GameState>>,
@@ -175,8 +184,6 @@ fn on_enter_restart(
         &mut meshes,
         &mut materials,
         &mut nav_meshes,
-        window.width(),
-        window.height(),
         1,
         None,
         &mut monster_letters,
@@ -189,7 +196,6 @@ fn on_enter_descend(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut nav_meshes: ResMut<Assets<NavMesh2d>>,
-    window: Single<&Window>,
     mut depth: ResMut<DungeonDepth>,
     mut message_log: ResMut<MessageLog>,
     saved_player: Res<SavedPlayer>,
@@ -204,8 +210,6 @@ fn on_enter_descend(
         &mut meshes,
         &mut materials,
         &mut nav_meshes,
-        window.width(),
-        window.height(),
         depth.0,
         saved_player.0.as_ref().map(|(stats, inv)| (*stats, Inventory(inv.0.clone()))),
         &mut monster_letters,
@@ -226,8 +230,6 @@ fn spawn_game_world(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
     nav_meshes: &mut Assets<NavMesh2d>,
-    window_width: f32,
-    window_height: f32,
     depth: u32,
     saved_player: Option<(Stats, Inventory)>,
     monster_letters: &mut LetterMap,
@@ -237,7 +239,7 @@ fn spawn_game_world(
     archipelago.set_type_index_cost(1, TORPOR_NAV_COST).expect("torpor nav cost is positive");
     let archipelago_id = commands.spawn((DespawnOnExit(GameState::InLevel), archipelago)).id();
 
-    let terrain_geometry = TerrainGeometry::new(window_width, window_height);
+    let terrain_geometry = TerrainGeometry::new(WORLD_WIDTH, WORLD_HEIGHT);
 
     // Build the underlying canonical state, visuals, collider, and navmesh
     let terrain_mesh = geometry_to_mesh(&terrain_geometry.solid_rock);
@@ -323,12 +325,12 @@ fn spawn_game_world(
         commands.entity(door_entity).add_child(joint_entity);
     }
 
-    commands.insert_resource(WorldBounds { width: window_width, height: window_height });
+    commands.insert_resource(WorldBounds { width: WORLD_WIDTH, height: WORLD_HEIGHT });
     let rubble_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.5, 0.5)));
     commands
         .insert_resource(vector_arena::effects::crumble_terrain::RubbleMaterial(rubble_material));
 
-    fov::spawn_fov_meshes(commands, meshes, materials, window_width, window_height);
+    fov::spawn_fov_meshes(commands, meshes, materials, WORLD_WIDTH, WORLD_HEIGHT);
 
     // Spawn the island (navigation surface) for landmass
     commands.spawn((DespawnOnExit(GameState::InLevel), NavMeshIslandMarker, Island2dBundle {

@@ -19,6 +19,9 @@ pub mod ui;
 // TODO: move all these things out!
 pub const AGENT_RADIUS: f32 = 10.0;
 
+pub const WORLD_WIDTH: f32 = 1280.0;
+pub const WORLD_HEIGHT: f32 = 720.0;
+
 #[derive(bevy::prelude::Resource)]
 pub struct WorldBounds {
     pub width: f32,
