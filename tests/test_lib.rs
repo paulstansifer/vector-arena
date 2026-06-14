@@ -50,6 +50,45 @@ pub fn loc(app: &App, entity: Entity) -> Vec3 {
 }
 
 // ---------------------------------------------------------------------------
+// Full-game headless app for smoke tests and listen-mode integration tests.
+// ---------------------------------------------------------------------------
+
+/// Build a headless full-game app (no window, no Winit event loop).
+///
+/// Passes `seed` to the dungeon generator when `Some`; otherwise uses thread_rng.
+///
+/// # Usage
+/// ```rust
+/// let mut app = headless_game_app(Some(42));
+/// tick(&mut app);
+/// ```
+#[allow(dead_code)]
+pub fn headless_game_app(seed: Option<u64>) -> App {
+    use bevy::{window::ExitCondition, winit::WinitPlugin};
+    use vector_arena::game::{DungeonSeed, GamePlugin};
+
+    let mut app = App::new();
+    app.add_plugins((
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: None,
+                exit_condition: ExitCondition::DontExit,
+                ..default()
+            })
+            .disable::<WinitPlugin>()
+            // Pipelined rendering requires Winit for frame synchronization; disable it so
+            // tests can drive the app directly with app.update().
+            .disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>(),
+        GamePlugin { headless: true },
+    ));
+    if let Some(s) = seed {
+        app.insert_resource(DungeonSeed(s));
+    }
+    app.finish();
+    app
+}
+
+// ---------------------------------------------------------------------------
 // Generic Bevy preview window for test geometry visualization.
 //
 // Usage:

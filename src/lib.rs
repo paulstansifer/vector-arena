@@ -1,5 +1,6 @@
 // Module exports, global constants, and shared types.
 pub mod command_palette;
+pub mod game;
 pub mod dungeon;
 pub mod effects;
 pub mod fov;
