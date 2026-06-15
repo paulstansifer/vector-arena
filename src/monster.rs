@@ -2,6 +2,7 @@
 // `MonsterState` drives behavior each frame: sleeping monsters ignore the player,
 // wandering ones path to a random nearby location at half speed, seeking ones chase
 // the player, tired ones rest briefly, and distracted ones path to a fixed point.
+use avian2d::prelude::LinearVelocity;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use geo::{Contains, Intersects, MultiPolygon};
@@ -14,7 +15,7 @@ use crate::{
     fov::CurrentFovState,
     indicator::StateIndicator,
     item::ItemKind,
-    player::Player,
+    player::{ExplorationGoal, MoveTarget, Player},
     status_effect::StatusEffects,
 };
 
@@ -186,7 +187,10 @@ pub fn refresh_monster_tooltips(
 
 pub fn update_monster_ai(
     time: Res<Time>,
-    player_query: Single<(Entity, &Transform), With<Player>>,
+    player_query: Single<
+        (Entity, &Transform, &mut MoveTarget, &mut AgentTarget2d, &mut LinearVelocity),
+        (With<Player>, Without<Monster>),
+    >,
     mut monster_query: Query<
         (
             Entity,
@@ -202,7 +206,13 @@ pub fn update_monster_ai(
     dungeon_state: Res<DungeonState>,
     mut commands: Commands,
 ) {
-    let (player_entity, player_transform) = *player_query;
+    let (
+        player_entity,
+        player_transform,
+        mut player_move_target,
+        mut player_agent_target,
+        mut player_velocity,
+    ) = player_query.into_inner();
     let player_pos = player_transform.translation.truncate();
     let solid_rock = &dungeon_state.solid_rock;
     let dt = time.delta_secs();
@@ -245,6 +255,15 @@ pub fn update_monster_ai(
             dt,
             &mut rand::thread_rng(),
         );
+        // When a monster newly enters Seeking (the chase state, not Distracted), interrupt
+        // the player's current path; they may want to change plans!
+        if old_label != "seeking" && matches!(&*state, MonsterState::Seeking { .. }) {
+            player_move_target.active = false;
+            *player_agent_target = AgentTarget2d::None;
+            player_velocity.0 = Vec2::ZERO;
+            commands.entity(player_entity).remove::<ExplorationGoal>();
+        }
+
         if state.label() != old_label {
             let ch = match &*state {
                 MonsterState::Seeking { .. } | MonsterState::Distracted { .. } => '!',
