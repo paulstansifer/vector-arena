@@ -480,7 +480,7 @@ pub fn execute_item_command(
             ) {
                 let ItemKind::Potion(color) = item else { return };
                 let gained = 20.0_f32.min(stats.max_hp - stats.hp);
-                stats.hp = (stats.hp + 20.0).min(stats.max_hp);
+                stats.hp = (stats.hp + 15.0).min(stats.max_hp);
                 let mut rng = rand::thread_rng();
                 let (kind, duration) =
                     potion_status_effect(identities.potion_effect(color), &mut rng);

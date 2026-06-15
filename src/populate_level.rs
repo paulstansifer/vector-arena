@@ -53,7 +53,7 @@ pub fn populate(
         non_player_centers.choose(rng).copied().unwrap_or(player_position + Vec2::new(50.0, 0.0));
 
     let (initial_stats, initial_inventory) = saved_player.unwrap_or((
-        Stats { hp: 100.0, max_hp: 100.0, mana: 80.0, max_mana: 80.0 },
+        Stats { hp: 50.0, max_hp: 50.0, mana: 80.0, max_mana: 80.0 },
         Inventory::default(),
     ));
 
