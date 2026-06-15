@@ -5,7 +5,6 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::{prelude::*, rngs::StdRng};
-use std::time::Duration;
 use vector_arena::{
     AGENT_RADIUS, GameLayer,
     dungeon::{
@@ -14,7 +13,7 @@ use vector_arena::{
         terrain::geometry_to_collider,
     },
     monster::MONSTER_SPEED,
-    nav::playable_area_to_nav_mesh,
+    nav::{apply_nav_velocity, playable_area_to_nav_mesh},
     player::{MoveTarget, PLAYER_SPEED, Player, move_player},
 };
 
@@ -113,15 +112,6 @@ fn missile_hits_monster_at_various_distances() {
     );
 }
 
-fn mock_physics_system(
-    mut query: Query<(&mut Transform, &LinearVelocity)>,
-    time: Res<Time<Virtual>>,
-) {
-    for (mut transform, velocity) in query.iter_mut() {
-        transform.translation += velocity.0.extend(0.0) * time.delta_secs();
-    }
-}
-
 #[test]
 fn test_player_can_path_within_room_and_to_other_room() {
     let mut rng = StdRng::seed_from_u64(1234);
@@ -167,16 +157,21 @@ fn test_player_can_path_within_room_and_to_other_room() {
     assert_eq!(terrain_geometry.rooms.len(), 2);
 
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(TransformPlugin);
-    app.add_plugins(AssetPlugin::default());
-    app.add_plugins(Landmass2dPlugin::default());
-
-    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
-        1.0 / 60.0,
-    )));
+    app.add_plugins((
+        MinimalPlugins,
+        TransformPlugin,
+        AssetPlugin::default(),
+        bevy::scene::ScenePlugin,
+        PhysicsPlugins::default(),
+        Landmass2dPlugin::default(),
+    ));
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+        std::time::Duration::from_secs_f32(1.0 / 60.0),
+    ));
     app.insert_resource(Time::<Virtual>::default());
-    app.add_systems(Update, (move_player, mock_physics_system).chain());
+    app.insert_resource(Gravity(Vec2::ZERO));
+    app.add_systems(Update, (move_player, apply_nav_velocity).chain());
+    app.finish();
 
     let mut nav_meshes = app.world_mut().resource_mut::<Assets<NavMesh2d>>();
     let valid_nav_mesh =
@@ -198,11 +193,17 @@ fn test_player_can_path_within_room_and_to_other_room() {
     let r0 = terrain_geometry.rooms[0];
     let start_pos = Vec2::new(r0.center().x, r0.center().y);
 
+    // TODO: We should probably have reusable spawning!
     let player_id = app
         .world_mut()
         .spawn((
             Player,
             Transform::from_translation(start_pos.extend(0.0)),
+            RigidBody::Dynamic,
+            Collider::circle(AGENT_RADIUS),
+            ColliderDensity(8.0),
+            CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
+            LockedAxes::ROTATION_LOCKED,
             LinearVelocity::ZERO,
             MoveTarget {
                 destination: start_pos,
@@ -242,9 +243,7 @@ fn test_player_can_path_within_room_and_to_other_room() {
     // Run app updates until player reaches intra-room target or we hit a step limit
     let mut reached = false;
     for step in 0..1000 {
-        let mut time = app.world_mut().resource_mut::<Time<Virtual>>();
-        time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
-        app.update();
+        tick(&mut app);
 
         let player_entity = app.world().entity(player_id);
         let transform = player_entity.get::<Transform>().unwrap();
@@ -291,9 +290,7 @@ fn test_player_can_path_within_room_and_to_other_room() {
 
     reached = false;
     for step in 0..3000 {
-        let mut time = app.world_mut().resource_mut::<Time<Virtual>>();
-        time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
-        app.update();
+        tick(&mut app);
 
         let player_entity = app.world().entity(player_id);
         let transform = player_entity.get::<Transform>().unwrap();
