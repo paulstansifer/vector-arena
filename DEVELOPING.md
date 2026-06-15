@@ -8,19 +8,24 @@ A 2D dungeon-exploration game built with [Bevy](https://bevyengine.org/) (0.18.1
 
 ```
 src/
-├── main.rs                   # App setup, system registration, world startup (terrain, doors, FOV)
+├── main.rs                   # Binary entry point: window setup, camera, clear color
 ├── lib.rs                    # Module exports, GameLayer/GameState enums, WorldBounds, AGENT_RADIUS, etc.
+├── game.rs                   # GamePlugin: all gameplay systems, startup logic, dungeon seeding
 ├── player.rs                 # Player component, MoveTarget steering, click-to-move, exploration goals
 ├── monster.rs                # Monster, Stats, wander/seek AI, MonsterDrop, tooltip refresh
 ├── nav.rs                    # Landmass→Avian2D velocity bridge + navmesh triangulation
 ├── fov.rs                    # FOV raycasting, exploration tracking, mesh overlays
 ├── item.rs                   # Items, inventory, pickup animation, use dialog dispatch
-├── object.rs                 # Objects that can't be picked up (currently just unstable sigils)
+├── objects.rs                # Objects that can't be picked up (currently just unstable sigils)
 ├── populate_level.rs         # Spawns player, monsters, items, and the down staircase into rooms
 ├── time_scale.rs             # Global virtual-time scaling (bullet-time / pause / normal)
 ├── indicator.rs              # Visual-only temporary effects (like hitflash)
 ├── ui.rs                     # egui HUD: message log, stat bars, inventory, menu
 ├── command_palette.rs        # General interface for complex user commands
+├── sprite.rs                 # SVG sprite loading and egui texture registration
+├── status_effect.rs          # Confusion, torpor, and other timed status effects
+├── bin/
+│   └── headless.rs           # Scripted headless runner (see Testing section below)
 ├── dungeon/
 │   ├── mod.rs                # Re-exports
 │   ├── bsp.rs                # Binary Space Partitioning algorithm
@@ -50,7 +55,7 @@ src/
 
 ## Architecture Overview
 
-### Startup sequence (`main.rs::spawn_game_world`)
+### Startup sequence (`game.rs::spawn_game_world`)
 
 1. Generate dungeon: `BSP → level_generation → TerrainGeometry`
 2. Create physics/render/navmesh resources from terrain geometry
@@ -103,3 +108,45 @@ Item pickup animations and the physics fixed-timestep are both adjusted to remai
 **New monster behavior** — extend [src/monster.rs](src/monster.rs) with components and systems; register the systems in `main.rs`.
 
 **Terrain changes at runtime** — mutate `DungeonState` (the `solid_rock`/`playable_area` `MultiPolygon`s); `sync_dungeon_to_entities()` will automatically rebuild mesh, collider, and navmesh on the next frame. See `crumble_terrain.rs` for the pattern.
+
+---
+
+## Testing
+
+### Integration tests
+
+```
+cargo test                    # run all tests
+cargo test start_complete_game  # full-game smoke test only
+```
+
+Integration tests live in `tests/`. They share helpers from `tests/test_lib.rs`:
+
+- **`physics_app(gravity, ropes)`** — minimal app with Avian2D physics, no window.
+- **`headless_game_app(seed)`** — full game app with no window/Winit; drives the game via `app.update()` directly. Used by the startup smoke test in `tests/game_tests.rs`.
+- **`tick(app)`** — advance one 60 Hz frame (advances `Time<Virtual>` then calls `app.update()`).
+
+`GamePlugin { headless: true }` is used in test contexts to skip egui-dependent plugins while still initialising all gameplay systems.
+
+### Headless scripted runner
+
+For interactive manual testing of a change — for example to take a screenshot or script a sequence of player actions — use the `headless` binary instead of the test harness:
+
+```
+cargo run --bin headless -- 'wait 1s; snap /tmp/before.png'
+cargo run --bin headless -- 'wait 0.5s; click left 200 100; wait 2s; snap /tmp/after.png'
+```
+
+Progress and errors are written to `/tmp/va-headless.log` (Bevy's INFO logs are suppressed).
+
+**Supported commands** (semicolon-separated in a single argument):
+
+| Command | Effect |
+|---|---|
+| `wait <N>s` | Advance N seconds at 60 fps |
+| `snap <path>` | Save a PNG screenshot to `<path>` |
+| `cmd <key>` | Fire a command-palette key (e.g. `cmd q` to quit to menu) |
+| `click left <x> <y>` | Set the player's move target to world coordinates (x, y) |
+| `level blank` | Replace the dungeon with an open 800×500 room |
+
+The binary always starts with seed 42 (deterministic dungeon) and waits 120 frames for the game to reach `InLevel` before executing commands.
