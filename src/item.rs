@@ -73,6 +73,8 @@ pub enum ScrollName {
     License,
     DoNotReadme,
     CodeOfConduct,
+    Passwd,
+    Hosts,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -97,6 +99,8 @@ const ALL_SCROLL_NAMES: &[ScrollName] = &[
     ScrollName::License,
     ScrollName::DoNotReadme,
     ScrollName::CodeOfConduct,
+    ScrollName::Passwd,
+    ScrollName::Hosts,
 ];
 
 pub const ALL_ITEM_KINDS: &[ItemKind] = &[
@@ -112,6 +116,8 @@ pub const ALL_ITEM_KINDS: &[ItemKind] = &[
     ItemKind::Scroll(ScrollName::License),
     ItemKind::Scroll(ScrollName::DoNotReadme),
     ItemKind::Scroll(ScrollName::CodeOfConduct),
+    ItemKind::Scroll(ScrollName::Passwd),
+    ItemKind::Scroll(ScrollName::Hosts),
 ];
 
 /// The hidden effect a potion appearance maps to this game.
@@ -158,6 +164,8 @@ pub enum ScrollEffect {
     MagicMapping,
     MonsterConfusion,
     Acquirement,
+    Identify,
+    Forgetting,
 }
 
 const ALL_SCROLL_EFFECTS: &[ScrollEffect] = &[
@@ -166,6 +174,8 @@ const ALL_SCROLL_EFFECTS: &[ScrollEffect] = &[
     ScrollEffect::MagicMapping,
     ScrollEffect::MonsterConfusion,
     ScrollEffect::Acquirement,
+    ScrollEffect::Identify,
+    ScrollEffect::Forgetting,
 ];
 
 impl ScrollEffect {
@@ -176,6 +186,8 @@ impl ScrollEffect {
             ScrollEffect::MagicMapping => "Magic Mapping",
             ScrollEffect::MonsterConfusion => "Monster Confusion",
             ScrollEffect::Acquirement => "Acquirement",
+            ScrollEffect::Identify => "Identify",
+            ScrollEffect::Forgetting => "Forgetting",
         }
     }
 }
@@ -215,6 +227,70 @@ impl ItemIdentities {
     pub fn is_identified(&self, item: ItemKind) -> bool { self.identified.contains(&item) }
 
     pub fn identify(&mut self, item: ItemKind) { self.identified.insert(item); }
+
+    /// Implements a Scroll of Forgetting: pick an item type (potions or scrolls) that has at least
+    /// two identified appearances, choose up to three of them, forget their identifications, and
+    /// permute (derange) the chosen appearances' hidden effects among one another. Returns the
+    /// number of forgotten appearances and the type word for the message, or `None` if neither
+    /// type had enough known appearances to scramble.
+    pub fn forget(&mut self, rng: &mut impl Rng) -> Option<(usize, &'static str)> {
+        let known_potions: Vec<PotionColor> = ALL_POTION_COLORS
+            .iter()
+            .copied()
+            .filter(|c| self.identified.contains(&ItemKind::Potion(*c)))
+            .collect();
+        let known_scrolls: Vec<ScrollName> = ALL_SCROLL_NAMES
+            .iter()
+            .copied()
+            .filter(|n| self.identified.contains(&ItemKind::Scroll(*n)))
+            .collect();
+
+        // Each type is a candidate only if it has at least two known appearances to permute.
+        let mut candidates: Vec<bool> = Vec::new(); // true = potions, false = scrolls
+        if known_potions.len() >= 2 {
+            candidates.push(true);
+        }
+        if known_scrolls.len() >= 2 {
+            candidates.push(false);
+        }
+        let &do_potions = candidates.choose(rng)?;
+
+        if do_potions {
+            let chosen: Vec<PotionColor> = known_potions.choose_multiple(rng, 3).copied().collect();
+            let effects: Vec<PotionEffect> = chosen.iter().map(|c| self.potion[c]).collect();
+            let perm = derange_indices(chosen.len(), rng);
+            for (i, &c) in chosen.iter().enumerate() {
+                self.potion.insert(c, effects[perm[i]]);
+                self.identified.remove(&ItemKind::Potion(c));
+            }
+            Some((chosen.len(), "potion"))
+        } else {
+            let chosen: Vec<ScrollName> = known_scrolls.choose_multiple(rng, 3).copied().collect();
+            let effects: Vec<ScrollEffect> = chosen.iter().map(|n| self.scroll[n]).collect();
+            let perm = derange_indices(chosen.len(), rng);
+            for (i, &n) in chosen.iter().enumerate() {
+                self.scroll.insert(n, effects[perm[i]]);
+                self.identified.remove(&ItemKind::Scroll(n));
+            }
+            Some((chosen.len(), "scroll"))
+        }
+    }
+}
+
+/// Produces a derangement of `0..n`: a permutation where no index maps to itself (for n >= 2), so
+/// every chosen appearance ends up with a *different* effect than it started with. The effects only
+/// move among the chosen appearances, keeping the global appearance→effect bijection intact.
+fn derange_indices(n: usize, rng: &mut impl Rng) -> Vec<usize> {
+    let mut perm: Vec<usize> = (0..n).collect();
+    if n < 2 {
+        return perm;
+    }
+    loop {
+        perm.shuffle(rng);
+        if perm.iter().enumerate().all(|(i, &j)| i != j) {
+            return perm;
+        }
+    }
 }
 
 /// Maps an identified potion effect to a concrete status effect + duration applied on quaff.
@@ -467,6 +543,37 @@ pub fn execute_item_command(
                 ScrollEffect::Acquirement => {
                     commands.trigger(AcquirementEvent { origin: player_pos });
                 }
+                ScrollEffect::Identify => {
+                    // Defer to a follow-up palette prompt so the player can choose which of their
+                    // unidentified items to identify.
+                    if inventory.0.iter().any(|i| !identities.is_identified(*i)) {
+                        palette.open = true;
+                        palette.identify_mode = true;
+                        palette.input = "identify ".to_string();
+                        palette.selected_idx = 0;
+                    } else {
+                        log.push("...but you have nothing left to identify.");
+                    }
+                }
+                ScrollEffect::Forgetting => match identities.forget(&mut rand::thread_rng()) {
+                    Some((_n, type_word)) => {
+                        log.push(format!(
+                            "You're not as sure as you used to be about those {type_word}s."
+                        ));
+                    }
+                    None => {
+                        log.push("You don't remember having forgotten anything.");
+                    }
+                },
+            }
+        }
+        ["identify", letter_str] => {
+            let Some(ch) = letter_str.chars().next() else { return };
+            let Some(item_kind) = letter_map.item_for_letter(ch) else { return };
+            let count = inventory.0.iter().filter(|i| **i == item_kind).count() as u16;
+            if count > 0 && !identities.is_identified(item_kind) {
+                identities.identify(item_kind);
+                log.push(format!("It is {}.", item_display_name(item_kind, count, &identities)));
             }
         }
         _ => {
@@ -486,5 +593,60 @@ pub fn refresh_item_tooltips(
         if tooltip.0 != name {
             tooltip.0 = name;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rand::{SeedableRng, rngs::StdRng};
+
+    use super::*;
+
+    #[test]
+    fn forget_scrambles_three_known_potions() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut ids = ItemIdentities::default();
+        ids.randomize(&mut rng);
+
+        // Identify four potion appearances (and nothing else), so Forgetting must target potions.
+        let known = [PotionColor::Red, PotionColor::Green, PotionColor::Blue, PotionColor::Yellow];
+        for c in known {
+            ids.identify(ItemKind::Potion(c));
+        }
+        let before: Vec<(PotionColor, PotionEffect)> =
+            ALL_POTION_COLORS.iter().map(|&c| (c, ids.potion_effect(c))).collect();
+
+        let (n, word) = ids.forget(&mut rng).expect("had four known potions to forget");
+        assert_eq!(word, "potion");
+        assert_eq!(n, 3, "should scramble exactly three known appearances");
+
+        // The appearances that changed effect are exactly the ones that became unidentified, and
+        // each changed appearance now has a *different* effect (a true derangement).
+        let mut changed = 0;
+        for &(c, old_effect) in &before {
+            let new_effect = ids.potion_effect(c);
+            if new_effect != old_effect {
+                assert!(
+                    !ids.is_identified(ItemKind::Potion(c)),
+                    "scrambled potion stays identified"
+                );
+                changed += 1;
+            }
+        }
+        assert_eq!(changed, 3);
+
+        // The global appearance→effect pairing is still a bijection (no effect duplicated/lost).
+        let effects: HashSet<PotionEffect> =
+            ALL_POTION_COLORS.iter().map(|&c| ids.potion_effect(c)).collect();
+        assert_eq!(effects.len(), ALL_POTION_COLORS.len());
+    }
+
+    #[test]
+    fn forget_with_too_few_known_does_nothing() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut ids = ItemIdentities::default();
+        ids.randomize(&mut rng);
+        ids.identify(ItemKind::Potion(PotionColor::Red)); // only one known appearance
+        assert!(ids.forget(&mut rng).is_none());
     }
 }
