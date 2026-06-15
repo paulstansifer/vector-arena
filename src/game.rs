@@ -280,17 +280,21 @@ impl Plugin for GamePlugin {
 
         if self.headless {
             // In headless mode, skip egui-dependent plugins and stub their resources.
+            // SvgPlugin + insert_svg_components are kept so SVG sprites (player, items) render.
+            // Only the egui texture-registration systems are dropped.
             use crate::{
                 command_palette::{CommandPaletteState, CommandPaletteWatchesClicks, PaletteRegistry},
-                sprite::{SpriteCache, SpriteEguiTextures},
+                sprite::{SpriteCache, SpriteEguiTextures, insert_svg_components},
                 ui::MessageLog,
             };
-            app.init_resource::<MessageLog>()
+            app.add_plugins(bevy_svg::prelude::SvgPlugin)
+                .init_resource::<MessageLog>()
                 .init_resource::<CommandPaletteState>()
                 .init_resource::<PaletteRegistry>()
                 .init_resource::<CommandPaletteWatchesClicks>()
                 .init_resource::<SpriteCache>()
-                .init_resource::<SpriteEguiTextures>();
+                .init_resource::<SpriteEguiTextures>()
+                .add_systems(Update, insert_svg_components);
         } else {
             app.add_plugins((bevy_svg::prelude::SvgPlugin, UiPlugin, CommandPalettePlugin, SpritePlugin));
         }

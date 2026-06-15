@@ -80,12 +80,257 @@ pub fn headless_game_app(seed: Option<u64>) -> App {
             // tests can drive the app directly with app.update().
             .disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>(),
         GamePlugin { headless: true },
+        snap::SnapPlugin {
+            width: vector_arena::WORLD_WIDTH as u32,
+            height: vector_arena::WORLD_HEIGHT as u32,
+        },
     ));
     if let Some(s) = seed {
         app.insert_resource(DungeonSeed(s));
     }
     app.finish();
     app
+}
+
+// ---------------------------------------------------------------------------
+// Headless screenshot support for the full-game test app.
+//
+// Add `SnapPlugin` to the app, then call `snap::save(app, path)` from your
+// test.  The plugin spawns a render-target Camera2d (centered at the game
+// world origin, no UI) and wires up the same GPU-buffer readback pipeline
+// used by the geometry preview module below.
+// ---------------------------------------------------------------------------
+pub mod snap {
+    use bevy::{
+        image::TextureFormatPixelInfo,
+        prelude::*,
+        render::{
+            Extract, Render, RenderApp, RenderSystems,
+            render_asset::RenderAssets,
+            render_graph::{self, NodeRunError, RenderGraph, RenderGraphContext, RenderLabel},
+            render_resource::{
+                Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d,
+                MapMode, PollType, TexelCopyBufferInfo, TexelCopyBufferLayout, TextureUsages,
+            },
+            renderer::{RenderContext, RenderDevice, RenderQueue},
+            texture::GpuImage,
+        },
+    };
+    use std::sync::{Mutex, mpsc};
+
+    // ── Render-world types ───────────────────────────────────────────────────
+
+    #[derive(Debug, PartialEq, Eq, Clone, Hash, RenderLabel)]
+    struct CopyLabel;
+
+    #[derive(Clone, Component)]
+    struct ImageCopier {
+        buffer: Buffer,
+        src_image: Handle<Image>,
+    }
+
+    #[derive(Clone, Default, Resource, Deref, DerefMut)]
+    struct ExtractedCopiers(Vec<ImageCopier>);
+
+    fn extract_copiers(mut commands: Commands, copiers: Extract<Query<&ImageCopier>>) {
+        commands.insert_resource(ExtractedCopiers(copiers.iter().cloned().collect()));
+    }
+
+    #[derive(Resource)]
+    struct BytesTx(mpsc::Sender<Vec<u8>>);
+
+    struct CopyDriver;
+    impl render_graph::Node for CopyDriver {
+        fn run(
+            &self,
+            _graph: &mut RenderGraphContext,
+            render_context: &mut RenderContext,
+            world: &World,
+        ) -> Result<(), NodeRunError> {
+            let copiers = world.resource::<ExtractedCopiers>();
+            let gpu_images = world.resource::<RenderAssets<GpuImage>>();
+            for copier in copiers.iter() {
+                let src = match gpu_images.get(&copier.src_image) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let mut encoder = render_context
+                    .render_device()
+                    .create_command_encoder(&CommandEncoderDescriptor::default());
+                let (bx, _) = src.texture_format.block_dimensions();
+                let block_size = src.texture_format.block_copy_size(None).unwrap();
+                let padded = RenderDevice::align_copy_bytes_per_row(
+                    (src.size.width as usize / bx as usize) * block_size as usize,
+                );
+                encoder.copy_texture_to_buffer(
+                    src.texture.as_image_copy(),
+                    TexelCopyBufferInfo {
+                        buffer: &copier.buffer,
+                        layout: TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(
+                                std::num::NonZero::new(padded as u32).unwrap().into(),
+                            ),
+                            rows_per_image: None,
+                        },
+                    },
+                    src.size,
+                );
+                world.resource::<RenderQueue>().submit(std::iter::once(encoder.finish()));
+            }
+            Ok(())
+        }
+    }
+
+    fn readback_to_channel(
+        copiers: Res<ExtractedCopiers>,
+        render_device: Res<RenderDevice>,
+        tx: Res<BytesTx>,
+    ) {
+        for copier in copiers.iter() {
+            let slice = copier.buffer.slice(..);
+            let (s, r) = mpsc::channel();
+            slice.map_async(MapMode::Read, move |res| { s.send(res).ok(); });
+            render_device.poll(PollType::wait_indefinitely()).expect("poll failed");
+            r.recv().ok();
+            let _ = tx.0.send(slice.get_mapped_range().to_vec());
+            copier.buffer.unmap();
+        }
+    }
+
+    // ── Public API ───────────────────────────────────────────────────────────
+
+    /// Main-world bytes receiver; inserted by `SnapPlugin`.
+    #[derive(Resource)]
+    pub struct BytesRx(pub Mutex<mpsc::Receiver<Vec<u8>>>);
+    impl BytesRx {
+        fn try_recv(&self) -> Option<Vec<u8>> { self.0.lock().unwrap().try_recv().ok() }
+    }
+
+    /// Image dimensions used by `SnapPlugin`; inserted as a resource so `save` can read them.
+    #[derive(Resource, Clone, Copy)]
+    pub struct SnapSize { pub width: u32, pub height: u32 }
+
+    /// Plugin: adds a render-target Camera2d and the GPU-buffer readback pipeline.
+    ///
+    /// The camera is centered at world origin (0, 0) — the UI bars are not included
+    /// in snapshots.  This can be refined later if needed.
+    pub struct SnapPlugin { pub width: u32, pub height: u32 }
+
+    impl Plugin for SnapPlugin {
+        fn build(&self, app: &mut App) {
+            let (tx, rx) = mpsc::channel::<Vec<u8>>();
+            app.insert_resource(BytesRx(Mutex::new(rx)))
+                .insert_resource(SnapSize { width: self.width, height: self.height })
+                .add_systems(Startup, setup_camera);
+
+            let render_app = app.sub_app_mut(RenderApp);
+            {
+                let mut graph = render_app.world_mut().resource_mut::<RenderGraph>();
+                graph.add_node(CopyLabel, CopyDriver);
+                graph.add_node_edge(bevy::render::graph::CameraDriverLabel, CopyLabel);
+            }
+            render_app
+                .insert_resource(BytesTx(tx))
+                .add_systems(ExtractSchedule, extract_copiers)
+                .add_systems(Render, readback_to_channel.after(RenderSystems::Render));
+        }
+    }
+
+    fn setup_camera(
+        mut commands: Commands,
+        mut images: ResMut<Assets<Image>>,
+        render_device: Res<RenderDevice>,
+        size: Res<SnapSize>,
+    ) {
+        let (w, h) = (size.width, size.height);
+        let padded = RenderDevice::align_copy_bytes_per_row(w as usize * 4) * h as usize;
+
+        let mut render_image = Image::new_target_texture(
+            w, h,
+            bevy::render::render_resource::TextureFormat::bevy_default(),
+            None,
+        );
+        render_image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+        let render_handle = images.add(render_image);
+
+        let buffer = render_device.create_buffer(&BufferDescriptor {
+            label: Some("snap_readback"),
+            size: padded as u64,
+            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        commands.spawn(ImageCopier { buffer, src_image: render_handle.clone() });
+        // Camera centered at origin — UI panels are not part of the snapshot.
+        commands.spawn((
+            Camera2d,
+            bevy::camera::RenderTarget::Image(render_handle.into()),
+            Transform::from_translation(Vec3::ZERO),
+        ));
+        // Match the game's background color; not set elsewhere in headless mode.
+        commands.insert_resource(ClearColor(Color::srgb(0.9, 0.9, 0.9)));
+    }
+
+    /// Drain stale bytes, tick a couple of frames, then read the latest rendered frame
+    /// and save it as a PNG at `path`.
+    pub fn save(app: &mut App, path: &str) {
+        use bevy::render::render_resource::TextureFormat;
+        use std::time::Duration;
+
+        let size = *app.world().resource::<SnapSize>();
+
+        // Drain any bytes buffered from earlier frames.
+        while app.world().resource::<BytesRx>().try_recv().is_some() {}
+
+        // Tick twice: one frame to update the scene, one for the render-world to copy it.
+        for _ in 0..2 {
+            app.world_mut()
+                .resource_mut::<Time<Virtual>>()
+                .advance_by(Duration::from_secs_f32(1.0 / 60.0));
+            app.update();
+        }
+
+        let bytes = match app.world().resource::<BytesRx>().try_recv() {
+            Some(b) => b,
+            None => {
+                eprintln!("[snap] no bytes received — skipping {path}");
+                return;
+            }
+        };
+
+        let fmt = TextureFormat::bevy_default();
+        let pixel_size = fmt.pixel_size().unwrap_or(4);
+        let row_bytes = size.width as usize * pixel_size;
+        let aligned = RenderDevice::align_copy_bytes_per_row(row_bytes);
+
+        let raw: Vec<u8> = if row_bytes == aligned {
+            bytes
+        } else {
+            bytes
+                .chunks(aligned)
+                .take(size.height as usize)
+                .flat_map(|row| row[..row_bytes.min(row.len())].iter().copied())
+                .collect()
+        };
+
+        let mut img = bevy::image::Image::new(
+            bevy::render::render_resource::Extent3d {
+                width: size.width,
+                height: size.height,
+                depth_or_array_layers: 1,
+            },
+            bevy::render::render_resource::TextureDimension::D2,
+            raw,
+            fmt,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        img.try_into_dynamic()
+            .unwrap()
+            .to_rgba8()
+            .save(path)
+            .expect("failed to save snap PNG");
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@
 //   cmd d              — issue command-palette command with key "d"
 //   click left 200 100 — move player toward world coordinate (200, 100)
 //   level blank        — replace the current dungeon with an empty open room
-//   snap /tmp/foo.png  — (not yet supported; logs a message)
+//   snap /tmp/foo.png  — saves a snapshot of the current screen
 
 #[path = "test_lib.rs"]
 mod test_lib;
@@ -36,11 +36,8 @@ fn start_complete_game() {
         vector_arena::GameState::InLevel,
         "expected GameState::InLevel after startup"
     );
-    let player_count = app
-        .world_mut()
-        .query::<&vector_arena::player::Player>()
-        .iter(app.world())
-        .count();
+    let player_count =
+        app.world_mut().query::<&vector_arena::player::Player>().iter(app.world()).count();
     assert_eq!(player_count, 1, "expected exactly one Player entity after startup");
 
     if std::env::var("GAME_LISTEN").is_ok() {
@@ -66,9 +63,7 @@ fn listen_loop(app: &mut App) {
             ["cmd", key] => cmd_palette(app, key),
             ["click", "left", x_str, y_str] => cmd_click(app, x_str, y_str),
             ["level", "blank"] => cmd_level_blank(app),
-            ["snap", path] => {
-                eprintln!("[game_tests] snap {path}: not yet supported (needs headless render pipeline)");
-            }
+            ["snap", path] => cmd_snap(app, path),
             _ => eprintln!("[game_tests] unknown command: {line}"),
         }
     }
@@ -86,7 +81,9 @@ fn cmd_wait(app: &mut App, duration_str: &str) {
     let frames = (secs * 60.0).round() as u32;
     eprintln!("[game_tests] wait {secs}s ({frames} frames)");
     for _ in 0..frames {
-        app.world_mut().resource_mut::<Time<Virtual>>().advance_by(Duration::from_secs_f32(1.0 / 60.0));
+        app.world_mut()
+            .resource_mut::<Time<Virtual>>()
+            .advance_by(Duration::from_secs_f32(1.0 / 60.0));
         app.update();
     }
 }
@@ -112,32 +109,35 @@ fn cmd_click(app: &mut App, x_str: &str, y_str: &str) {
 
     // Find the player and set its move target directly.
     let world = app.world_mut();
-    let mut player_q = world.query_filtered::<(Entity, &Transform), With<vector_arena::player::Player>>();
+    let mut player_q =
+        world.query_filtered::<(Entity, &Transform), With<vector_arena::player::Player>>();
     let Ok((player_entity, transform)) = player_q.single(world) else {
         eprintln!("[game_tests] click: no player entity found");
         return;
     };
     let origin = transform.translation.truncate();
     let now = world.resource::<Time>().elapsed();
-    world
-        .entity_mut(player_entity)
-        .get_mut::<vector_arena::player::MoveTarget>()
-        .map(|mut mt| {
-            mt.destination = destination;
-            mt.origin = origin;
-            mt.active = true;
-            mt.time_set = now;
-        });
+    world.entity_mut(player_entity).get_mut::<vector_arena::player::MoveTarget>().map(|mut mt| {
+        mt.destination = destination;
+        mt.origin = origin;
+        mt.active = true;
+        mt.time_set = now;
+    });
     // Also set the landmass agent target for pathfinding.
-    world
-        .entity_mut(player_entity)
-        .get_mut::<bevy_landmass::prelude::AgentTarget2d>()
-        .map(|mut at| {
+    world.entity_mut(player_entity).get_mut::<bevy_landmass::prelude::AgentTarget2d>().map(
+        |mut at| {
             *at = bevy_landmass::prelude::AgentTarget2d::Entity(player_entity);
-        });
+        },
+    );
     drop(player_q);
 
     tick(app);
+}
+
+fn cmd_snap(app: &mut App, path: &str) {
+    eprintln!("[game_tests] snap {path}");
+    test_lib::snap::save(app, path);
+    eprintln!("[game_tests] snap saved to {path}");
 }
 
 fn cmd_level_blank(app: &mut App) {
@@ -158,9 +158,8 @@ fn cmd_level_blank(app: &mut App) {
         vec![],
     )]);
 
-    let mut dungeon = app
-        .world_mut()
-        .resource_mut::<vector_arena::dungeon::terrain::DungeonState>();
+    let mut dungeon =
+        app.world_mut().resource_mut::<vector_arena::dungeon::terrain::DungeonState>();
     dungeon.solid_rock = MultiPolygon::new(vec![]);
     dungeon.playable_area = playable;
     dungeon.torpor_zones = vec![];
