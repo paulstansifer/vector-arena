@@ -2,6 +2,11 @@
 name = "vector-arena"
 version = "0.1.0"
 edition = "2024"
+default-run = "game"
+
+[[bin]]
+name = "game"
+path = "src/main.rs"
 
 [dependencies]
 bevy = { version = "0.18.1", default-features = false, features = [

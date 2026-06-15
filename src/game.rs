@@ -140,7 +140,7 @@ pub fn spawn_game_world(
     monster_letters: &mut LetterMap,
     seed: u64,
 ) {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(seed + depth);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed + depth as u64);
 
     let mut archipelago = Archipelago2d::new(ArchipelagoOptions::from_agent_radius(AGENT_RADIUS));
     archipelago.set_type_index_cost(1, TORPOR_NAV_COST).expect("torpor nav cost is positive");
