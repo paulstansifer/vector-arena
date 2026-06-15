@@ -18,13 +18,13 @@ use crate::{
     status_effect::StatusEffects,
 };
 
-pub const MONSTER_SPEED: f32 = 80.0;
+pub const MONSTER_SPEED: f32 = 140.0;
 pub const MONSTER_MAX_HP: f32 = 20.0;
-pub const MONSTER_SEEK_RANGE: f32 = 150.0;
+pub const MONSTER_SEEK_RANGE: f32 = 300.0;
 const MONSTER_WANDER_SPEED: f32 = MONSTER_SPEED * 0.5;
 const MONSTER_WANDER_RANGE: f32 = 200.0;
 const WANDER_ARRIVE_DIST: f32 = 30.0;
-const FOCUS_DIST: f32 = 200.0;
+const FOCUS_DIST: f32 = 250.0;
 /// Don't get tired if the player is this close.
 
 #[derive(Component, Default, Clone, Copy)]

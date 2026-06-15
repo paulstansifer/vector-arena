@@ -38,7 +38,7 @@ pub struct AcquirementEvent {
     pub origin: Vec2,
 }
 
-/// Spawns a single monster 40–80 units from the reader.
+/// Spawns a single monster 40-80 units from the reader.
 pub fn on_summon_monster(
     trigger: On<SummonMonsterEvent>,
     mut commands: Commands,
@@ -52,7 +52,7 @@ pub fn on_summon_monster(
     let origin = trigger.event().origin;
     let mut rng = rand::thread_rng();
     let Some(pos) = random_near(&dungeon_state.playable_area, origin, 40.0, 80.0, &mut rng) else {
-        log.push("The summoning fizzles.");
+        log.push("Nothing happens.");
         return;
     };
     let mesh = meshes.add(Circle::new(AGENT_RADIUS));
@@ -86,7 +86,7 @@ pub fn on_magic_mapping(
     {
         *mesh = terrain::geometry_to_mesh(&exploration.0);
     }
-    log.push("The dungeon layout is revealed!");
+    log.push("Hm, this scroll seems to have a map on it.");
 }
 
 /// Confuses every monster in the reader's line of sight.
@@ -116,13 +116,15 @@ pub fn on_monster_confusion(
         count += 1;
     }
     if count == 0 {
-        log.push("You hear distant cackling, but nothing happens.");
+        log.push("You hear perfectly normal laughter in the distance.");
+    } else if count == 1 {
+        log.push(format!("The monster seems confused!"));
     } else {
-        log.push(format!("{count} monster(s) become confused!"));
+        log.push(format!("{count} monsters start acting confused!"));
     }
 }
 
-/// Spawns three random items 20–60 units from the reader.
+/// Spawns three random items 20-60 units from the reader.
 pub fn on_acquirement(
     trigger: On<AcquirementEvent>,
     mut commands: Commands,
@@ -131,7 +133,6 @@ pub fn on_acquirement(
 ) {
     let origin = trigger.event().origin;
     let mut rng = rand::thread_rng();
-    let mut spawned = 0;
     for _ in 0..3 {
         let Some(pos) = random_near(&dungeon_state.playable_area, origin, 20.0, 60.0, &mut rng)
         else {
@@ -146,11 +147,7 @@ pub fn on_acquirement(
             SvgSprite { svg_path: svg_path.into(), param: Some(param) },
             Transform::from_translation(pos.extend(fov::ON_FLOOR_Z)).with_scale(Vec3::splat(0.4)),
         ));
-        spawned += 1;
     }
-    if spawned == 0 {
-        log.push("The acquirement fizzles.");
-    } else {
-        log.push("Items appear around you!");
-    }
+
+    log.push("Were those things there before?");
 }
