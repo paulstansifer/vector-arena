@@ -25,7 +25,10 @@ src/
 ├── sprite.rs                 # SVG sprite loading and egui texture registration
 ├── status_effect.rs          # Confusion, torpor, and other timed status effects
 ├── bin/
-│   └── headless.rs           # Scripted headless runner (see Testing section below)
+│   └── headless/             # Scripted headless runner (native only; see Testing section below)
+│       ├── main.rs           # Entry point; compiles to an empty program on wasm32
+│       └── runner.rs         # The actual runner implementation
+
 ├── dungeon/
 │   ├── mod.rs                # Re-exports
 │   ├── bsp.rs                # Binary Space Partitioning algorithm

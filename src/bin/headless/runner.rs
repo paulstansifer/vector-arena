@@ -1,4 +1,4 @@
-//! Headless scripted game runner.
+//! Headless scripted game runner (native only; see `main.rs` for the wasm gate).
 //!
 //! Usage:  cargo run --bin headless -- 'wait 1s; snap /tmp/out.png'
 //!
@@ -6,12 +6,11 @@
 //! Progress is logged to /tmp/va-headless.log.
 //!
 //! Commands:
-//!   wait <N>s          – advance N seconds at 60 fps
-//!   snap <path>        – save a PNG screenshot to <path>
-//!   cmd <key>          – trigger a command-palette key (e.g. "cmd q")
-//!   click left <x> <y> – set the player's move target to world coords (x, y)
-//!   level blank        – replace the dungeon with an open 800×500 room
-
+//!   wait <N>s          - advance N seconds at 60 fps
+//!   snap <path>        - save a PNG screenshot to <path>
+//!   cmd <key>          - trigger a command-palette key (e.g. "cmd q")
+//!   click left <x> <y> - set the player's move target to world coords (x, y)
+//!   level blank        - replace the dungeon with an open 800×500 room
 use std::{
     fs::{File, OpenOptions},
     io::{BufWriter, Write},
@@ -436,7 +435,7 @@ fn cmd_level_blank(app: &mut App, log: &mut Log) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-fn main() {
+pub fn run() {
     let mut log = Log::open();
 
     // Parse: all argv args joined, then split by ';'.
