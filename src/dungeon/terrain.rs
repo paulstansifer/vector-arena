@@ -128,7 +128,7 @@ pub fn random_in_playable_area(
 
 /// Returns a random point inside `playable_area` (eroded by `AGENT_RADIUS`) whose distance from
 /// `origin` lies within `[min_dist, max_dist]`. Returns `None` after 1000 failed attempts.
-pub fn random_near_player(
+pub fn random_near(
     playable_area: &MultiPolygon<f32>,
     origin: Vec2,
     min_dist: f32,

@@ -10,7 +10,7 @@ use rand::{Rng, seq::SliceRandom};
 use crate::{
     AGENT_RADIUS, GameState,
     command_palette::LetterMap,
-    dungeon::terrain::{self, DungeonState, random_near_player},
+    dungeon::terrain::{self, DungeonState, random_near},
     fov::{self, ExplorationState, NeverExploredMeshMarker, WALL_FOV_DEPTH},
     item::{ALL_ITEM_KINDS, Item, item_name},
     monster::Monster,
@@ -51,8 +51,7 @@ pub fn on_summon_monster(
 ) {
     let origin = trigger.event().origin;
     let mut rng = rand::thread_rng();
-    let Some(pos) = random_near_player(&dungeon_state.playable_area, origin, 40.0, 80.0, &mut rng)
-    else {
+    let Some(pos) = random_near(&dungeon_state.playable_area, origin, 40.0, 80.0, &mut rng) else {
         log.push("The summoning fizzles.");
         return;
     };
@@ -134,8 +133,7 @@ pub fn on_acquirement(
     let mut rng = rand::thread_rng();
     let mut spawned = 0;
     for _ in 0..3 {
-        let Some(pos) =
-            random_near_player(&dungeon_state.playable_area, origin, 20.0, 60.0, &mut rng)
+        let Some(pos) = random_near(&dungeon_state.playable_area, origin, 20.0, 60.0, &mut rng)
         else {
             continue;
         };

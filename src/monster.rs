@@ -4,13 +4,18 @@
 // the player, tired ones rest briefly, and distracted ones path to a fixed point.
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::{Contains, Intersects};
+use geo::{Contains, Intersects, MultiPolygon};
 
 use bevy_egui::egui;
 
 use crate::{
-    command_palette::CommandPaletteState, dungeon::terrain::DungeonState, fov::CurrentFovState,
-    indicator::StateIndicator, item::ItemKind, player::Player, status_effect::StatusEffects,
+    command_palette::CommandPaletteState,
+    dungeon::terrain::{DungeonState, random_near},
+    fov::CurrentFovState,
+    indicator::StateIndicator,
+    item::ItemKind,
+    player::Player,
+    status_effect::StatusEffects,
 };
 
 pub const MONSTER_SPEED: f32 = 80.0;
@@ -82,6 +87,7 @@ fn tick_state(
     dist_to_player: f32,
     should_seek: bool,
     blind_strength: f32,
+    playable_area: &MultiPolygon<f32>,
     dt: f32,
     rng: &mut impl rand::Rng,
 ) {
@@ -101,7 +107,7 @@ fn tick_state(
             settings.max_speed = MONSTER_SPEED * 1.2;
             *timer -= dt;
             if *timer <= 0.0 {
-                *state = MonsterState::Wandering { target: random_wander_target(monster_pos, rng) };
+                *state = wander_somewhere(monster_pos, playable_area, rng);
             }
         }
         MonsterState::Wandering { target: wander_pos } => {
@@ -129,7 +135,7 @@ fn tick_state(
             settings.max_speed = MONSTER_SPEED * 1.2;
             if monster_pos.distance(dp) < WANDER_ARRIVE_DIST {
                 *state = if rng.gen_bool(0.5) {
-                    MonsterState::Wandering { target: random_wander_target(monster_pos, rng) }
+                    wander_somewhere(monster_pos, playable_area, rng)
                 } else {
                     MonsterState::Sleeping { timer: rng.gen_range(2.0..5.0) }
                 };
@@ -142,7 +148,7 @@ fn tick_state(
             *timer -= dt;
             if *timer <= 0.0 {
                 *state = if rng.gen_bool(0.5) {
-                    MonsterState::Wandering { target: random_wander_target(monster_pos, rng) }
+                    wander_somewhere(monster_pos, playable_area, rng)
                 } else {
                     MonsterState::Sleeping { timer: rng.gen_range(2.0..5.0) }
                 };
@@ -235,6 +241,7 @@ pub fn update_monster_ai(
             dist_to_player,
             missile_alerted || has_los,
             blind_strength,
+            &dungeon_state.playable_area,
             dt,
             &mut rand::thread_rng(),
         );
@@ -250,10 +257,16 @@ pub fn update_monster_ai(
     }
 }
 
-fn random_wander_target(origin: Vec2, rng: &mut impl rand::Rng) -> Vec2 {
-    let angle = rng.gen_range(0.0..std::f32::consts::TAU);
-    let dist = rng.gen_range(50.0..MONSTER_WANDER_RANGE);
-    origin + Vec2::new(angle.cos(), angle.sin()) * dist
+/// Pick a navigable wandering destination (or sleep if rejection sampling fails)
+fn wander_somewhere(
+    origin: Vec2,
+    playable_area: &MultiPolygon<f32>,
+    rng: &mut impl rand::Rng,
+) -> MonsterState {
+    match random_near(playable_area, origin, 50.0, MONSTER_WANDER_RANGE, rng) {
+        Some(target) => MonsterState::Wandering { target },
+        None => MonsterState::Sleeping { timer: rng.gen_range(2.0..5.0) },
+    }
 }
 
 pub fn render_monster_markers(
