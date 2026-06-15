@@ -19,7 +19,7 @@ fn start_complete_game() {
         tick(&mut app);
     }
 
-    let state = app.world().resource::<State<vector_arena::GameState>>();
+    let state = app.world().resource::<bevy::prelude::State<vector_arena::GameState>>();
     assert_eq!(
         *state.get(),
         vector_arena::GameState::InLevel,

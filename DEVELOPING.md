@@ -1,6 +1,6 @@
 # Vector Arena
 
-A 2D dungeon-exploration game built with [Bevy](https://bevyengine.org/) (0.18.1) and [Avian2D](https://github.com/Jondolf/avian) physics. BSP-generated dungeons, raycasted FOV, physics-based combat, and destructible terrain.
+A traditional dungeom-crawl roguelike ... except that the world is 2D vector objects with physics instead of a grid. It is  built with [Bevy](https://bevyengine.org/) (0.18.1) and [Avian2D](https://github.com/Jondolf/avian) physics. BSP-generated dungeons, raycasted FOV, physics-based combat, and destructible terrain.
 
 ---
 
@@ -89,11 +89,11 @@ Physics    → Avian2D step
 
 ## Time scale
 
-| Situation               | Virtual time scale  |
-| ----------------------- | ------------------- |
-| Player idle (no target) | 0.0× (paused)       |
-| Player moving           | 1.0×                |
-| Any missile in flight   | 0.5× (bullet-time)  |
+| Situation               | Virtual time scale |
+| ----------------------- | ------------------ |
+| Player idle (no target) | 0.0× (paused)      |
+| Player moving           | 1.0×               |
+| Any missile in flight   | 0.5× (bullet-time) |
 
 Item pickup animations and the physics fixed-timestep are both adjusted to remain smooth regardless of scale.
 
@@ -141,12 +141,12 @@ Progress and errors are written to `/tmp/va-headless.log` (Bevy's INFO logs are 
 
 **Supported commands** (semicolon-separated in a single argument):
 
-| Command | Effect |
-|---|---|
-| `wait <N>s` | Advance N seconds at 60 fps |
-| `snap <path>` | Save a PNG screenshot to `<path>` |
-| `cmd <key>` | Fire a command-palette key (e.g. `cmd q` to quit to menu) |
-| `click left <x> <y>` | Set the player's move target to world coordinates (x, y) |
-| `level blank` | Replace the dungeon with an open 800×500 room |
+| Command              | Effect                                                    |
+| -------------------- | --------------------------------------------------------- |
+| `wait <N>s`          | Advance N seconds at 60 fps                               |
+| `snap <path>`        | Save a PNG screenshot to `<path>`                         |
+| `cmd <key>`          | Fire a command-palette key (e.g. `cmd q` to quit to menu) |
+| `click left <x> <y>` | Set the player's move target to world coordinates (x, y)  |
+| `level blank`        | Replace the dungeon with an open 800×500 room             |
 
 The binary always starts with seed 42 (deterministic dungeon) and waits 120 frames for the game to reach `InLevel` before executing commands.

@@ -177,7 +177,8 @@ fn render_message_bar(ctx: &egui::Context, log: &MessageLog, expanded: bool) -> 
     // Lock the panel to an exact height when collapsed so the level edge aligns precisely.
     // When expanded, let the panel grow naturally to show the full log.
     let panel = if expanded { panel } else { panel.exact_height(TOP_PANEL_HEIGHT) };
-    panel.show(ctx, |ui| {
+    panel
+        .show(ctx, |ui| {
             let latest = log.iter().next_back().unwrap_or("—");
 
             let row_height = ui.spacing().interact_size.y;

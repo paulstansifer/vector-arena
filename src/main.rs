@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use vector_arena::{
+    WORLD_HEIGHT, WORLD_WIDTH,
     game::GamePlugin,
-    ui::{TOP_PANEL_HEIGHT, BOTTOM_PANEL_HEIGHT},
-    WORLD_WIDTH, WORLD_HEIGHT,
+    ui::{BOTTOM_PANEL_HEIGHT, TOP_PANEL_HEIGHT},
 };
 
 fn main() {
@@ -15,7 +15,8 @@ fn main() {
                         resolution: (
                             WORLD_WIDTH as u32,
                             (WORLD_HEIGHT + TOP_PANEL_HEIGHT + BOTTOM_PANEL_HEIGHT) as u32,
-                        ).into(),
+                        )
+                            .into(),
                         ..default()
                     }),
                     ..default()

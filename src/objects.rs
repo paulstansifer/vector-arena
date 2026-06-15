@@ -76,9 +76,8 @@ pub fn spawn_unstable_sigil(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
     position: Vec2,
+    rng: &mut impl rand::Rng,
 ) {
-    let mut rng = rand::thread_rng();
-
     let mut angles = [0.0f32; NUM_PTS];
     let mut angle_vels = [0.0f32; NUM_PTS];
     let mut tangents = [Vec2::ZERO; NUM_PTS];

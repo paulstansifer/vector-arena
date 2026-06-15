@@ -27,8 +27,8 @@ use bevy::{
         render_asset::RenderAssets,
         render_graph::{self, NodeRunError, RenderGraph, RenderGraphContext, RenderLabel},
         render_resource::{
-            Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor,
-            MapMode, PollType, TexelCopyBufferInfo, TexelCopyBufferLayout, TextureUsages,
+            Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, MapMode, PollType,
+            TexelCopyBufferInfo, TexelCopyBufferLayout, TextureUsages,
         },
         renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::GpuImage,
@@ -38,7 +38,7 @@ use bevy::{
 };
 
 use vector_arena::{
-    WORLD_WIDTH, WORLD_HEIGHT,
+    WORLD_HEIGHT, WORLD_WIDTH,
     command_palette::CommandPaletteState,
     dungeon::terrain::{
         DungeonCollider, DungeonState, DungeonVisuals, geometry_to_collider, geometry_to_mesh,
@@ -46,7 +46,7 @@ use vector_arena::{
     game::{DungeonSeed, GamePlugin},
     nav::{DungeonNavMesh, playable_area_to_nav_mesh},
     player::{MoveTarget, Player},
-    ui::{TOP_PANEL_HEIGHT, BOTTOM_PANEL_HEIGHT},
+    ui::{BOTTOM_PANEL_HEIGHT, TOP_PANEL_HEIGHT},
 };
 
 // ── Simple file logger ────────────────────────────────────────────────────────
@@ -72,9 +72,7 @@ impl Log {
 // ── Tick helper ───────────────────────────────────────────────────────────────
 
 fn tick(app: &mut App) {
-    app.world_mut()
-        .resource_mut::<Time<Virtual>>()
-        .advance_by(Duration::from_secs_f32(1.0 / 60.0));
+    app.world_mut().resource_mut::<Time<Virtual>>().advance_by(Duration::from_secs_f32(1.0 / 60.0));
     app.update();
 }
 
@@ -141,9 +139,7 @@ impl render_graph::Node for SnapCopyDriver {
                     buffer: &copier.buffer,
                     layout: TexelCopyBufferLayout {
                         offset: 0,
-                        bytes_per_row: Some(
-                            std::num::NonZero::new(padded as u32).unwrap().into(),
-                        ),
+                        bytes_per_row: Some(std::num::NonZero::new(padded as u32).unwrap().into()),
                         rows_per_image: None,
                     },
                 },
@@ -162,9 +158,7 @@ struct SnapBytesTx(mpsc::Sender<Vec<u8>>);
 struct SnapBytesRx(Mutex<mpsc::Receiver<Vec<u8>>>);
 
 impl SnapBytesRx {
-    fn try_recv(&self) -> Option<Vec<u8>> {
-        self.0.lock().unwrap().try_recv().ok()
-    }
+    fn try_recv(&self) -> Option<Vec<u8>> { self.0.lock().unwrap().try_recv().ok() }
 }
 
 fn readback_to_channel(
@@ -357,10 +351,7 @@ fn cmd_click_left(app: &mut App, log: &mut Log, args: &str) {
     let now = app.world().resource::<Time<Virtual>>().elapsed();
 
     let mut player_q = app.world_mut().query_filtered::<(Entity, &Transform), With<Player>>();
-    let player_info = player_q
-        .single(app.world())
-        .ok()
-        .map(|(e, t)| (e, t.translation.truncate()));
+    let player_info = player_q.single(app.world()).ok().map(|(e, t)| (e, t.translation.truncate()));
 
     let Some((player_entity, origin)) = player_info else {
         log.write("click left: no player found");
@@ -420,10 +411,8 @@ fn cmd_level_blank(app: &mut App, log: &mut Log) {
         coord! { x: -rw, y: -rh },
     ]);
 
-    let solid_rock =
-        geo::MultiPolygon::new(vec![Polygon::new(world_ring, vec![room_ring_hole])]);
-    let playable_area =
-        geo::MultiPolygon::new(vec![Polygon::new(room_ring_open, vec![])]);
+    let solid_rock = geo::MultiPolygon::new(vec![Polygon::new(world_ring, vec![room_ring_hole])]);
+    let playable_area = geo::MultiPolygon::new(vec![Polygon::new(room_ring_open, vec![])]);
 
     let terrain_mesh = geometry_to_mesh(&solid_rock);
     let terrain_collider = geometry_to_collider(&solid_rock);
@@ -436,11 +425,7 @@ fn cmd_level_blank(app: &mut App, log: &mut Log) {
     let nav_handle = world.resource::<DungeonNavMesh>().0.clone();
     world.resource_mut::<Assets<NavMesh2d>>().get_mut(&nav_handle).unwrap().nav_mesh = nav_mesh;
 
-    world.insert_resource(DungeonState {
-        solid_rock,
-        playable_area,
-        torpor_zones: vec![],
-    });
+    world.insert_resource(DungeonState { solid_rock, playable_area, torpor_zones: vec![] });
     world.insert_resource(DungeonVisuals(terrain_mesh_handle));
     world.insert_resource(DungeonCollider(terrain_collider));
 
@@ -456,11 +441,8 @@ fn main() {
 
     // Parse: all argv args joined, then split by ';'.
     let script = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
-    let commands: Vec<String> = script
-        .split(';')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let commands: Vec<String> =
+        script.split(';').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
 
     log.write(&format!("headless: script = {:?}", commands));
 

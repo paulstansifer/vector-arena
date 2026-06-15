@@ -7,7 +7,7 @@ use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::SeedableRng;
 
 use crate::{
-    AGENT_RADIUS, WORLD_WIDTH, WORLD_HEIGHT, DungeonDepth, GameLayer, GameState, WorldBounds,
+    AGENT_RADIUS, DungeonDepth, GameLayer, GameState, WORLD_HEIGHT, WORLD_WIDTH, WorldBounds,
     command_palette::{CommandPalettePlugin, LetterMap},
     dungeon::{
         level_generation::TerrainGeometry,
@@ -28,7 +28,7 @@ use crate::{
         rope,
         scroll::{on_acquirement, on_magic_mapping, on_monster_confusion, on_summon_monster},
     },
-    fov::{self, OpaqueVertices, TERRAIN_Z, MOVABLE_Z},
+    fov::{self, MOVABLE_Z, OpaqueVertices, TERRAIN_Z},
     goto,
     indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
     item::{
@@ -69,10 +69,18 @@ fn on_enter_restart(
     mut identities: ResMut<ItemIdentities>,
     seed: Option<Res<DungeonSeed>>,
 ) {
+    let seed_val = match seed.as_deref() {
+        Some(s) => s.0,
+        None => {
+            let s = rand::random::<u64>();
+            commands.insert_resource(DungeonSeed(s));
+            s
+        }
+    };
     message_log.clear();
     depth.0 = 1;
     monster_letters.clear_monsters();
-    identities.randomize(&mut rand::thread_rng());
+    identities.randomize(&mut rand::rngs::StdRng::seed_from_u64(seed_val));
     spawn_game_world(
         &mut commands,
         &mut meshes,
@@ -81,7 +89,7 @@ fn on_enter_restart(
         1,
         None,
         &mut monster_letters,
-        seed.as_deref().map(|s| s.0),
+        seed_val,
     );
     next_state.set(GameState::InLevel);
 }
@@ -96,7 +104,7 @@ fn on_enter_descend(
     saved_player: Res<SavedPlayer>,
     mut next_state: ResMut<NextState<GameState>>,
     mut monster_letters: ResMut<LetterMap>,
-    seed: Option<Res<DungeonSeed>>,
+    seed: Res<DungeonSeed>,
 ) {
     depth.0 += 1;
     message_log.push(format!("You descend to depth {}.", depth.0));
@@ -109,7 +117,7 @@ fn on_enter_descend(
         depth.0,
         saved_player.0.as_ref().map(|(stats, inv)| (*stats, Inventory(inv.0.clone()))),
         &mut monster_letters,
-        seed.as_deref().map(|s| s.0),
+        seed.0,
     );
     next_state.set(GameState::InLevel);
 }
@@ -130,16 +138,15 @@ pub fn spawn_game_world(
     depth: u32,
     saved_player: Option<(Stats, Inventory)>,
     monster_letters: &mut LetterMap,
-    seed: Option<u64>,
+    seed: u64,
 ) {
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed + depth);
+
     let mut archipelago = Archipelago2d::new(ArchipelagoOptions::from_agent_radius(AGENT_RADIUS));
     archipelago.set_type_index_cost(1, TORPOR_NAV_COST).expect("torpor nav cost is positive");
     let archipelago_id = commands.spawn((DespawnOnExit(GameState::InLevel), archipelago)).id();
 
-    let terrain_geometry = match seed {
-        Some(s) => TerrainGeometry::new_seeded(WORLD_WIDTH, WORLD_HEIGHT, &mut rand::rngs::StdRng::seed_from_u64(s)),
-        None => TerrainGeometry::new(WORLD_WIDTH, WORLD_HEIGHT),
-    };
+    let terrain_geometry = TerrainGeometry::new_seeded(WORLD_WIDTH, WORLD_HEIGHT, &mut rng);
 
     let terrain_mesh = geometry_to_mesh(&terrain_geometry.solid_rock);
     let terrain_collider = geometry_to_collider(&terrain_geometry.solid_rock);
@@ -245,6 +252,7 @@ pub fn spawn_game_world(
         depth,
         saved_player,
         monster_letters,
+        &mut rng,
     );
 
     let mut poi_points: Vec<Vec2> = terrain_geometry
@@ -276,14 +284,20 @@ impl Default for GamePlugin {
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         // Physics and navigation are always included.
-        app.add_plugins((avian2d::PhysicsPlugins::default(), Landmass2dPlugin::default(), rope::RopePlugin));
+        app.add_plugins((
+            avian2d::PhysicsPlugins::default(),
+            Landmass2dPlugin::default(),
+            rope::RopePlugin,
+        ));
 
         if self.headless {
             // In headless mode, skip egui-dependent plugins and stub their resources.
             // SvgPlugin + insert_svg_components are kept so SVG sprites (player, items) render.
             // Only the egui texture-registration systems are dropped.
             use crate::{
-                command_palette::{CommandPaletteState, CommandPaletteWatchesClicks, PaletteRegistry},
+                command_palette::{
+                    CommandPaletteState, CommandPaletteWatchesClicks, PaletteRegistry,
+                },
                 sprite::{SpriteCache, SpriteEguiTextures, insert_svg_components},
                 ui::MessageLog,
             };
@@ -296,7 +310,12 @@ impl Plugin for GamePlugin {
                 .init_resource::<SpriteEguiTextures>()
                 .add_systems(Update, insert_svg_components);
         } else {
-            app.add_plugins((bevy_svg::prelude::SvgPlugin, UiPlugin, CommandPalettePlugin, SpritePlugin));
+            app.add_plugins((
+                bevy_svg::prelude::SvgPlugin,
+                UiPlugin,
+                CommandPalettePlugin,
+                SpritePlugin,
+            ));
         }
 
         app.init_state::<GameState>()
@@ -333,21 +352,37 @@ impl Plugin for GamePlugin {
             .add_systems(Update, execute_stop_command)
             .add_systems(Update, execute_descend_command)
             .add_systems(Update, monster::update_monster_ai)
-            .add_systems(Update, monster::refresh_monster_tooltips.after(monster::update_monster_ai))
-            .add_systems(Update, apply_confusion_to_velocity.after(nav::apply_nav_velocity).after(directional_move_system))
+            .add_systems(
+                Update,
+                monster::refresh_monster_tooltips.after(monster::update_monster_ai),
+            )
+            .add_systems(
+                Update,
+                apply_confusion_to_velocity
+                    .after(nav::apply_nav_velocity)
+                    .after(directional_move_system),
+            )
             .add_systems(Update, nav::sync_island_nav_mesh)
             .add_systems(Update, fov::update_fov)
             .add_systems(Update, fov::update_staircase_fog_copy.after(fov::update_fov))
-            .add_systems(Update, if self.headless {
-                handle_right_click_excavation.into_configs()
-            } else {
-                handle_right_click_excavation.run_if(not(egui_wants_any_pointer_input)).into_configs()
-            })
+            .add_systems(
+                Update,
+                if self.headless {
+                    handle_right_click_excavation.into_configs()
+                } else {
+                    handle_right_click_excavation
+                        .run_if(not(egui_wants_any_pointer_input))
+                        .into_configs()
+                },
+            )
             .add_systems(Update, sync_dungeon_to_entities)
             .add_systems(Update, execute_missile_command)
             .add_systems(Update, monster_fire_missiles)
             .add_systems(Update, update_missiles)
-            .add_systems(Update, apply_torpor_to_non_agents.after(update_torpor_multipliers).after(update_missiles))
+            .add_systems(
+                Update,
+                apply_torpor_to_non_agents.after(update_torpor_multipliers).after(update_missiles),
+            )
             .add_systems(Update, spawn_missile_trails)
             .add_systems(Update, update_missile_trails)
             .add_observer(apply_knockback_on_hit)

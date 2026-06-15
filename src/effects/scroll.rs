@@ -51,8 +51,7 @@ pub fn on_summon_monster(
 ) {
     let origin = trigger.event().origin;
     let mut rng = rand::thread_rng();
-    let Some(pos) =
-        random_near_player(&dungeon_state.playable_area, origin, 40.0, 80.0, &mut rng)
+    let Some(pos) = random_near_player(&dungeon_state.playable_area, origin, 40.0, 80.0, &mut rng)
     else {
         log.push("The summoning fizzles.");
         return;
@@ -103,10 +102,10 @@ pub fn on_monster_confusion(
     let mut count = 0;
     for (tf, mut effects) in monsters.iter_mut() {
         let mpos = tf.translation.truncate();
-        let seg = GeoLine::new(
-            geo::Coord { x: mpos.x, y: mpos.y },
-            geo::Coord { x: origin.x, y: origin.y },
-        );
+        let seg = GeoLine::new(geo::Coord { x: mpos.x, y: mpos.y }, geo::Coord {
+            x: origin.x,
+            y: origin.y,
+        });
         if dungeon_state.solid_rock.intersects(&seg) {
             continue; // a wall blocks line of sight
         }

@@ -31,9 +31,8 @@ pub fn populate(
     depth: u32,
     saved_player: Option<(Stats, Inventory)>,
     monster_letters: &mut crate::command_palette::LetterMap,
+    rng: &mut impl Rng,
 ) {
-    let mut rng = rand::thread_rng();
-
     let room_center = |r: &Rect<f32>| {
         let c = r.center();
         Vec2::new(c.x, c.y)
@@ -50,10 +49,8 @@ pub fn populate(
         .map(|(_, r)| room_center(r))
         .collect();
 
-    let staircase_position = non_player_centers
-        .choose(&mut rng)
-        .copied()
-        .unwrap_or(player_position + Vec2::new(50.0, 0.0));
+    let staircase_position =
+        non_player_centers.choose(rng).copied().unwrap_or(player_position + Vec2::new(50.0, 0.0));
 
     let (initial_stats, initial_inventory) = saved_player.unwrap_or((
         Stats { hp: 100.0, max_hp: 100.0, mana: 80.0, max_mana: 80.0 },
@@ -89,7 +86,7 @@ pub fn populate(
     // One more monster per depth level (2 at depth 1, 3 at depth 2, …).
     let monster_count = (depth as usize + 1).min(non_player_centers.len());
     for &position in non_player_centers.iter().take(monster_count) {
-        let drop = if rng.gen_bool(0.6) { ALL_ITEM_KINDS.choose(&mut rng).copied() } else { None };
+        let drop = if rng.gen_bool(0.6) { ALL_ITEM_KINDS.choose(rng).copied() } else { None };
         spawn_monster(
             commands,
             materials,
@@ -98,16 +95,16 @@ pub fn populate(
             position,
             monster_letters,
             drop,
-            &mut rng,
+            rng,
         );
     }
 
     let item_count = rng.gen_range(4..=5);
     let chosen_kinds: Vec<ItemKind> =
-        ALL_ITEM_KINDS.choose_multiple(&mut rng, item_count).copied().collect();
+        ALL_ITEM_KINDS.choose_multiple(rng, item_count).copied().collect();
 
     for kind in chosen_kinds {
-        let Some(pt) = random_in_playable_area(playable_area, &mut rng) else { continue };
+        let Some(pt) = random_in_playable_area(playable_area, rng) else { continue };
         let pos = Vec3::new(pt.x, pt.y, fov::ON_FLOOR_Z);
 
         let (svg_path, param) = sprite_spec(kind);
@@ -122,8 +119,8 @@ pub fn populate(
 
     let sigil_count = rng.gen_range(1..=5);
     for _ in 0..sigil_count {
-        let Some(pt) = random_in_playable_area(playable_area, &mut rng) else { continue };
-        spawn_unstable_sigil(commands, meshes, materials, pt);
+        let Some(pt) = random_in_playable_area(playable_area, rng) else { continue };
+        spawn_unstable_sigil(commands, meshes, materials, pt, rng);
     }
 
     spawn_staircase(commands, meshes, materials, staircase_position);
