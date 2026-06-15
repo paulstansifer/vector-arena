@@ -41,22 +41,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      # Install wasm-bindgen-cli using the official prebuilt binary runner (very fast!)
-      - name: Install wasm-bindgen-cli
-        uses: jetli/wasm-bindgen-action@v0.2.0
+      - name: Install Trunk
+        uses: jetli/trunk-action@v0.5.0
         with:
-          version: '0.2.121'
+          version: 'latest'
 
-      # Compile the workspace for the WASM target in release mode
-      - name: Build Rust WebAssembly Target
-        run: cargo build --release --target wasm32-unknown-unknown
-
-      # Generate WebAssembly bindings and copy files to the dist directory
-      - name: Bundle Web Application
-        run: |
-          mkdir -p dist
-          cp index.html dist/
-          wasm-bindgen --target web --out-dir dist --out-name vector_arena ./target/wasm32-unknown-unknown/release/vector-arena.wasm
+      - name: Build with Trunk
+        run: trunk build --release --public-url /vector-arena/
 
       # Deploy the contents of the dist folder to the gh-pages branch
       - name: Deploy to GitHub Pages
