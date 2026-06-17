@@ -275,6 +275,16 @@ pub struct MissileDodgedEvent {
     pub direction: Vec2,
 }
 
+/// Fired (from `apply_damage_on_hit`) with the HP actually removed, the world
+/// position of the struck entity, and which side fired the missile. Used by
+/// `hit_particles` to spawn a damage-scaled burst effect.
+#[derive(Event)]
+pub struct MissileDamageDealt {
+    pub damage: f32,
+    pub position: Vec3,
+    pub fired_by_player: bool,
+}
+
 /// For each missile, sweep the collision shape along the path the missile travelled this frame
 /// (including bounces) and trigger a `MissileHitEvent` for each Dynamic entity it passed through.
 /// Must run before `spawn_missile_trails` so both systems read the same
@@ -446,7 +456,11 @@ pub fn apply_damage_on_hit(
     let Some(ref mut stats) = stats_opt else { return };
 
     let was_alive = stats.hp > 0.0;
-    stats.hp -= MISSILE_DAMAGE * event.damage_multiplier;
+    let attempted = MISSILE_DAMAGE * event.damage_multiplier;
+    let before_hp = stats.hp;
+    stats.hp -= attempted;
+    // Actual HP removed = min(attempted, pre-hit HP), clamped to ≥ 0.
+    let damage_dealt = attempted.min(before_hp.max(0.0));
 
     if is_monster {
         if event.fired_by_player {
@@ -491,6 +505,12 @@ pub fn apply_damage_on_hit(
         }
         stats.hp = stats.hp.max(0.0);
     }
+
+    commands.trigger(MissileDamageDealt {
+        damage: damage_dealt,
+        position: transform.translation,
+        fired_by_player: event.fired_by_player,
+    });
 }
 
 pub fn tick_knockback_cooldowns(time: Res<Time>, mut query: Query<&mut KnockbackCooldown>) {

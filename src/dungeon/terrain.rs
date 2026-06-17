@@ -65,6 +65,16 @@ pub fn geometry_to_collider(geometry: &MultiPolygon<f32>) -> Collider {
 #[derive(Component)]
 pub struct TerrainMarker;
 
+/// Marks a torpor-zone visual entity, carrying the bounding box of the zone so
+/// the (render-only) particle effect can seed particles across it. Spawned
+/// unconditionally; consumed by `effects::torpor_particles` when that plugin is
+/// registered (the rendering binaries), so GPU-less tests can ignore it.
+#[derive(Component)]
+pub struct TorporZoneParticles {
+    pub center: Vec2,
+    pub half_size: Vec2,
+}
+
 pub const TORPOR_FACTOR: f32 = 0.25;
 
 #[derive(Component, Default)]

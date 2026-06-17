@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use vector_arena::{
     WORLD_HEIGHT, WORLD_WIDTH,
+    effects::{hit_particles::HitParticlesPlugin, torpor_particles::TorporParticlesPlugin},
     game::GamePlugin,
     ui::{BOTTOM_PANEL_HEIGHT, TOP_PANEL_HEIGHT},
 };
@@ -33,6 +34,8 @@ fn main() {
                     ..default()
                 }),
             GamePlugin::default(),
+            TorporParticlesPlugin,
+            HitParticlesPlugin,
         ))
         .add_systems(Startup, setup)
         .run();

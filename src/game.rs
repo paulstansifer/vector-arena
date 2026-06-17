@@ -4,6 +4,7 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_egui::{EguiPrimaryContextPass, input::egui_wants_any_pointer_input};
 use bevy_landmass::{NavMeshHandle, prelude::*};
+use geo::BoundingRect;
 use rand::SeedableRng;
 
 use crate::{
@@ -13,12 +14,12 @@ use crate::{
         level_generation::TerrainGeometry,
         terrain::{
             DungeonCollider, DungeonState, DungeonVisuals, PointsOfInterest, TerrainMarker,
-            geometry_to_collider, geometry_to_mesh, sync_dungeon_to_entities,
+            TorporZoneParticles, geometry_to_collider, geometry_to_mesh, sync_dungeon_to_entities,
             update_torpor_multipliers,
         },
     },
     effects::{
-        crumble_terrain::{Fragile, RubbleMaterial, handle_right_click_excavation},
+        self, crumble_terrain::{Fragile, RubbleMaterial, handle_right_click_excavation},
         projectile::{
             apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit, apply_knockback_on_hit,
             apply_torpor_to_non_agents, detect_missile_hits, execute_missile_command,
@@ -188,14 +189,21 @@ pub fn spawn_game_world(
         ))
         .id();
 
-    let torpor_material = materials.add(ColorMaterial::from(Color::srgba(0.3, 0.7, 1.0, 0.35)));
+    let torpor_material =
+        materials.add(ColorMaterial::from(Color::Srgba(effects::torpor_particles::TORPOR_ZONE_COLOR)));
     for zone in &terrain_geometry.torpor_zones {
         let mesh = geometry_to_mesh(&geo::MultiPolygon::new(vec![zone.clone()]));
+        // Bounding box of the zone, for seeding ambient particles. For today's
+        // rectangular zones this matches the zone exactly.
+        let bbox = zone.bounding_rect().expect("torpor zone is non-empty");
+        let center = Vec2::new((bbox.min().x + bbox.max().x) / 2.0, (bbox.min().y + bbox.max().y) / 2.0);
+        let half_size = Vec2::new(bbox.width() / 2.0, bbox.height() / 2.0);
         commands.spawn((
             DespawnOnExit(GameState::InLevel),
             Mesh2d(meshes.add(mesh)),
             MeshMaterial2d(torpor_material.clone()),
             Transform::from_translation(Vec3::new(0.0, 0.0, TERRAIN_Z + 0.1)),
+            TorporZoneParticles { center, half_size },
         ));
     }
 

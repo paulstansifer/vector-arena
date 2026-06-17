@@ -42,6 +42,7 @@ use vector_arena::{
     dungeon::terrain::{
         DungeonCollider, DungeonState, DungeonVisuals, geometry_to_collider, geometry_to_mesh,
     },
+    effects::{hit_particles::HitParticlesPlugin, torpor_particles::TorporParticlesPlugin},
     game::{DungeonSeed, GamePlugin},
     nav::{DungeonNavMesh, playable_area_to_nav_mesh},
     player::{MoveTarget, Player},
@@ -463,6 +464,8 @@ pub fn run() {
             // Manual app.update() requires pipelined rendering to be disabled.
             .disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>(),
         GamePlugin { headless: true },
+        TorporParticlesPlugin,
+        HitParticlesPlugin,
         SnapPlugin,
     ))
     .insert_resource(DungeonSeed(42))
