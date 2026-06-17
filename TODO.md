@@ -11,7 +11,6 @@
   * The top bar should slide down when opened.
   * Place monsters and down staircases in random accessible locations, just like items.
   * The test setup is causing a lot of unusedness warnings visible in the editor, but not `cargo check`.
-  * Hitting movement keys unpauses?
   * "g h" is treated the same as pressing "h", instead of going to that spot.
   
 

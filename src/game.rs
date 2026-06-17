@@ -9,7 +9,7 @@ use rand::SeedableRng;
 
 use crate::{
     AGENT_RADIUS, DungeonDepth, GameLayer, GameState, WORLD_HEIGHT, WORLD_WIDTH, WorldBounds,
-    command_palette::{CommandPalettePlugin, LetterMap},
+    command_palette::{CommandPalettePlugin, LetterMap, open_palette_system},
     dungeon::{
         level_generation::TerrainGeometry,
         terrain::{
@@ -354,7 +354,7 @@ impl Plugin for GamePlugin {
             .add_systems(Update, set_target_on_click)
             .add_systems(Update, move_player.after(update_torpor_multipliers))
             .add_systems(Update, nav::apply_nav_velocity.after(move_player))
-            .add_systems(Update, directional_move_system.after(nav::apply_nav_velocity))
+            .add_systems(Update, directional_move_system.after(nav::apply_nav_velocity).after(open_palette_system))
             .add_systems(Update, rotate_player_to_velocity.after(move_player))
             .add_systems(Update, advance_exploration.after(move_player))
             .add_systems(Update, execute_stop_command)

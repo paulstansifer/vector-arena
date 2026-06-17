@@ -51,6 +51,7 @@ pub struct MoveTarget {
     pub origin: Vec2,
     pub active: bool,
     pub time_set: Duration,
+    pub directional: bool,
 }
 
 impl MoveTarget {
@@ -58,6 +59,7 @@ impl MoveTarget {
         self.destination = destination;
         self.origin = origin;
         self.active = true;
+        self.directional = false;
         self.time_set = now;
     }
 }
@@ -332,18 +334,24 @@ pub fn directional_move_system(
     }
 
     let dir = dir.normalize_or_zero();
-    if dir == Vec2::ZERO {
-        return;
-    }
     let Ok((entity, mut forces, transform, mut move_target, mut agent_target, effects, torpor)) =
         player_query.single_mut()
     else {
         return;
     };
+    if dir == Vec2::ZERO {
+        if move_target.directional {
+            move_target.active = false;
+            move_target.directional = false;
+            *agent_target = AgentTarget2d::None;
+        }
+        return;
+    }
     let pos = transform.translation.truncate();
     move_target.destination = pos + dir * 10000.0;
     move_target.origin = pos;
     move_target.active = true;
+    move_target.directional = true;
     move_target.time_set = time.elapsed();
     let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0)
         * torpor.map(|t| t.get()).unwrap_or(1.0);

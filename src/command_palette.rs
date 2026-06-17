@@ -336,6 +336,7 @@ pub fn open_palette_system(
                 player_query.single_mut()
             {
                 move_target.active = false;
+                move_target.directional = false;
                 *agent_target = AgentTarget2d::None;
                 velocity.0 = Vec2::ZERO;
                 commands.entity(entity).remove::<ExplorationGoal>();
