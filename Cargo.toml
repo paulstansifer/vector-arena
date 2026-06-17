@@ -29,6 +29,7 @@ bevy_svg = "0.18.0" # default-features includes both 2d and 3d; 2d-only build ha
 egui_extras = { version = "0.33", features = ["svg_text"] } # svg_text enables resvg/text+system-fonts for scroll letter rendering
 resvg = { version = "0.45.1", default-features = false } # for usvg::Options passed to egui_extras
 bevy_hanabi = { version = "0.18", default-features = false, features = ["2d"] }
+
 [profile.dev]
 opt-level = 1 # Suggested by the Bevy docs
 

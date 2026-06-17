@@ -18,6 +18,8 @@ fn main() {
                             (WORLD_HEIGHT + TOP_PANEL_HEIGHT + BOTTOM_PANEL_HEIGHT) as u32,
                         )
                             .into(),
+                        #[cfg(target_arch = "wasm32")]
+                        canvas: Some("#bevy-canvas".into()),
                         ..default()
                     }),
                     ..default()
