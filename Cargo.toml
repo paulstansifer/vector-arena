@@ -10,8 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Renderer backend is selected per-target below: native uses `default_platform`
-# (which includes the WebGL2/`webgl2` backend), while wasm uses `webgpu`.
-# Particles in `hanabi` need this, but it restricts us to recent browsers.
+# (which includes the WebGL2/`webgl2` backend), while wasm uses `webgl2`.
 bevy = { version = "0.18.1", default-features = false, features = [
     "2d",
     "debug",
@@ -28,7 +27,7 @@ bevy_verlet = { path = "crates/bevy_verlet", default-features = false }
 bevy_svg = "0.18.0" # default-features includes both 2d and 3d; 2d-only build has a cfg bug in the crate
 egui_extras = { version = "0.33", features = ["svg_text"] } # svg_text enables resvg/text+system-fonts for scroll letter rendering
 resvg = { version = "0.45.1", default-features = false } # for usvg::Options passed to egui_extras
-bevy_hanabi = { version = "0.18", default-features = false, features = ["2d"] }
+bevy_enoki = "0.6.0"
 
 [profile.dev]
 opt-level = 1 # Suggested by the Bevy docs
@@ -50,14 +49,14 @@ bevy = { version = "0.18.1", default-features = false, features = ["default_plat
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# WebGPU backend (compute-shader capable, needed by bevy_hanabi). We deliberately
-# omit `multi_threaded` (wasm threads need cross-origin isolation headers that
-# GitHub Pages doesn't set) and the native-only `webgl2`/x11/wayland features.
+# WebGL2 backend. We deliberately omit `multi_threaded` (wasm threads need
+# cross-origin isolation headers that GitHub Pages doesn't set) and the
+# native-only x11/wayland features.
 bevy = { version = "0.18.1", default-features = false, features = [
     "std",
     "bevy_winit",
     "default_font",
-    "webgpu",
+    "webgl2",
 ] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 getrandom_0_2 = { package = "getrandom", version = "0.2", features = ["js"] }

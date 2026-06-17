@@ -2,23 +2,19 @@
 //
 // Triggered by MissileDamageDealt (fired from apply_damage_on_hit after the
 // exact HP loss is known). Particle count = damage dealt, rounded. Each
-// particle shoots outward at a random angle and decelerates exponentially
-// using real time, so the effect plays at normal speed even under time
-// dilation from missile slow-motion.
-
-use std::f32::consts::TAU;
+// particle shoots outward at a random angle. The effect uses virtual time, so
+// it will slow with bullet-time and pause when the player is idle — both cases
+// are brief and visually acceptable.
 
 use bevy::prelude::*;
-use bevy_hanabi::prelude::*;
+use bevy_enoki::prelude::*;
 
 use crate::{GameState, effects::projectile::MissileDamageDealt};
 
 /// Real seconds for a burst to fully fade out.
 const LIFETIME: f32 = 1.45;
-/// Initial launch speed at the fast end (pixels/s); varied ±40% per particle.
-const INITIAL_SPEED: f32 = 300.0;
-/// Exponential drag coefficient (pixels/s² per pixel/s). See position formula below.
-const DRAG: f32 = 5.0;
+/// Initial launch speed (pixels/s); varied ±40% per particle.
+const INITIAL_SPEED: f32 = 60.0;
 /// World-space size of each particle quad (pixels).
 const PARTICLE_SIZE: f32 = 2.5;
 
@@ -26,11 +22,14 @@ pub struct HitParticlesPlugin;
 
 impl Plugin for HitParticlesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(spawn_hit_burst).add_systems(Update, expire_hit_bursts);
+        app.add_plugins(EnokiPlugin)
+            .add_observer(spawn_hit_burst)
+            .add_systems(Update, expire_hit_bursts);
     }
 }
 
-/// Marks an effect entity for real-time expiry (independent of virtual-time pause).
+/// Marks an effect entity for real-time expiry so it cleans up even if virtual
+/// time is paused (preventing frozen particle entities lingering until level end).
 #[derive(Component)]
 struct HitBurstExpiry(f32);
 
@@ -50,7 +49,7 @@ fn expire_hit_bursts(
 fn spawn_hit_burst(
     trigger: On<MissileDamageDealt>,
     mut commands: Commands,
-    mut effects: ResMut<Assets<EffectAsset>>,
+    mut effects: ResMut<Assets<Particle2dEffect>>,
     time: Res<Time<Real>>,
 ) {
     let event = trigger.event();
@@ -61,65 +60,33 @@ fn spawn_hit_burst(
     let effect = effects.add(create_hit_burst_effect(count, r, g, b));
     commands.spawn((
         DespawnOnExit(GameState::InLevel),
-        HitBurstExpiry(time.elapsed_secs() + LIFETIME + 0.1),
-        ParticleEffect::new(effect),
+        // Real-time fallback in case virtual time is paused when the burst fires.
+        HitBurstExpiry(time.elapsed_secs() + LIFETIME + 0.5),
+        ParticleSpawner::<ColorParticle2dMaterial>::default(),
+        ParticleEffectHandle(effect),
+        OneShot::Despawn,
         Transform::from_translation(
             event.position.truncate().extend(crate::fov::MOVABLE_Z + 2.0),
         ),
     ));
 }
 
-fn create_hit_burst_effect(count: f32, r: f32, g: f32, b: f32) -> EffectAsset {
-    let writer = ExprWriter::new();
+fn create_hit_burst_effect(count: f32, r: f32, g: f32, b: f32) -> Particle2dEffect {
+    let color_curve = MultiCurve::new()
+        .with_point(LinearRgba::new(r, g, b, 1.0), 0.0, None)
+        .with_point(LinearRgba::new(r, g, b, 0.0), 1.0, None);
 
-    // --- Init: random angle + speed → stored as velocity in (F32_0, F32_1).
-    // Birth real-time is stored in F32_2 so the update pass can compute particle age.
-    let angle = writer.rand(ScalarType::Float).mul(writer.lit(TAU));
-    // Speed in [0.6 * INITIAL_SPEED, 1.4 * INITIAL_SPEED]
-    let speed =
-        writer.rand(ScalarType::Float).mul(writer.lit(0.8_f32)).add(writer.lit(0.6_f32)).mul(writer.lit(INITIAL_SPEED));
-    let init_vel_x =
-        SetAttributeModifier::new(Attribute::F32_0, angle.clone().cos().mul(speed.clone()).expr());
-    let init_vel_y = SetAttributeModifier::new(Attribute::F32_1, angle.sin().mul(speed).expr());
-
-    let birth_time = writer.push(Expr::BuiltIn(BuiltInExpr::new(BuiltInOperator::RealTime)));
-    let init_birth_time = SetAttributeModifier::new(Attribute::F32_2, birth_time.expr());
-
-    // --- Update: position from exponential-decay velocity integral, color fades.
-    //
-    // For a particle whose velocity decays as v(t) = v0 * exp(-DRAG * t):
-    //   position(t) = v0 * (1 - exp(-DRAG * t)) / DRAG
-    //
-    // We drive everything from real_time (not virtual) so the burst animates at
-    // normal speed even when missiles trigger slow-motion time dilation.
-    let real_time = writer.push(Expr::BuiltIn(BuiltInExpr::new(BuiltInOperator::RealTime)));
-    let age = real_time.sub(writer.attr(Attribute::F32_2));
-
-    let decay = age.clone().mul(writer.lit(-DRAG)).exp(); // exp(-DRAG * age)
-    let pos_scale = writer.lit(1.0_f32).sub(decay).mul(writer.lit(1.0 / DRAG));
-    let pos = writer
-        .attr(Attribute::F32_0)
-        .mul(pos_scale.clone())
-        .vec3(writer.attr(Attribute::F32_1).mul(pos_scale), writer.lit(0.0_f32));
-    let update_pos = SetAttributeModifier::new(Attribute::POSITION, pos.expr());
-
-    // Alpha goes from 1.0 (born) to 0.0 (at LIFETIME). pack4x8unorm clamps to [0,1].
-    let alpha = writer.lit(1.0_f32).sub(age.div(writer.lit(LIFETIME)));
-    let color_vec = writer.lit(Vec3::new(r, g, b)).vec4_xyz_w(alpha);
-    let update_color = SetAttributeModifier::new(Attribute::COLOR, color_vec.pack4x8unorm().expr());
-
-    let module = writer.finish();
-
-    EffectAsset::new(count.ceil() as u32 + 1, SpawnerSettings::once(count.into()), module)
-        .with_name("hit_burst")
-        .with_simulation_space(SimulationSpace::Local)
-        .with_simulation_condition(SimulationCondition::Always)
-        // Position is fully computed each frame from real_time; no velocity integration.
-        .with_motion_integration(MotionIntegration::None)
-        .init(init_vel_x)
-        .init(init_vel_y)
-        .init(init_birth_time)
-        .update(update_pos)
-        .update(update_color)
-        .render(SetSizeModifier { size: Vec3::splat(PARTICLE_SIZE).into() })
+    Particle2dEffect {
+        // spawn_rate near-zero so the burst fires on the first update tick.
+        spawn_rate: 0.001,
+        spawn_amount: count.ceil() as u32,
+        emission_shape: EmissionShape::Point,
+        lifetime: Rval::new(LIFETIME, 0.0),
+        // randomness=1.0 rotates direction by ±π → full 360° spread.
+        direction: Some(Rval::new(Vec2::Y, 1.0)),
+        linear_speed: Some(Rval::new(INITIAL_SPEED, 0.4)),
+        scale: Some(Rval::new(PARTICLE_SIZE, 0.0)),
+        color_curve: Some(color_curve),
+        ..Default::default()
+    }
 }
