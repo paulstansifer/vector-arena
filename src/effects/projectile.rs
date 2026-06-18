@@ -15,10 +15,10 @@ use crate::{
     effects::crumble_terrain::Rubble,
     fov,
     indicator::HitFlash,
-    item::{Item, ItemKind, item_name},
+    item::{Item, item_name},
     monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
     player::Player,
-    sprite::{SpriteParam, SvgSprite, potion_hex, scroll_letter},
+    sprite::{SvgSprite, sprite_spec},
     status_effect::StatusEffects,
     ui::{MessageLog, WorldTooltip},
 };
@@ -479,14 +479,9 @@ pub fn apply_damage_on_hit(
             if let Some(drop) = drop_opt {
                 let kind = drop.0;
                 let pos = transform.translation.truncate().extend(fov::ON_FLOOR_Z);
-                let (svg_path, param) = match kind {
-                    ItemKind::Potion(color) => {
-                        ("sprites/potion.svg".to_string(), SpriteParam::Color(potion_hex(color)))
-                    }
-                    ItemKind::Scroll(name) => (
-                        "sprites/scroll.svg".to_string(),
-                        SpriteParam::Text(scroll_letter(name).to_string()),
-                    ),
+                let (svg_path, param) = {
+                    let (path, p) = sprite_spec(kind);
+                    (path.to_string(), p)
                 };
                 commands.spawn((
                     DespawnOnExit(GameState::InLevel),

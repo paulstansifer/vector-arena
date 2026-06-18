@@ -385,6 +385,10 @@ pub fn draw_item_icon_at(
             let sq = egui::Rect::from_center_size(center, egui::vec2(half * 2.0, half * 2.0));
             painter.rect_filled(sq, 1.0_f32, egui::Color32::from_rgb(204, 204, 191));
         }
+        ItemKind::Wand(_) => {
+            let r = size * 0.25;
+            painter.circle_filled(center, r, egui::Color32::from_rgb(180, 100, 40));
+        }
     }
 }
 

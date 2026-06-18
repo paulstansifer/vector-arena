@@ -5,14 +5,14 @@
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use geo::{BooleanOps, Buffer, Intersects, Line as GeoLine, Simplify};
-use rand::{Rng, seq::SliceRandom};
+use rand::Rng;
 
 use crate::{
     AGENT_RADIUS, GameState,
     command_palette::LetterMap,
     dungeon::terrain::{self, DungeonState, random_near},
     fov::{self, ExplorationState, NeverExploredMeshMarker, WALL_FOV_DEPTH},
-    item::{ALL_ITEM_KINDS, Item, item_name},
+    item::{Item, item_name, random_item_kind},
     monster::Monster,
     populate_level::spawn_monster,
     sprite::{SvgSprite, sprite_spec},
@@ -138,7 +138,7 @@ pub fn on_acquirement(
         else {
             continue;
         };
-        let Some(&kind) = ALL_ITEM_KINDS.choose(&mut rng) else { continue };
+        let kind = random_item_kind(&mut rng);
         let (svg_path, param) = sprite_spec(kind);
         commands.spawn((
             DespawnOnExit(GameState::InLevel),

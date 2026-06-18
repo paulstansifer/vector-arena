@@ -12,7 +12,7 @@ use crate::{
     dungeon::terrain::{TorporMultiplier, random_in_playable_area},
     effects::projectile::MonsterShootTimer,
     fov,
-    item::{ALL_ITEM_KINDS, Inventory, Item, ItemKind, item_name},
+    item::{Inventory, Item, ItemKind, item_name, random_item_kind},
     monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterDrop, MonsterState, Stats},
     objects::spawn_unstable_sigil,
     player::{MoveTarget, PLAYER_SPEED, Player},
@@ -74,7 +74,7 @@ pub fn populate(
     let monster_count = (depth as usize + 1).min(rooms.len().saturating_sub(1));
     for _ in 0..monster_count {
         let position = random_pos(rng);
-        let drop = if rng.gen_bool(0.6) { ALL_ITEM_KINDS.choose(rng).copied() } else { None };
+        let drop = if rng.gen_bool(0.6) { Some(random_item_kind(rng)) } else { None };
         spawn_monster(
             commands,
             materials,
@@ -88,8 +88,7 @@ pub fn populate(
     }
 
     let item_count = rng.gen_range(4..=5);
-    let chosen_kinds: Vec<ItemKind> =
-        ALL_ITEM_KINDS.choose_multiple(rng, item_count).copied().collect();
+    let chosen_kinds: Vec<ItemKind> = (0..item_count).map(|_| random_item_kind(rng)).collect();
 
     for kind in chosen_kinds {
         let Some(pt) = random_in_playable_area(playable_area, rng) else { continue };

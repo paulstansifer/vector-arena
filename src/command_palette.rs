@@ -56,6 +56,10 @@ pub struct CommandPaletteState {
     /// Scroll of Identify. Completions list the player's unidentified items, and selecting one
     /// emits an `identify <letter>` command.
     pub identify_mode: bool,
+    /// True while the player has selected a wand and is choosing a wave target.
+    pub target_los_only: bool,
+    /// The wand item kind selected in step 1 of a wave command, pending target selection.
+    pub pending_wand: Option<ItemKind>,
 }
 
 /// True while the palette has a LocationTarget command active and is watching
@@ -87,7 +91,19 @@ impl PaletteRegistry {
         current_fov: Option<&geo::MultiPolygon<f32>>,
         identities: &ItemIdentities,
         identify_mode: bool,
+        wand_mode: bool,
     ) -> Vec<PaletteEntry> {
+        // In wand mode the only choices are visible location targets (monster or location).
+        if wand_mode {
+            return targeting_sub_completions(
+                "wave",
+                "Wave at",
+                goto_state,
+                letter_map,
+                monster_query,
+                current_fov,
+            );
+        }
         // In identify mode the only choices are the player's unidentified items, regardless of
         // what (if anything) has been typed.
         if identify_mode {
@@ -346,6 +362,8 @@ pub fn open_palette_system(
     } else if keyboard.just_pressed(Key::Escape) {
         state.open = false;
         state.identify_mode = false;
+        state.target_los_only = false;
+        state.pending_wand = None;
         state.input.clear();
     }
 }
@@ -370,7 +388,8 @@ pub fn palette_system(
         return Ok(());
     };
 
-    let targeting = palette.open && registry.is_location_targeting(&palette.input);
+    let targeting =
+        palette.open && (registry.is_location_targeting(&palette.input) || palette.target_los_only);
     watches_clicks.0 = targeting;
 
     if palette.open {
@@ -384,6 +403,7 @@ pub fn palette_system(
             fov,
             &identities,
             palette.identify_mode,
+            palette.target_los_only,
         );
 
         let screen_rect = ctx.viewport_rect();
@@ -408,7 +428,15 @@ pub fn palette_system(
                 palette.selected_idx = 0;
             }
             PaletteUiAction::Execute(cmd) => {
-                if palette.identify_mode {
+                if palette.target_los_only {
+                    // `wave <letter>` is not a registered command; resolve the target and hand
+                    // "wave" straight to the item handler.
+                    let rest = cmd.trim_start_matches("wave").trim();
+                    palette.pending_target =
+                        resolve_location_letter(rest, &letter_map, &monster_query, &goto_state);
+                    palette.pending_command = Some("wave".to_string());
+                    palette.target_los_only = false;
+                } else if palette.identify_mode {
                     // `identify <letter>` is not a registered command; hand it straight to the
                     // item handler.
                     palette.pending_command = Some(cmd);
@@ -442,6 +470,8 @@ pub fn palette_system(
             PaletteUiAction::Close => {
                 palette.open = false;
                 palette.identify_mode = false;
+                palette.target_los_only = false;
+                palette.pending_wand = None;
                 palette.input.clear();
             }
             PaletteUiAction::None => {}

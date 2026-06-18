@@ -29,6 +29,8 @@ pub fn item_name(item: ItemKind, count: u16) -> String {
         ItemKind::Potion(color) => format!("{count} {color:?} potions"),
         ItemKind::Scroll(name) if count == 1 => format!("a scroll titled '{name:?}'"),
         ItemKind::Scroll(name) => format!("{count} scrolls titled '{name:?}'"),
+        ItemKind::Wand(gem) if count == 1 => format!("{} wand", gem.article_name()),
+        ItemKind::Wand(gem) => format!("{count} {} wands", gem.name()),
     }
 }
 
@@ -47,6 +49,7 @@ pub fn item_display_name(item: ItemKind, count: u16, identities: &ItemIdentities
             let e = identities.scroll_effect(name).name();
             if count == 1 { format!("a Scroll of {e}") } else { format!("{count} Scrolls of {e}") }
         }
+        ItemKind::Wand(_) => item_name(item, count),
     }
 }
 
@@ -78,9 +81,40 @@ pub enum ScrollName {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WandGem {
+    Ruby,
+    Onyx,
+    Amber,
+    Emerald,
+}
+
+impl WandGem {
+    pub fn name(self) -> &'static str {
+        match self {
+            WandGem::Ruby => "ruby",
+            WandGem::Onyx => "onyx",
+            WandGem::Amber => "amber",
+            WandGem::Emerald => "emerald",
+        }
+    }
+
+    pub fn article_name(self) -> &'static str {
+        match self {
+            WandGem::Ruby => "a ruby",
+            WandGem::Onyx => "an onyx",
+            WandGem::Amber => "an amber",
+            WandGem::Emerald => "an emerald",
+        }
+    }
+}
+
+const ALL_WAND_GEMS: &[WandGem] = &[WandGem::Ruby, WandGem::Onyx, WandGem::Amber, WandGem::Emerald];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ItemKind {
     Potion(PotionColor),
     Scroll(ScrollName),
+    Wand(WandGem),
 }
 
 const ALL_POTION_COLORS: &[PotionColor] = &[
@@ -118,7 +152,23 @@ pub const ALL_ITEM_KINDS: &[ItemKind] = &[
     ItemKind::Scroll(ScrollName::CodeOfConduct),
     ItemKind::Scroll(ScrollName::Passwd),
     ItemKind::Scroll(ScrollName::Hosts),
+    ItemKind::Wand(WandGem::Ruby),
+    ItemKind::Wand(WandGem::Onyx),
+    ItemKind::Wand(WandGem::Amber),
+    ItemKind::Wand(WandGem::Emerald),
 ];
+
+/// Returns a random item kind with weighted distribution: 40% potions, 40% scrolls, 20% wands.
+pub fn random_item_kind(rng: &mut impl Rng) -> ItemKind {
+    let roll = rng.gen_range(0..10u32);
+    if roll < 4 {
+        ItemKind::Potion(*ALL_POTION_COLORS.choose(rng).unwrap())
+    } else if roll < 8 {
+        ItemKind::Scroll(*ALL_SCROLL_NAMES.choose(rng).unwrap())
+    } else {
+        ItemKind::Wand(*ALL_WAND_GEMS.choose(rng).unwrap())
+    }
+}
 
 /// The hidden effect a potion appearance maps to this game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -417,7 +467,17 @@ pub fn register_item_commands(mut registry: ResMut<PaletteRegistry>) {
             item_filter: |i| matches!(i, ItemKind::Scroll(_)),
         },
     });
+    registry.commands.push(PaletteCommand {
+        key: "w".to_string(),
+        description: "wave a wand".to_string(),
+        icon: None,
+        kind: PaletteCommandKind::InventoryTarget {
+            item_filter: |i| matches!(i, ItemKind::Wand(_)),
+        },
+    });
 }
+
+const WAND_MANA_COST: f32 = 5.0;
 
 /// Verify `target` passes `filter`, then remove its first occurrence from inventory.
 fn find_and_remove_item(
@@ -574,6 +634,40 @@ pub fn execute_item_command(
             if count > 0 && !identities.is_identified(item_kind) {
                 identities.identify(item_kind);
                 log.push(format!("It is {}.", item_display_name(item_kind, count, &identities)));
+            }
+        }
+        ["w", letter_str] => {
+            let Some(ch) = letter_str.chars().next() else { return };
+            let Some(item_kind) = letter_map.item_for_letter(ch) else { return };
+            if !matches!(item_kind, ItemKind::Wand(_)) {
+                return;
+            }
+            if !inventory.0.contains(&item_kind) {
+                return;
+            }
+            if stats.mana < WAND_MANA_COST {
+                log.push("You don't have enough mana...");
+                return;
+            }
+            palette.pending_wand = Some(item_kind);
+            palette.open = true;
+            palette.target_los_only = true;
+            palette.input = "wave ".to_string();
+            palette.selected_idx = 0;
+        }
+        ["wave"] => {
+            let Some(target_pos) = palette.pending_target.take() else { return };
+            let Some(wand_kind) = palette.pending_wand.take() else { return };
+            if let Some(item) =
+                find_and_remove_item(&mut inventory, |i| matches!(i, ItemKind::Wand(_)), wand_kind)
+            {
+                stats.mana -= WAND_MANA_COST;
+                let _ = target_pos;
+                log.push(format!(
+                    "You wave the {}. (−{} MP)",
+                    item_name(item, 1),
+                    WAND_MANA_COST as i32
+                ));
             }
         }
         _ => {

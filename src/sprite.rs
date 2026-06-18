@@ -9,7 +9,7 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 use bevy_mesh::VertexAttributeValues;
 use bevy_svg::prelude::{Svg, Svg2d};
 
-use crate::item::{ALL_ITEM_KINDS, Item, ItemKind, PotionColor, ScrollName};
+use crate::item::{ALL_ITEM_KINDS, Item, ItemKind, PotionColor, ScrollName, WandGem};
 
 pub enum SpriteParam {
     Color(String),
@@ -70,12 +70,22 @@ pub fn scroll_letter(name: ScrollName) -> &'static str {
     }
 }
 
+pub fn wand_hex(gem: WandGem) -> String {
+    match gem {
+        WandGem::Ruby => "#cc2222".to_string(),
+        WandGem::Onyx => "#333333".to_string(),
+        WandGem::Amber => "#dd8800".to_string(),
+        WandGem::Emerald => "#22bb44".to_string(),
+    }
+}
+
 pub fn sprite_spec(kind: ItemKind) -> (&'static str, SpriteParam) {
     match kind {
         ItemKind::Potion(color) => ("sprites/potion.svg", SpriteParam::Color(potion_hex(color))),
         ItemKind::Scroll(name) => {
             ("sprites/scroll.svg", SpriteParam::Text(scroll_letter(name).to_string()))
         }
+        ItemKind::Wand(gem) => ("sprites/wand.svg", SpriteParam::Color(wand_hex(gem))),
     }
 }
 
@@ -107,6 +117,7 @@ fn get_embedded_svg(svg_path: &str) -> Option<&'static [u8]> {
     match svg_path {
         "sprites/potion.svg" => Some(include_bytes!("../sprites/potion.svg")),
         "sprites/scroll.svg" => Some(include_bytes!("../sprites/scroll.svg")),
+        "sprites/wand.svg" => Some(include_bytes!("../sprites/wand.svg")),
         "sprites/hatch.svg" => Some(include_bytes!("../sprites/hatch.svg")),
         "sprites/wizard.svg" => Some(include_bytes!("../sprites/wizard.svg")),
         _ => {
