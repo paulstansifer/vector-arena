@@ -33,24 +33,11 @@ pub fn populate(
     monster_letters: &mut crate::command_palette::LetterMap,
     rng: &mut impl Rng,
 ) {
-    let room_center = |r: &Rect<f32>| {
-        let c = r.center();
-        Vec2::new(c.x, c.y)
-    };
+    let random_pos =
+        |rng: &mut _| random_in_playable_area(playable_area, rng).unwrap_or(Vec2::ZERO);
 
-    // Pick the player's room by index so we can exclude it when placing the staircase.
-    let player_room_idx = if rooms.is_empty() { 0 } else { rng.gen_range(0..rooms.len()) };
-    let player_position = rooms.get(player_room_idx).map(room_center).unwrap_or(Vec2::ZERO);
-
-    let non_player_centers: Vec<Vec2> = rooms
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| *i != player_room_idx)
-        .map(|(_, r)| room_center(r))
-        .collect();
-
-    let staircase_position =
-        non_player_centers.choose(rng).copied().unwrap_or(player_position + Vec2::new(50.0, 0.0));
+    let player_position = random_pos(rng);
+    let staircase_position = random_pos(rng);
 
     let (initial_stats, initial_inventory) = saved_player.unwrap_or((
         Stats { hp: 50.0, max_hp: 50.0, mana: 80.0, max_mana: 80.0 },
@@ -84,8 +71,9 @@ pub fn populate(
     let monster_mesh = meshes.add(Circle::new(AGENT_RADIUS));
 
     // One more monster per depth level (2 at depth 1, 3 at depth 2, …).
-    let monster_count = (depth as usize + 1).min(non_player_centers.len());
-    for &position in non_player_centers.iter().take(monster_count) {
+    let monster_count = (depth as usize + 1).min(rooms.len().saturating_sub(1));
+    for _ in 0..monster_count {
+        let position = random_pos(rng);
         let drop = if rng.gen_bool(0.6) { ALL_ITEM_KINDS.choose(rng).copied() } else { None };
         spawn_monster(
             commands,

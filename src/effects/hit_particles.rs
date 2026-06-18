@@ -54,8 +54,7 @@ fn spawn_hit_burst(
 ) {
     let event = trigger.event();
     let count = event.damage.round().max(1.0);
-    let (r, g, b) =
-        if event.fired_by_player { (0.2_f32, 0.4, 0.7) } else { (0.7_f32, 0.3, 0.2) };
+    let (r, g, b) = if event.fired_by_player { (0.2_f32, 0.4, 0.7) } else { (0.7_f32, 0.3, 0.2) };
 
     let effect = effects.add(create_hit_burst_effect(count, r, g, b));
     commands.spawn((
@@ -65,9 +64,7 @@ fn spawn_hit_burst(
         ParticleSpawner::<ColorParticle2dMaterial>::default(),
         ParticleEffectHandle(effect),
         OneShot::Despawn,
-        Transform::from_translation(
-            event.position.truncate().extend(crate::fov::MOVABLE_Z + 2.0),
-        ),
+        Transform::from_translation(event.position.truncate().extend(crate::fov::MOVABLE_Z + 2.0)),
     ));
 }
 

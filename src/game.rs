@@ -19,7 +19,8 @@ use crate::{
         },
     },
     effects::{
-        self, crumble_terrain::{Fragile, RubbleMaterial, handle_right_click_excavation},
+        self,
+        crumble_terrain::{Fragile, RubbleMaterial, handle_right_click_excavation},
         projectile::{
             apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit, apply_knockback_on_hit,
             apply_torpor_to_non_agents, detect_missile_hits, execute_missile_command,
@@ -189,14 +190,15 @@ pub fn spawn_game_world(
         ))
         .id();
 
-    let torpor_material =
-        materials.add(ColorMaterial::from(Color::Srgba(effects::torpor_particles::TORPOR_ZONE_COLOR)));
+    let torpor_material = materials
+        .add(ColorMaterial::from(Color::Srgba(effects::torpor_particles::TORPOR_ZONE_COLOR)));
     for zone in &terrain_geometry.torpor_zones {
         let mesh = geometry_to_mesh(&geo::MultiPolygon::new(vec![zone.clone()]));
         // Bounding box of the zone, for seeding ambient particles. For today's
         // rectangular zones this matches the zone exactly.
         let bbox = zone.bounding_rect().expect("torpor zone is non-empty");
-        let center = Vec2::new((bbox.min().x + bbox.max().x) / 2.0, (bbox.min().y + bbox.max().y) / 2.0);
+        let center =
+            Vec2::new((bbox.min().x + bbox.max().x) / 2.0, (bbox.min().y + bbox.max().y) / 2.0);
         let half_size = Vec2::new(bbox.width() / 2.0, bbox.height() / 2.0);
         commands.spawn((
             DespawnOnExit(GameState::InLevel),
@@ -354,7 +356,10 @@ impl Plugin for GamePlugin {
             .add_systems(Update, set_target_on_click)
             .add_systems(Update, move_player.after(update_torpor_multipliers))
             .add_systems(Update, nav::apply_nav_velocity.after(move_player))
-            .add_systems(Update, directional_move_system.after(nav::apply_nav_velocity).after(open_palette_system))
+            .add_systems(
+                Update,
+                directional_move_system.after(nav::apply_nav_velocity).after(open_palette_system),
+            )
             .add_systems(Update, rotate_player_to_velocity.after(move_player))
             .add_systems(Update, advance_exploration.after(move_player))
             .add_systems(Update, execute_stop_command)

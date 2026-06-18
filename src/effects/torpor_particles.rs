@@ -89,11 +89,7 @@ fn spawn_particles_for_new_zones(
                     phase_x: rand::random::<f32>() * TAU,
                     phase_y: rand::random::<f32>() * TAU,
                 },
-                Sprite {
-                    image: texture.0.clone(),
-                    custom_size: Some(quad),
-                    ..default()
-                },
+                Sprite { image: texture.0.clone(), custom_size: Some(quad), ..default() },
                 Transform::from_translation(base_pos),
             ));
         }
@@ -103,12 +99,10 @@ fn spawn_particles_for_new_zones(
 fn update_torpor_dots(time: Res<Time<Real>>, mut query: Query<(&TorporDot, &mut Transform)>) {
     let t = time.elapsed_secs();
     for (dot, mut transform) in &mut query {
-        let drift_x = AMP
-            * ((F1 * t + dot.phase_x).sin()
-                + 0.5 * (F2 * t + 2.7 * dot.phase_x).sin());
-        let drift_y = AMP
-            * ((F4 * t + dot.phase_y).cos()
-                + 0.5 * (F3 * t + 1.7 * dot.phase_y).sin());
+        let drift_x =
+            AMP * ((F1 * t + dot.phase_x).sin() + 0.5 * (F2 * t + 2.7 * dot.phase_x).sin());
+        let drift_y =
+            AMP * ((F4 * t + dot.phase_y).cos() + 0.5 * (F3 * t + 1.7 * dot.phase_y).sin());
         transform.translation = dot.base_pos + Vec3::new(drift_x, drift_y, 0.0);
     }
 }
@@ -116,9 +110,7 @@ fn update_torpor_dots(time: Res<Time<Real>>, mut query: Query<(&TorporDot, &mut 
 /// World-space size of the particle billboard. The texture is laid out so the
 /// dots occupy a fixed fraction of the quad (see `build_two_dot_texture`); this
 /// size makes them render at `DOT_DIAMETER` / `DOT_SPACING` pixels.
-fn particle_quad_size() -> Vec2 {
-    Vec2::new(DOT_DIAMETER / 0.75, DOT_SPACING / 0.375)
-}
+fn particle_quad_size() -> Vec2 { Vec2::new(DOT_DIAMETER / 0.75, DOT_SPACING / 0.375) }
 
 /// Build the 32x64 RGBA texture containing a whiter highlight dot above a darker
 /// shadow dot. Drawn with anti-aliased edges and stored in sRGB space.

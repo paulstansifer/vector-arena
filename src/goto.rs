@@ -4,6 +4,7 @@ use bevy_egui::egui;
 use bevy_landmass::prelude::*;
 
 use crate::{
+    Staircase,
     command_palette::{
         CommandPaletteState, CommandPaletteWatchesClicks, PaletteCommand, PaletteCommandKind,
         PaletteRegistry,
@@ -39,6 +40,7 @@ pub fn compute_goto_assignments(
     poi: Res<PointsOfInterest>,
     player_query: Query<&Transform, With<Player>>,
     item_query: Query<&Transform, With<crate::item::Item>>,
+    staircase_query: Query<&Transform, With<Staircase>>,
     mut goto_state: ResMut<GotoState>,
 ) {
     if !palette.open || !watches_clicks.0 || goto_state.computed {
@@ -73,8 +75,15 @@ pub fn compute_goto_assignments(
         goto_state.labels[idx] = is_explored(pos).then_some(pos);
     }
 
+    // Reserve 's' for the staircase when it has been explored.
+    if let Ok(tf) = staircase_query.single() {
+        let pos = tf.translation.truncate();
+        goto_state.labels[idx('s')] = is_explored(pos).then_some(pos);
+    }
+
     // Fill remaining slots with interesting points sorted by distance.
-    let reserved: Vec<usize> = cardinals.map(|x| x.0).iter().cloned().collect();
+    let mut reserved: Vec<usize> = cardinals.map(|x| x.0).iter().cloned().collect();
+    reserved.push(idx('s'));
     let map_points = poi.points.iter().copied().filter(|&p| is_explored(p));
     let item_points =
         item_query.iter().map(|tf| tf.translation.truncate()).filter(|&p| is_explored(p));

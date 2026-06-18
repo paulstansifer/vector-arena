@@ -9,9 +9,7 @@
 mod runner;
 
 #[cfg(not(target_arch = "wasm32"))]
-fn main() {
-    runner::run();
-}
+fn main() { runner::run(); }
 
 #[cfg(target_arch = "wasm32")]
 fn main() {}
