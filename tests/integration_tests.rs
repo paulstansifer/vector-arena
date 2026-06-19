@@ -210,6 +210,7 @@ fn test_player_can_path_within_room_and_to_other_room() {
                 origin: start_pos,
                 active: false,
                 time_set: Default::default(),
+                directional: false,
             },
             Agent2dBundle {
                 agent: Default::default(),

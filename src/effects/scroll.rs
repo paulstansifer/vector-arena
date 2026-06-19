@@ -5,7 +5,6 @@
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use geo::{BooleanOps, Buffer, Simplify};
-use rand::Rng;
 
 use crate::{
     AGENT_RADIUS, GameState,
