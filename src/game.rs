@@ -20,7 +20,9 @@ use crate::{
     },
     effects::{
         self,
-        crumble_terrain::{Fragile, RubbleMaterial, handle_right_click_excavation},
+        crumble_terrain::{
+            Fragile, RubbleMaterial, handle_right_click_excavation, on_wand_crumbling,
+        },
         projectile::{
             apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit, apply_knockback_on_hit,
             apply_torpor_to_non_agents, detect_missile_hits, execute_missile_command,
@@ -28,14 +30,14 @@ use crate::{
             spawn_missile_trails, tick_knockback_cooldowns, update_missile_trails, update_missiles,
         },
         rope,
-        scroll::{on_acquirement, on_magic_mapping, on_monster_confusion, on_summon_monster},
+        scroll::{on_acquirement, on_instability, on_magic_mapping, on_summon_monster},
     },
     fov::{self, MOVABLE_Z, OpaqueVertices, TERRAIN_Z},
     goto,
     indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
     item::{
-        Inventory, ItemIdentities, animate_pickup, execute_item_command, pickup_items,
-        refresh_item_tooltips, register_item_commands,
+        Inventory, ItemIdentities, animate_pickup, execute_item_command, on_wand_attraction,
+        pickup_items, refresh_item_tooltips, register_item_commands,
     },
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
@@ -351,8 +353,10 @@ impl Plugin for GamePlugin {
             .add_systems(Update, refresh_item_tooltips)
             .add_observer(on_summon_monster)
             .add_observer(on_magic_mapping)
-            .add_observer(on_monster_confusion)
+            .add_observer(on_instability)
             .add_observer(on_acquirement)
+            .add_observer(on_wand_crumbling)
+            .add_observer(on_wand_attraction)
             .add_systems(Update, set_target_on_click)
             .add_systems(Update, move_player.after(update_torpor_multipliers))
             .add_systems(Update, nav::apply_nav_velocity.after(move_player))

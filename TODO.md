@@ -12,11 +12,12 @@
   * Place monsters and down staircases in random accessible locations, just like items.
   * The test setup is causing a lot of unusedness warnings visible in the editor, but not `cargo check`.
   * "g h" is treated the same as pressing "h", instead of going to that spot.
-  * Hunger clock: a bordem meter fills up as time goes by. Fighting, explosions and (especially) trying unidentified items refills it.
+  * Hunger clock: a boredem meter fills up as time goes by. Fighting, explosions and (especially) trying unidentified items refills it.
   * Wands:
-    * Wand of Swap
-    * Wand of Crumble
-    * Wand of Forgetting (maybe we want this to be repeatable?)
+    * Wand of Swapping
+    * Wand of Crumbling
+    * Wand of Summoning
+    * Wand of Confusion
   * Add a "vortex" dungeon feature (and a scroll that creates one).
 
 

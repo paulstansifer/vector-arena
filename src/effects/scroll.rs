@@ -4,7 +4,7 @@
 // the read handler itself stays small.
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::{BooleanOps, Buffer, Intersects, Line as GeoLine, Simplify};
+use geo::{BooleanOps, Buffer, Simplify};
 use rand::Rng;
 
 use crate::{
@@ -13,10 +13,9 @@ use crate::{
     dungeon::terrain::{self, DungeonState, random_near},
     fov::{self, ExplorationState, NeverExploredMeshMarker, WALL_FOV_DEPTH},
     item::{Item, item_name, random_item_kind},
-    monster::Monster,
+    objects::spawn_unstable_sigil,
     populate_level::spawn_monster,
     sprite::{SvgSprite, sprite_spec},
-    status_effect::{StatusEffect, StatusEffects},
     ui::{MessageLog, WorldTooltip},
 };
 
@@ -27,6 +26,11 @@ pub struct SummonMonsterEvent {
 
 #[derive(Event)]
 pub struct MagicMappingEvent;
+
+#[derive(Event)]
+pub struct InstabilityEvent {
+    pub origin: Vec2,
+}
 
 #[derive(Event)]
 pub struct MonsterConfusionEvent {
@@ -89,38 +93,30 @@ pub fn on_magic_mapping(
     log.push("Hm, this scroll seems to have a map on it.");
 }
 
-/// Confuses every monster in the reader's line of sight.
-pub fn on_monster_confusion(
-    trigger: On<MonsterConfusionEvent>,
-    mut monsters: Query<(&Transform, &mut StatusEffects), With<Monster>>,
+/// Spawns three unstable sigils 40-120 units from the reader.
+pub fn on_instability(
+    trigger: On<InstabilityEvent>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
     dungeon_state: Res<DungeonState>,
     mut log: ResMut<MessageLog>,
 ) {
     let origin = trigger.event().origin;
     let mut rng = rand::thread_rng();
-    let mut count = 0;
-    for (tf, mut effects) in monsters.iter_mut() {
-        let mpos = tf.translation.truncate();
-        let seg = GeoLine::new(geo::Coord { x: mpos.x, y: mpos.y }, geo::Coord {
-            x: origin.x,
-            y: origin.y,
-        });
-        if dungeon_state.solid_rock.intersects(&seg) {
-            continue; // a wall blocks line of sight
-        }
-        let a = rng.gen_range(0.0..std::f32::consts::TAU);
-        effects.add(
-            StatusEffect::Confused { wander_dir: Vec2::new(a.cos(), a.sin()) },
-            rng.gen_range(6.0..10.0),
-        );
-        count += 1;
+    let mut spawned = 0;
+    for _ in 0..3 {
+        let Some(pos) = random_near(&dungeon_state.playable_area, origin, 40.0, 120.0, &mut rng)
+        else {
+            continue;
+        };
+        spawn_unstable_sigil(&mut commands, &mut meshes, &mut materials, pos, &mut rng);
+        spawned += 1;
     }
-    if count == 0 {
-        log.push("You hear perfectly normal laughter in the distance.");
-    } else if count == 1 {
-        log.push(format!("The monster seems confused!"));
+    if spawned == 0 {
+        log.push("The scroll crumbles to dust.");
     } else {
-        log.push(format!("{count} monsters start acting confused!"));
+        log.push("Unstable sigils flicker into existence nearby!");
     }
 }
 

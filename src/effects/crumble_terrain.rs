@@ -9,6 +9,7 @@ use crate::{
     dungeon::terrain::{
         DungeonCollider, DungeonState, DungeonVisuals, geometry_to_collider, geometry_to_mesh,
     },
+    item::WandCrumblingEvent,
     nav::{DungeonNavMesh, playable_area_to_nav_mesh},
 };
 use avian2d::{math::PI, prelude::*};
@@ -242,6 +243,80 @@ pub fn subtract_polygon_from_terrain(
             }
         }
     }
+}
+
+/// Like `create_circle_polygon` but with per-vertex radius and angle jitter for an organic shape.
+fn create_irregular_circle_polygon(
+    center: Vec2,
+    radius: f32,
+    points: usize,
+    rng: &mut impl rand::Rng,
+) -> Polygon<f32> {
+    use std::f32::consts::TAU;
+    let angle_step = TAU / (points as f32);
+    let mut coords: Vec<(f32, f32)> = (0..points)
+        .map(|i| {
+            let base = (i as f32) * angle_step;
+            let jitter = rng.gen_range(-0.25..0.25) * angle_step;
+            let angle = base + jitter;
+            let r = radius * rng.gen_range(0.65..1.35);
+            (center.x + r * angle.cos(), center.y + r * angle.sin())
+        })
+        .collect();
+    if let Some(&first) = coords.first() {
+        coords.push(first);
+    }
+    Polygon::new(LineString::from(coords), vec![])
+}
+
+/// Crumbles an irregular circle of terrain around `target` (radius ~25 units).
+pub fn on_wand_crumbling(
+    trigger: On<WandCrumblingEvent>,
+    mut commands: Commands,
+    dungeon_state: Option<ResMut<DungeonState>>,
+    dungeon_visuals: Option<ResMut<DungeonVisuals>>,
+    dungeon_collider: Option<ResMut<DungeonCollider>>,
+    dungeon_nav_mesh: Option<ResMut<DungeonNavMesh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut nav_meshes: ResMut<Assets<NavMesh2d>>,
+    rubble_material: Option<Res<RubbleMaterial>>,
+    fragile_query: Query<(Entity, &ColliderAabb), With<Fragile>>,
+) {
+    let (dungeon_state, dungeon_visuals, dungeon_collider, dungeon_nav_mesh, rubble_material) =
+        match (dungeon_state, dungeon_visuals, dungeon_collider, dungeon_nav_mesh, rubble_material)
+        {
+            (Some(ds), Some(dv), Some(dc), Some(dn), Some(rm)) => (ds, dv, dc, dn, rm),
+            _ => return,
+        };
+
+    let target = trigger.event().target;
+    let mut rng = rand::thread_rng();
+    let poly = create_irregular_circle_polygon(target, 25.0, 14, &mut rng);
+    let input_multipolygon = MultiPolygon::new(vec![poly]);
+
+    for (entity, aabb) in &fragile_query {
+        let rect_poly = Rect::new(Coord { x: aabb.min.x, y: aabb.min.y }, Coord {
+            x: aabb.max.x,
+            y: aabb.max.y,
+        })
+        .to_polygon();
+        if input_multipolygon.intersects(&rect_poly) {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    subtract_polygon_from_terrain(
+        &mut commands,
+        &input_multipolygon,
+        dungeon_state,
+        dungeon_visuals,
+        dungeon_collider,
+        dungeon_nav_mesh,
+        &mut meshes,
+        &mut nav_meshes,
+        &rubble_material.0,
+        Some((target, 60.0)),
+    );
 }
 
 pub fn handle_right_click_excavation(

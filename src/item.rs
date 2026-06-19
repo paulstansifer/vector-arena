@@ -4,15 +4,18 @@
 // plays at normal speed even during bullet-time.
 use std::collections::{HashMap, HashSet};
 
-use avian2d::prelude::{LinearVelocity, Position};
+use avian2d::prelude::{Collider, LinearVelocity, Position, SpatialQuery, SpatialQueryFilter};
 use bevy::{prelude::*, time::Real};
+use geo::{Intersects, Line as GeoLine};
 use rand::{Rng, seq::SliceRandom};
 
 use crate::{
+    GameLayer,
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     dungeon::terrain::{DungeonState, random_in_playable_area},
     effects::scroll::{
-        AcquirementEvent, MagicMappingEvent, MonsterConfusionEvent, SummonMonsterEvent,
+        AcquirementEvent, InstabilityEvent, MagicMappingEvent, MonsterConfusionEvent,
+        SummonMonsterEvent,
     },
     monster::{Monster, Stats},
     player::{ExplorationGoal, Player},
@@ -49,7 +52,10 @@ pub fn item_display_name(item: ItemKind, count: u16, identities: &ItemIdentities
             let e = identities.scroll_effect(name).name();
             if count == 1 { format!("a Scroll of {e}") } else { format!("{count} Scrolls of {e}") }
         }
-        ItemKind::Wand(_) => item_name(item, count),
+        ItemKind::Wand(gem) => {
+            let e = identities.wand_effect(gem).name();
+            if count == 1 { format!("a Wand of {e}") } else { format!("{count} Wands of {e}") }
+        }
     }
 }
 
@@ -109,6 +115,40 @@ impl WandGem {
 }
 
 const ALL_WAND_GEMS: &[WandGem] = &[WandGem::Ruby, WandGem::Onyx, WandGem::Amber, WandGem::Emerald];
+
+/// The hidden effect a wand gem maps to this game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WandEffect {
+    Swapping,
+    Confusion,
+    Crumbling,
+    Attraction,
+}
+
+const ALL_WAND_EFFECTS: &[WandEffect] =
+    &[WandEffect::Swapping, WandEffect::Confusion, WandEffect::Crumbling, WandEffect::Attraction];
+
+impl WandEffect {
+    pub fn name(self) -> &'static str {
+        match self {
+            WandEffect::Swapping => "Swapping",
+            WandEffect::Confusion => "Confusion",
+            WandEffect::Crumbling => "Crumbling",
+            WandEffect::Attraction => "Attraction",
+        }
+    }
+}
+
+#[derive(Event)]
+pub struct WandCrumblingEvent {
+    pub target: Vec2,
+}
+
+#[derive(Event)]
+pub struct WandAttractionEvent {
+    pub target: Vec2,
+    pub player_pos: Vec2,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ItemKind {
@@ -212,7 +252,7 @@ pub enum ScrollEffect {
     Teleport,
     SummonMonster,
     MagicMapping,
-    MonsterConfusion,
+    Instability,
     Acquirement,
     Identify,
     Forgetting,
@@ -222,7 +262,7 @@ const ALL_SCROLL_EFFECTS: &[ScrollEffect] = &[
     ScrollEffect::Teleport,
     ScrollEffect::SummonMonster,
     ScrollEffect::MagicMapping,
-    ScrollEffect::MonsterConfusion,
+    ScrollEffect::Instability,
     ScrollEffect::Acquirement,
     ScrollEffect::Identify,
     ScrollEffect::Forgetting,
@@ -234,7 +274,7 @@ impl ScrollEffect {
             ScrollEffect::Teleport => "Teleportation",
             ScrollEffect::SummonMonster => "Monster Summoning",
             ScrollEffect::MagicMapping => "Magic Mapping",
-            ScrollEffect::MonsterConfusion => "Monster Confusion",
+            ScrollEffect::Instability => "Instability",
             ScrollEffect::Acquirement => "Acquirement",
             ScrollEffect::Identify => "Identify",
             ScrollEffect::Forgetting => "Forgetting",
@@ -248,6 +288,7 @@ impl ScrollEffect {
 pub struct ItemIdentities {
     potion: HashMap<PotionColor, PotionEffect>,
     scroll: HashMap<ScrollName, ScrollEffect>,
+    wand: HashMap<WandGem, WandEffect>,
     identified: HashSet<ItemKind>,
 }
 
@@ -264,6 +305,10 @@ impl ItemIdentities {
         let mut scroll_effects = ALL_SCROLL_EFFECTS.to_vec();
         scroll_effects.shuffle(rng);
         self.scroll = ALL_SCROLL_NAMES.iter().copied().zip(scroll_effects).collect();
+
+        let mut wand_effects = ALL_WAND_EFFECTS.to_vec();
+        wand_effects.shuffle(rng);
+        self.wand = ALL_WAND_GEMS.iter().copied().zip(wand_effects).collect();
     }
 
     pub fn potion_effect(&self, color: PotionColor) -> PotionEffect {
@@ -272,6 +317,10 @@ impl ItemIdentities {
 
     pub fn scroll_effect(&self, name: ScrollName) -> ScrollEffect {
         self.scroll.get(&name).copied().unwrap_or(ScrollEffect::Teleport)
+    }
+
+    pub fn wand_effect(&self, gem: WandGem) -> WandEffect {
+        self.wand.get(&gem).copied().unwrap_or(WandEffect::Swapping)
     }
 
     pub fn is_identified(&self, item: ItemKind) -> bool { self.identified.contains(&item) }
@@ -457,6 +506,7 @@ pub fn register_item_commands(mut registry: ResMut<PaletteRegistry>) {
         icon: None,
         kind: PaletteCommandKind::InventoryTarget {
             item_filter: |i| matches!(i, ItemKind::Potion(_)),
+            requires_target: false,
         },
     });
     registry.commands.push(PaletteCommand {
@@ -465,6 +515,7 @@ pub fn register_item_commands(mut registry: ResMut<PaletteRegistry>) {
         icon: None,
         kind: PaletteCommandKind::InventoryTarget {
             item_filter: |i| matches!(i, ItemKind::Scroll(_)),
+            requires_target: false,
         },
     });
     registry.commands.push(PaletteCommand {
@@ -473,6 +524,7 @@ pub fn register_item_commands(mut registry: ResMut<PaletteRegistry>) {
         icon: None,
         kind: PaletteCommandKind::InventoryTarget {
             item_filter: |i| matches!(i, ItemKind::Wand(_)),
+            requires_target: true,
         },
     });
 }
@@ -507,6 +559,10 @@ pub fn execute_item_command(
         ),
         (With<Player>, Without<Monster>),
     >,
+    mut monster_query: Query<
+        (&mut Position, &mut Transform, &mut LinearVelocity, &mut StatusEffects),
+        (With<Monster>, Without<Player>),
+    >,
     dungeon_state: Res<DungeonState>,
     mut log: ResMut<MessageLog>,
     mut commands: Commands,
@@ -528,6 +584,8 @@ pub fn execute_item_command(
         return;
     };
 
+    let mut wand_step2 = false;
+    let mut put_back = false;
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     match parts.as_slice() {
         ["q", letter_str] => {
@@ -597,8 +655,8 @@ pub fn execute_item_command(
                 ScrollEffect::MagicMapping => {
                     commands.trigger(MagicMappingEvent);
                 }
-                ScrollEffect::MonsterConfusion => {
-                    commands.trigger(MonsterConfusionEvent { origin: player_pos });
+                ScrollEffect::Instability => {
+                    commands.trigger(InstabilityEvent { origin: player_pos });
                 }
                 ScrollEffect::Acquirement => {
                     commands.trigger(AcquirementEvent { origin: player_pos });
@@ -636,7 +694,12 @@ pub fn execute_item_command(
                 log.push(format!("It is {}.", item_display_name(item_kind, count, &identities)));
             }
         }
+        ["w", _] if palette.pending_target.is_some() => {
+            // Step 2: world-click target — pending_target set by the click handler.
+            wand_step2 = true;
+        }
         ["w", letter_str] => {
+            // Step 1: validate the wand and open the targeting sub-palette.
             let Some(ch) = letter_str.chars().next() else { return };
             let Some(item_kind) = letter_map.item_for_letter(ch) else { return };
             if !matches!(item_kind, ItemKind::Wand(_)) {
@@ -652,26 +715,167 @@ pub fn execute_item_command(
             palette.pending_wand = Some(item_kind);
             palette.open = true;
             palette.target_los_only = true;
-            palette.input = "wave ".to_string();
+            palette.input = format!("w {letter_str} ");
             palette.selected_idx = 0;
         }
-        ["wave"] => {
-            let Some(target_pos) = palette.pending_target.take() else { return };
-            let Some(wand_kind) = palette.pending_wand.take() else { return };
-            if let Some(item) =
-                find_and_remove_item(&mut inventory, |i| matches!(i, ItemKind::Wand(_)), wand_kind)
-            {
-                stats.mana -= WAND_MANA_COST;
-                let _ = target_pos;
-                log.push(format!(
-                    "You wave the {}. (−{} MP)",
-                    item_name(item, 1),
-                    WAND_MANA_COST as i32
-                ));
-            }
+        ["w", _, _] => {
+            // Step 2: letter target — pending_wand, pending_target, pending_target_entity set.
+            wand_step2 = true;
         }
         _ => {
-            palette.pending_command = Some(cmd);
+            put_back = true;
+        }
+    }
+    drop(parts);
+    if put_back {
+        palette.pending_command = Some(cmd);
+        return;
+    }
+    if wand_step2 {
+        let Some(target_pos) = palette.pending_target.take() else { return };
+        let target_entity = palette.pending_target_entity.take();
+        // Wand kind: from pending_wand (fallback/legacy path) or from the command string.
+        let wand_kind = palette.pending_wand.take().or_else(|| {
+            cmd.split_whitespace()
+                .nth(1)
+                .and_then(|s| s.chars().next())
+                .and_then(|ch| letter_map.item_for_letter(ch))
+        });
+        let Some(wand_kind) = wand_kind else { return };
+        let Some(item) =
+            find_and_remove_item(&mut inventory, |i| matches!(i, ItemKind::Wand(_)), wand_kind)
+        else {
+            return;
+        };
+        let ItemKind::Wand(gem) = item else { return };
+        let effect = identities.wand_effect(gem);
+        identities.identify(item);
+        stats.mana -= WAND_MANA_COST;
+        log.push(format!(
+            "You wave the {}. (−{} MP)",
+            item_display_name(item, 1, &identities),
+            WAND_MANA_COST as i32
+        ));
+        match effect {
+            WandEffect::Swapping => {
+                let Some(target_entity) = target_entity else {
+                    log.push("Nothing to swap with here.");
+                    return;
+                };
+                let Ok((mut m_pos, mut m_tf, mut m_vel, _)) = monster_query.get_mut(target_entity)
+                else {
+                    return;
+                };
+                let player_pos = position.0;
+                let monster_pos = m_pos.0;
+                position.0 = monster_pos;
+                transform.translation.x = monster_pos.x;
+                transform.translation.y = monster_pos.y;
+                velocity.0 = Vec2::ZERO;
+                m_pos.0 = player_pos;
+                m_tf.translation.x = player_pos.x;
+                m_tf.translation.y = player_pos.y;
+                m_vel.0 = Vec2::ZERO;
+                commands.entity(entity).remove::<ExplorationGoal>();
+                log.push("You swap places!");
+            }
+            WandEffect::Confusion => {
+                let Some(target_entity) = target_entity else {
+                    log.push("Nothing to confuse here.");
+                    return;
+                };
+                let Ok((_, _, _, mut m_effects)) = monster_query.get_mut(target_entity) else {
+                    return;
+                };
+                let mut rng = rand::thread_rng();
+                let a = rng.gen_range(0.0..std::f32::consts::TAU);
+                m_effects.add(
+                    StatusEffect::Confused { wander_dir: Vec2::new(a.cos(), a.sin()) },
+                    rng.gen_range(6.0..10.0),
+                );
+                log.push("The monster looks confused!");
+            }
+            WandEffect::Crumbling => {
+                commands.trigger(WandCrumblingEvent { target: target_pos });
+            }
+            WandEffect::Attraction => {
+                let player_pos = transform.translation.truncate();
+                commands.trigger(WandAttractionEvent { target: target_pos, player_pos });
+            }
+        }
+    }
+}
+
+/// Confuses every monster in the reader's line of sight.
+pub fn on_monster_confusion(
+    trigger: On<MonsterConfusionEvent>,
+    mut monsters: Query<(&Transform, &mut StatusEffects), With<Monster>>,
+    dungeon_state: Res<DungeonState>,
+    mut log: ResMut<MessageLog>,
+) {
+    let origin = trigger.event().origin;
+    let mut rng = rand::thread_rng();
+    let mut count = 0;
+    for (tf, mut effects) in monsters.iter_mut() {
+        let mpos = tf.translation.truncate();
+        let seg = GeoLine::new(geo::Coord { x: mpos.x, y: mpos.y }, geo::Coord {
+            x: origin.x,
+            y: origin.y,
+        });
+        if dungeon_state.solid_rock.intersects(&seg) {
+            continue; // a wall blocks line of sight
+        }
+        let a = rng.gen_range(0.0..std::f32::consts::TAU);
+        effects.add(
+            StatusEffect::Confused { wander_dir: Vec2::new(a.cos(), a.sin()) },
+            rng.gen_range(6.0..10.0),
+        );
+        count += 1;
+    }
+    if count == 0 {
+        log.push("You hear perfectly normal laughter in the distance.");
+    } else if count == 1 {
+        log.push(format!("The monster seems confused!"));
+    } else {
+        log.push(format!("{count} monsters start acting confused!"));
+    }
+}
+
+const ATTRACTION_RADIUS: f32 = 70.0;
+const ATTRACTION_SPEED: f32 = 250.0;
+
+/// Pulls every physics entity within `ATTRACTION_RADIUS` of the target toward the player,
+/// and starts the pickup animation for any ground items in the same radius.
+pub fn on_wand_attraction(
+    trigger: On<WandAttractionEvent>,
+    mut commands: Commands,
+    spatial_query: SpatialQuery,
+    mut body_query: Query<(&Transform, &mut LinearVelocity), Without<Player>>,
+    items: Query<(Entity, &Transform), (With<Item>, Without<PickingUp>)>,
+) {
+    let WandAttractionEvent { target, player_pos } = *trigger.event();
+
+    let hits = spatial_query.shape_intersections(
+        &Collider::circle(ATTRACTION_RADIUS),
+        target,
+        0.0,
+        &SpatialQueryFilter::from_mask(GameLayer::Dynamic),
+    );
+    for entity in hits {
+        let Ok((tf, mut vel)) = body_query.get_mut(entity) else { continue };
+        let dir = (player_pos - tf.translation.truncate()).normalize_or_zero();
+        vel.0 = dir * ATTRACTION_SPEED;
+    }
+
+    for (entity, tf) in &items {
+        let item_pos = tf.translation.truncate();
+        if item_pos.distance(target) <= ATTRACTION_RADIUS {
+            commands.entity(entity).insert(PickingUp {
+                progress: 0.0,
+                origin: item_pos,
+                target: player_pos,
+                initial_scale: tf.scale,
+            });
         }
     }
 }

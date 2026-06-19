@@ -16,8 +16,9 @@ use crate::{
 
 pub enum PaletteCommandKind {
     /// Sub-entries come from the player's inventory filtered by item_filter.
-    /// Executed as "{key} {item_letter}".
-    InventoryTarget { item_filter: fn(ItemKind) -> bool },
+    /// Executed as "{key} {item_letter}" or, when requires_target is true,
+    /// as "{key} {item_letter} {target_letter}" after a second targeting step.
+    InventoryTarget { item_filter: fn(ItemKind) -> bool, requires_target: bool },
     /// Sub-entries come from visible monsters + labeled locations.
     /// When executed, pending_target is resolved to a Vec2 before the handler runs.
     LocationTarget { target_verb: &'static str },
@@ -60,6 +61,9 @@ pub struct CommandPaletteState {
     pub target_los_only: bool,
     /// The wand item kind selected in step 1 of a wave command, pending target selection.
     pub pending_wand: Option<ItemKind>,
+    /// The monster entity selected as the wand target, if the player chose a monster letter
+    /// (rather than a location label or a world click). Consumed by the wave handler.
+    pub pending_target_entity: Option<Entity>,
 }
 
 /// True while the palette has a LocationTarget command active and is watching
@@ -91,19 +95,7 @@ impl PaletteRegistry {
         current_fov: Option<&geo::MultiPolygon<f32>>,
         identities: &ItemIdentities,
         identify_mode: bool,
-        wand_mode: bool,
     ) -> Vec<PaletteEntry> {
-        // In wand mode the only choices are visible location targets (monster or location).
-        if wand_mode {
-            return targeting_sub_completions(
-                "wave",
-                "Wave at",
-                goto_state,
-                letter_map,
-                monster_query,
-                current_fov,
-            );
-        }
         // In identify mode the only choices are the player's unidentified items, regardless of
         // what (if anything) has been typed.
         if identify_mode {
@@ -113,13 +105,14 @@ impl PaletteRegistry {
                 |i| !identities.is_identified(i),
                 letter_map,
                 identities,
+                true,
             );
         }
 
         let mut entries = Vec::new();
         for cmd in &self.commands {
             match &cmd.kind {
-                PaletteCommandKind::InventoryTarget { item_filter } => {
+                PaletteCommandKind::InventoryTarget { item_filter, requires_target } => {
                     let tokens: Vec<&str> = input.split_whitespace().collect();
                     match tokens.as_slice() {
                         [] => entries.push(PaletteEntry {
@@ -128,13 +121,39 @@ impl PaletteRegistry {
                             icon: cmd.icon,
                             is_complete: false,
                         }),
-                        [k] | [k, _] if *k == cmd.key.as_str() => {
+                        [k] if *k == cmd.key.as_str() => {
+                            // Show inventory; wand entries are incomplete (need a target letter).
                             entries.extend(inventory_entries(
                                 &cmd.key,
                                 inventory,
                                 *item_filter,
                                 letter_map,
                                 identities,
+                                !requires_target,
+                            ));
+                        }
+                        [k, letter] | [k, letter, ..]
+                            if *k == cmd.key.as_str() && *requires_target =>
+                        {
+                            // Item selected; switch to target picker ("w a A", "w a h", …).
+                            entries.extend(targeting_sub_completions(
+                                &format!("{k} {letter}"),
+                                "Wave at",
+                                goto_state,
+                                letter_map,
+                                monster_query,
+                                current_fov,
+                            ));
+                        }
+                        [k, _] if *k == cmd.key.as_str() => {
+                            // !requires_target with item letter typed — show inventory for display.
+                            entries.extend(inventory_entries(
+                                &cmd.key,
+                                inventory,
+                                *item_filter,
+                                letter_map,
+                                identities,
+                                true,
                             ));
                         }
                         _ => {}
@@ -175,6 +194,20 @@ impl PaletteRegistry {
         }
         entries
     }
+
+    /// True when the input is `"<cmd> <letter>"` for a `requires_target` InventoryTarget command,
+    /// meaning the player has chosen an item and is now picking a location target.
+    pub fn is_inventory_target_targeting(&self, input: &str) -> bool {
+        let tokens: Vec<&str> = input.split_whitespace().collect();
+        let [k, _letter] = tokens.as_slice() else { return false };
+        self.commands.iter().any(|c| {
+            c.key == *k
+                && matches!(&c.kind, PaletteCommandKind::InventoryTarget {
+                    requires_target: true,
+                    ..
+                })
+        })
+    }
 }
 
 /// Build deduplicated palette entries for inventory items matching `filter`.
@@ -184,6 +217,7 @@ pub(crate) fn inventory_entries(
     item_filter: impl Fn(ItemKind) -> bool,
     letter_map: &LetterMap,
     identities: &ItemIdentities,
+    is_complete: bool,
 ) -> Vec<PaletteEntry> {
     let mut unique: Vec<(ItemKind, u16)> = Vec::new();
     for item in &inventory.0 {
@@ -202,7 +236,7 @@ pub(crate) fn inventory_entries(
                 key: format!("{command} {letter}"),
                 description: item_display_name(*item, *count, identities),
                 icon: Some(*item),
-                is_complete: true,
+                is_complete,
             })
         })
         .collect();
@@ -364,6 +398,7 @@ pub fn open_palette_system(
         state.identify_mode = false;
         state.target_los_only = false;
         state.pending_wand = None;
+        state.pending_target_entity = None;
         state.input.clear();
     }
 }
@@ -388,8 +423,10 @@ pub fn palette_system(
         return Ok(());
     };
 
-    let targeting =
-        palette.open && (registry.is_location_targeting(&palette.input) || palette.target_los_only);
+    let targeting = palette.open
+        && (registry.is_location_targeting(&palette.input)
+            || palette.target_los_only
+            || registry.is_inventory_target_targeting(&palette.input));
     watches_clicks.0 = targeting;
 
     if palette.open {
@@ -403,7 +440,6 @@ pub fn palette_system(
             fov,
             &identities,
             palette.identify_mode,
-            palette.target_los_only,
         );
 
         let screen_rect = ctx.viewport_rect();
@@ -428,37 +464,74 @@ pub fn palette_system(
                 palette.selected_idx = 0;
             }
             PaletteUiAction::Execute(cmd) => {
-                if palette.target_los_only {
-                    // `wave <letter>` is not a registered command; resolve the target and hand
-                    // "wave" straight to the item handler.
-                    let rest = cmd.trim_start_matches("wave").trim();
-                    palette.pending_target =
-                        resolve_location_letter(rest, &letter_map, &monster_query, &goto_state);
-                    palette.pending_command = Some("wave".to_string());
-                    palette.target_los_only = false;
-                } else if palette.identify_mode {
-                    // `identify <letter>` is not a registered command; hand it straight to the
-                    // item handler.
+                if palette.identify_mode {
                     palette.pending_command = Some(cmd);
                 } else {
-                    let key = cmd.split_whitespace().next().unwrap_or("").to_string();
-                    if let Some(pc) = registry.commands.iter().find(|c| c.key == key) {
-                        match &pc.kind {
-                            PaletteCommandKind::LocationTarget { .. } => {
-                                let rest = cmd[key.len()..].trim();
+                    let tokens: Vec<&str> = cmd.split_whitespace().collect();
+                    // Two-level inventory target: "{cmd_key} {item_letter} {target_letter}".
+                    if let [k, _item_letter, target_letter] = tokens.as_slice() {
+                        if let Some(pc) = registry.commands.iter().find(|c| c.key == *k) {
+                            if matches!(&pc.kind, PaletteCommandKind::InventoryTarget {
+                                requires_target: true,
+                                ..
+                            }) {
+                                let tl = *target_letter;
                                 palette.pending_target = resolve_location_letter(
-                                    rest,
+                                    tl,
                                     &letter_map,
                                     &monster_query,
                                     &goto_state,
                                 );
-                                palette.pending_command = Some(key);
-                            }
-                            PaletteCommandKind::InventoryTarget { .. } => {
+                                palette.pending_target_entity = tl
+                                    .chars()
+                                    .next()
+                                    .filter(|c| c.is_uppercase() || c.is_ascii_digit())
+                                    .and_then(|c| letter_map.entity_for_letter(c));
                                 palette.pending_command = Some(cmd);
+                                palette.target_los_only = false;
+                                palette.open = false;
+                                palette.identify_mode = false;
+                                palette.input.clear();
+                                return Ok(());
                             }
-                            PaletteCommandKind::Instant => {
-                                palette.pending_command = Some(key);
+                        }
+                    }
+                    // Fallback: legacy target_los_only path (reached when step-1 close-reopen happened).
+                    if palette.target_los_only {
+                        let target_letter = cmd.split_whitespace().last().unwrap_or("");
+                        palette.pending_target = resolve_location_letter(
+                            target_letter,
+                            &letter_map,
+                            &monster_query,
+                            &goto_state,
+                        );
+                        palette.pending_target_entity = target_letter
+                            .chars()
+                            .next()
+                            .filter(|c| c.is_uppercase() || c.is_ascii_digit())
+                            .and_then(|c| letter_map.entity_for_letter(c));
+                        palette.pending_command = Some(cmd);
+                        palette.target_los_only = false;
+                    } else {
+                        let key = cmd.split_whitespace().next().unwrap_or("").to_string();
+                        if let Some(pc) = registry.commands.iter().find(|c| c.key == key) {
+                            match &pc.kind {
+                                PaletteCommandKind::LocationTarget { .. } => {
+                                    let rest = cmd[key.len()..].trim();
+                                    palette.pending_target = resolve_location_letter(
+                                        rest,
+                                        &letter_map,
+                                        &monster_query,
+                                        &goto_state,
+                                    );
+                                    palette.pending_command = Some(key);
+                                }
+                                PaletteCommandKind::InventoryTarget { .. } => {
+                                    palette.pending_command = Some(cmd);
+                                }
+                                PaletteCommandKind::Instant => {
+                                    palette.pending_command = Some(key);
+                                }
                             }
                         }
                     }
@@ -472,6 +545,7 @@ pub fn palette_system(
                 palette.identify_mode = false;
                 palette.target_los_only = false;
                 palette.pending_wand = None;
+                palette.pending_target_entity = None;
                 palette.input.clear();
             }
             PaletteUiAction::None => {}
@@ -488,7 +562,17 @@ pub fn palette_system(
                 })
             });
             if let Some(world_pos) = world_pos {
-                let key = palette.input.split_whitespace().next().unwrap_or("").to_string();
+                // For requires_target commands ("w a ") and the legacy target_los_only path,
+                // the command is the full input so far (e.g. "w a"); execute_item_command
+                // picks up the world position from pending_target.
+                let key = if registry.is_inventory_target_targeting(&palette.input)
+                    || palette.target_los_only
+                {
+                    palette.target_los_only = false;
+                    palette.input.trim_end().to_string()
+                } else {
+                    palette.input.split_whitespace().next().unwrap_or("").to_string()
+                };
                 palette.pending_command = Some(key);
                 palette.pending_target = Some(world_pos);
                 palette.open = false;
@@ -836,6 +920,7 @@ mod tests {
             |i| matches!(i, ItemKind::Potion(_)),
             &letter_map,
             &identities,
+            true,
         );
         assert_eq!(keys(&entries), ["q a", "q c"]);
         assert_eq!(entries[0].description, "2 Red potions");
@@ -853,6 +938,7 @@ mod tests {
             |i| matches!(i, ItemKind::Scroll(_)),
             &letter_map,
             &identities,
+            true,
         );
         assert_eq!(keys(&entries), ["r b", "r d"]);
         assert_eq!(entries[0].description, "2 scrolls titled 'Readme'");
@@ -872,6 +958,7 @@ mod tests {
             |i| matches!(i, ItemKind::Potion(_)),
             &letter_map,
             &identities,
+            true,
         );
         let root_r = inventory_entries(
             "r",
@@ -879,6 +966,7 @@ mod tests {
             |i| matches!(i, ItemKind::Scroll(_)),
             &letter_map,
             &identities,
+            true,
         );
         // Simulate root level: ["q", "r"] as non-complete stubs
         let root = vec![
@@ -907,6 +995,7 @@ mod tests {
             |i| matches!(i, ItemKind::Scroll(_)),
             &letter_map,
             &identities,
+            true,
         );
         let final_input = press_down(&spaced, &read); // → "r d" (second entry)
 
@@ -950,6 +1039,7 @@ mod tests {
             |i| matches!(i, ItemKind::Scroll(_)),
             &letter_map,
             &identities,
+            true,
         );
         let final_input = press_down(&spaced, &read);
 
