@@ -68,7 +68,7 @@ impl ActiveStatusEffect {
     }
 }
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Clone)]
 pub struct StatusEffects(pub Vec<ActiveStatusEffect>);
 
 impl StatusEffects {

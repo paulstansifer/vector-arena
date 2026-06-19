@@ -29,7 +29,7 @@ pub fn populate(
     playable_area: &MultiPolygon<f32>,
     archipelago_id: Entity,
     depth: u32,
-    saved_player: Option<(Stats, Inventory)>,
+    saved_player: Option<(Stats, Inventory, StatusEffects)>,
     monster_letters: &mut crate::command_palette::LetterMap,
     rng: &mut impl Rng,
 ) {
@@ -39,14 +39,15 @@ pub fn populate(
     let player_position = random_pos(rng);
     let staircase_position = random_pos(rng);
 
-    let (initial_stats, initial_inventory) = saved_player.unwrap_or((
+    let (initial_stats, initial_inventory, initial_effects) = saved_player.unwrap_or((
         Stats { hp: 50.0, max_hp: 50.0, mana: 80.0, max_mana: 80.0 },
         Inventory::default(),
+        StatusEffects::default(),
     ));
 
     commands.spawn((
         DespawnOnExit(GameState::InLevel),
-        (Player, initial_inventory, initial_stats, StatusEffects::default(), TorporMultiplier(1.0)),
+        (Player, initial_inventory, initial_stats, initial_effects, TorporMultiplier(1.0)),
         SvgSprite { svg_path: "sprites/wizard.svg".into(), param: None },
         Transform::from_translation(player_position.extend(fov::MOVABLE_Z))
             .with_scale(Vec3::splat(0.4)),

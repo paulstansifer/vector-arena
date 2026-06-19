@@ -10,7 +10,6 @@
   * The top bar should slide down when opened.
   * The test setup is causing a lot of unusedness warnings visible in the editor, but not `cargo check`.
   * "g h" is treated the same as pressing "h", instead of going to that spot.
-  * Hunger clock: a boredem meter fills up as time goes by. Fighting, explosions and (especially) trying unidentified items refills it.
   * Add a "vortex" dungeon feature (and a scroll that creates one).
   * Add more rooms:
     * Octagonal rooms
@@ -19,9 +18,6 @@
   * Different kinds of monsters!
   * Maybe the default monster attack shouldn't look like magic missile. Melee?
   * Confusion should have a chance of causing missiles to fire in the wrong direction.
-
-  * Stauses should be carried over between levels.
-  * Fix the failing integration test
 
   # Larger projects
   * Think about how to break this into a library + game definition

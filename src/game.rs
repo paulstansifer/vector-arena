@@ -50,7 +50,7 @@ use crate::{
     },
     populate_level,
     sprite::SpritePlugin,
-    status_effect::{apply_confusion_to_velocity, tick_status_effects},
+    status_effect::{StatusEffects, apply_confusion_to_velocity, tick_status_effects},
     time_scale::manage_time_scale,
     ui::{Boredom, MessageLog, UiPlugin, enable_ui_input_absorption},
 };
@@ -60,7 +60,7 @@ use crate::{
 pub struct DungeonSeed(pub u64);
 
 #[derive(Resource, Default)]
-pub struct SavedPlayer(pub Option<(Stats, Inventory)>);
+pub struct SavedPlayer(pub Option<(Stats, Inventory, StatusEffects)>);
 
 fn on_enter_restart(
     mut commands: Commands,
@@ -124,7 +124,10 @@ fn on_enter_descend(
         &mut materials,
         &mut nav_meshes,
         depth.0,
-        saved_player.0.as_ref().map(|(stats, inv)| (*stats, Inventory(inv.0.clone()))),
+        saved_player
+            .0
+            .as_ref()
+            .map(|(stats, inv, effects)| (*stats, Inventory(inv.0.clone()), effects.clone())),
         &mut monster_letters,
         seed.0,
     );
@@ -132,11 +135,13 @@ fn on_enter_descend(
 }
 
 fn save_player_on_exit(
-    player_data: Query<(&Stats, &Inventory), With<Player>>,
+    player_data: Query<(&Stats, &Inventory, &StatusEffects), With<Player>>,
     mut saved_player: ResMut<SavedPlayer>,
 ) {
-    saved_player.0 =
-        player_data.single().ok().map(|(stats, inv)| (*stats, Inventory(inv.0.clone())));
+    saved_player.0 = player_data
+        .single()
+        .ok()
+        .map(|(stats, inv, effects)| (*stats, Inventory(inv.0.clone()), effects.clone()));
 }
 
 pub fn spawn_game_world(
@@ -145,7 +150,7 @@ pub fn spawn_game_world(
     materials: &mut Assets<ColorMaterial>,
     nav_meshes: &mut Assets<NavMesh2d>,
     depth: u32,
-    saved_player: Option<(Stats, Inventory)>,
+    saved_player: Option<(Stats, Inventory, StatusEffects)>,
     monster_letters: &mut LetterMap,
     seed: u64,
 ) {
