@@ -66,7 +66,6 @@ pub fn scroll_letter(name: ScrollName) -> &'static str {
         ScrollName::DoNotReadme => "D",
         ScrollName::CodeOfConduct => "C",
         ScrollName::Passwd => "P",
-        ScrollName::Hosts => "H",
     }
 }
 

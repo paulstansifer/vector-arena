@@ -7,19 +7,21 @@
   * I've seen `buffer_with_style` in fov.rs crash (I was jammed against a door; no idea how to reproduce). Let's test when `buffer` crashes and see if we can prevent it.
   * "i" should look at all inventory (and give the option of using any items)
   * Use less than half a megabyte worth of font for the scrolls.
-  * The allocated playable area overlaps the top and bottom bars.
   * The top bar should slide down when opened.
-  * Place monsters and down staircases in random accessible locations, just like items.
   * The test setup is causing a lot of unusedness warnings visible in the editor, but not `cargo check`.
   * "g h" is treated the same as pressing "h", instead of going to that spot.
   * Hunger clock: a boredem meter fills up as time goes by. Fighting, explosions and (especially) trying unidentified items refills it.
-  * Wands:
-    * Wand of Swapping
-    * Wand of Crumbling
-    * Wand of Summoning
-    * Wand of Confusion
   * Add a "vortex" dungeon feature (and a scroll that creates one).
+  * Add more rooms:
+    * Octagonal rooms
+    * Rooms with a walled off portion in the middle, always containing a monster and an item.
+  * Monsters should attack more
+  * Different kinds of monsters!
+  * Maybe the default monster attack shouldn't look like magic missile. Melee?
+  * Confusion should have a chance of causing missiles to fire in the wrong direction.
 
+  * Stauses should be carried over between levels.
+  * Fix the failing integration test
 
   # Larger projects
   * Think about how to break this into a library + game definition

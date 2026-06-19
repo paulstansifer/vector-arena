@@ -28,7 +28,7 @@ pub const MISSILE_KEY: &str = "z";
 pub const MISSILE_SPEED: f32 = 3500.0;
 pub const MISSILE_MAX_DISTANCE: f32 = 1000.0;
 pub const MONSTER_FIRE_RANGE: f32 = 100.0;
-const KNOCKBACK_SPEED: f32 = 600.0;
+pub const KNOCKBACK_SPEED: f32 = 600.0;
 const KNOCKBACK_COOLDOWN: f32 = 0.1; // virtual seconds; prevents double-hits per pass
 const MISSILE_DAMAGE: f32 = 10.0;
 pub const MISSILE_MANA_COST: f32 = 5.0;
@@ -377,17 +377,17 @@ pub fn detect_missile_hits(
     }
 }
 
-/// Shared by the hit and dodge observers: shove the entity along `direction` and start its
-/// re-hit cooldown.
-fn apply_knockback(
+/// Shoves `entity` along `direction` at `speed` and starts its re-hit cooldown.
+/// Shared by missile knockback and the Wand of Attraction.
+pub fn apply_knockback(
     commands: &mut Commands,
-    query: &mut Query<&mut LinearVelocity, (Without<MagicMissile>, With<RigidBody>)>,
-    hit_entity: Entity,
+    vel: &mut LinearVelocity,
+    entity: Entity,
     direction: Vec2,
+    speed: f32,
 ) {
-    let Ok(mut vel) = query.get_mut(hit_entity) else { return };
-    vel.0 += direction * KNOCKBACK_SPEED;
-    commands.entity(hit_entity).try_insert(KnockbackCooldown(KNOCKBACK_COOLDOWN));
+    vel.0 += direction * speed;
+    commands.entity(entity).try_insert(KnockbackCooldown(KNOCKBACK_COOLDOWN));
 }
 
 pub fn apply_knockback_on_hit(
@@ -396,7 +396,8 @@ pub fn apply_knockback_on_hit(
     mut query: Query<&mut LinearVelocity, (Without<MagicMissile>, With<RigidBody>)>,
 ) {
     let event = trigger.event();
-    apply_knockback(&mut commands, &mut query, event.hit_entity, event.direction);
+    let Ok(mut vel) = query.get_mut(event.hit_entity) else { return };
+    apply_knockback(&mut commands, &mut vel, event.hit_entity, event.direction, KNOCKBACK_SPEED);
 }
 
 pub fn apply_dodge(
@@ -405,7 +406,8 @@ pub fn apply_dodge(
     mut query: Query<&mut LinearVelocity, (Without<MagicMissile>, With<RigidBody>)>,
 ) {
     let event = trigger.event();
-    apply_knockback(&mut commands, &mut query, event.hit_entity, event.direction);
+    let Ok(mut vel) = query.get_mut(event.hit_entity) else { return };
+    apply_knockback(&mut commands, &mut vel, event.hit_entity, event.direction, KNOCKBACK_SPEED);
 }
 
 pub fn apply_hit_flash_on_hit(

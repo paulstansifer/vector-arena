@@ -291,7 +291,7 @@ pub fn on_wand_crumbling(
 
     let target = trigger.event().target;
     let mut rng = rand::thread_rng();
-    let poly = create_irregular_circle_polygon(target, 25.0, 14, &mut rng);
+    let poly = create_irregular_circle_polygon(target, 160.0, 14, &mut rng);
     let input_multipolygon = MultiPolygon::new(vec![poly]);
 
     for (entity, aabb) in &fragile_query {

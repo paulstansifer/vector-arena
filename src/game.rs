@@ -36,8 +36,9 @@ use crate::{
     goto,
     indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
     item::{
-        Inventory, ItemIdentities, animate_pickup, execute_item_command, on_wand_attraction,
-        pickup_items, refresh_item_tooltips, register_item_commands,
+        Inventory, ItemIdentities, WandCooldowns, animate_pickup, execute_item_command,
+        on_wand_attraction, pickup_items, refresh_item_tooltips, register_item_commands,
+        tick_wand_cooldowns,
     },
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
@@ -51,7 +52,7 @@ use crate::{
     sprite::SpritePlugin,
     status_effect::{apply_confusion_to_velocity, tick_status_effects},
     time_scale::manage_time_scale,
-    ui::{MessageLog, UiPlugin, enable_ui_input_absorption},
+    ui::{Boredom, MessageLog, UiPlugin, enable_ui_input_absorption},
 };
 
 /// Optional resource: when present, dungeon generation uses this seed instead of thread_rng.
@@ -71,6 +72,8 @@ fn on_enter_restart(
     mut next_state: ResMut<NextState<GameState>>,
     mut monster_letters: ResMut<LetterMap>,
     mut identities: ResMut<ItemIdentities>,
+    mut wand_cooldowns: ResMut<WandCooldowns>,
+    mut boredom: ResMut<Boredom>,
     seed: Option<Res<DungeonSeed>>,
 ) {
     let seed_val = match seed.as_deref() {
@@ -84,6 +87,8 @@ fn on_enter_restart(
     message_log.clear();
     depth.0 = 1;
     monster_letters.clear_monsters();
+    wand_cooldowns.clear();
+    *boredom = Boredom::default();
     identities.randomize(&mut rand::rngs::StdRng::seed_from_u64(seed_val));
     spawn_game_world(
         &mut commands,
@@ -315,6 +320,7 @@ impl Plugin for GamePlugin {
             };
             app.add_plugins(bevy_svg::prelude::SvgPlugin)
                 .init_resource::<MessageLog>()
+                .init_resource::<Boredom>()
                 .init_resource::<CommandPaletteState>()
                 .init_resource::<PaletteRegistry>()
                 .init_resource::<CommandPaletteWatchesClicks>()
@@ -333,7 +339,8 @@ impl Plugin for GamePlugin {
         app.init_state::<GameState>()
             .init_resource::<SavedPlayer>()
             .init_resource::<LetterMap>()
-            .init_resource::<ItemIdentities>();
+            .init_resource::<ItemIdentities>()
+            .init_resource::<WandCooldowns>();
 
         if !self.headless {
             app.add_systems(Startup, enable_ui_input_absorption);
@@ -349,6 +356,7 @@ impl Plugin for GamePlugin {
             .add_systems(OnExit(GameState::InLevel), save_player_on_exit)
             .add_systems(Update, tick_status_effects)
             .add_systems(Update, update_torpor_multipliers)
+            .add_systems(Update, tick_wand_cooldowns)
             .add_systems(Update, execute_item_command)
             .add_systems(Update, refresh_item_tooltips)
             .add_observer(on_summon_monster)

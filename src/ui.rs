@@ -3,13 +3,17 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, egui};
 use pyri_tooltip::prelude::*;
+use rand::Rng;
 
 use geo::Contains;
 
 use crate::{
     DungeonDepth, GameState,
     fov::CurrentFovState,
-    item::{Inventory, ItemIdentities, ItemKind, item_display_name},
+    item::{
+        Inventory, ItemIdentities, ItemKind, WAND_COOLDOWN_SECS, WandCooldowns, item_display_name,
+    },
+    monster::Stats,
     player::Player,
     sprite::SpriteEguiTextures,
     status_effect::StatusEffects,
@@ -78,6 +82,50 @@ struct UiState {
     menu_open: bool,
 }
 
+const BOREDOM_MAX: f32 = 60.0;
+const BOREDOM_WARN: f32 = 40.0;
+
+#[derive(Resource, Default)]
+pub struct Boredom {
+    pub seconds: f32,
+    warned: bool,
+}
+
+impl Boredom {
+    pub fn reduce(&mut self, secs: f32) { self.seconds = (self.seconds - secs).max(0.0); }
+}
+
+fn tick_boredom(
+    mut boredom: ResMut<Boredom>,
+    time: Res<Time>,
+    mut log: ResMut<MessageLog>,
+    mut player_query: Query<&mut Stats, With<Player>>,
+) {
+    boredom.seconds += time.delta_secs();
+
+    if boredom.seconds < BOREDOM_WARN {
+        boredom.warned = false;
+    }
+
+    if boredom.seconds >= BOREDOM_WARN && !boredom.warned {
+        boredom.warned = true;
+        let suggestion = if rand::thread_rng().gen_bool(0.5) {
+            "try an unknown item"
+        } else {
+            "blow something up"
+        };
+        log.push(format!("This is getting boring. Maybe you should {suggestion}."));
+    }
+
+    if boredom.seconds >= BOREDOM_MAX {
+        boredom.seconds -= 15.0;
+        log.push("You're so bored that it hurts! (-10 HP)");
+        if let Ok(mut stats) = player_query.single_mut() {
+            stats.hp = (stats.hp - 10.0).max(0.0);
+        }
+    }
+}
+
 pub fn enable_ui_input_absorption(mut egui_settings: ResMut<EguiGlobalSettings>) {
     egui_settings.enable_absorb_bevy_input_system = true;
 }
@@ -89,12 +137,14 @@ impl Plugin for UiPlugin {
         app.add_plugins((EguiPlugin::default(), TooltipPlugin::default()))
             .init_resource::<MessageLog>()
             .init_resource::<UiState>()
+            .init_resource::<Boredom>()
             .add_systems(EguiPrimaryContextPass, ui_system)
             .add_systems(EguiPrimaryContextPass, crate::command_palette::palette_system)
             .add_systems(EguiPrimaryContextPass, crate::goto::render_goto_markers)
             .add_systems(EguiPrimaryContextPass, crate::monster::render_monster_markers)
             .add_systems(Update, crate::monster::refresh_monster_tooltips)
-            .add_systems(Update, show_world_entity_tooltip);
+            .add_systems(Update, show_world_entity_tooltip)
+            .add_systems(Update, tick_boredom.run_if(in_state(GameState::InLevel)));
     }
 }
 
@@ -112,6 +162,8 @@ fn ui_system(
     depth: Res<DungeonDepth>,
     sprite_textures: Res<SpriteEguiTextures>,
     identities: Res<ItemIdentities>,
+    wand_cooldowns: Res<WandCooldowns>,
+    boredom: Res<Boredom>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -146,6 +198,8 @@ fn ui_system(
         near_staircase,
         &sprite_textures,
         &identities,
+        &wand_cooldowns,
+        &boredom,
     );
     if hud.toggle_menu {
         ui_state.menu_open = !ui_state.menu_open;
@@ -239,6 +293,8 @@ fn render_hud(
     near_staircase: bool,
     sprite_textures: &SpriteEguiTextures,
     identities: &ItemIdentities,
+    wand_cooldowns: &WandCooldowns,
+    boredom: &Boredom,
 ) -> HudActions {
     let mut actions = HudActions::default();
     egui::TopBottomPanel::bottom("hud").exact_height(BOTTOM_PANEL_HEIGHT).show(ctx, |ui| {
@@ -259,6 +315,15 @@ fn render_hud(
                 &format!("MP {}/{}", stats.mana as i32, stats.max_mana as i32),
             );
 
+            ui.separator();
+
+            draw_stat_bar(
+                ui,
+                boredom.seconds / BOREDOM_MAX,
+                egui::Color32::from_rgb(110, 110, 110),
+                &format!("Boredom: {}s", boredom.seconds as u32),
+            );
+
             if let Some(effects) = effects {
                 for e in &effects.0 {
                     ui.separator();
@@ -274,7 +339,7 @@ fn render_hud(
             ui.separator();
 
             for (item, count) in item_counts {
-                draw_item_icon(ui, *item, *count, sprite_textures, identities);
+                draw_item_icon(ui, *item, *count, sprite_textures, identities, wand_cooldowns);
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -398,24 +463,66 @@ fn draw_item_icon(
     count: u16,
     sprite_textures: &SpriteEguiTextures,
     identities: &ItemIdentities,
+    wand_cooldowns: &WandCooldowns,
 ) {
     let size = BAR_HEIGHT;
     let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
     draw_item_icon_at(ui.painter_at(rect), rect, item, sprite_textures.get(item));
 
-    if count > 1 {
-        ui.painter().text(
-            rect.right_bottom() + egui::vec2(-2.0, -2.0),
-            egui::Align2::RIGHT_BOTTOM,
-            count.to_string(),
-            egui::FontId::proportional(10.0),
-            egui::Color32::WHITE,
-        );
+    match item {
+        ItemKind::Wand(gem) => {
+            let ready = wand_cooldowns.ready_count(gem, count);
+            if ready >= 2 {
+                ui.painter().text(
+                    rect.right_bottom() + egui::vec2(-2.0, -2.0),
+                    egui::Align2::RIGHT_BOTTOM,
+                    ready.to_string(),
+                    egui::FontId::proportional(10.0),
+                    egui::Color32::WHITE,
+                );
+            } else if ready == 0 {
+                if let Some(remaining) = wand_cooldowns.shortest_remaining(gem) {
+                    draw_cooldown_arc(ui.painter_at(rect), rect, remaining / WAND_COOLDOWN_SECS);
+                }
+            }
+            // ready == 1: no badge
+        }
+        _ => {
+            if count > 1 {
+                ui.painter().text(
+                    rect.right_bottom() + egui::vec2(-2.0, -2.0),
+                    egui::Align2::RIGHT_BOTTOM,
+                    count.to_string(),
+                    egui::FontId::proportional(10.0),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
     }
 
     if response.hovered() {
         response.on_hover_text(item_display_name(item, count, identities));
     }
+}
+
+fn draw_cooldown_arc(painter: egui::Painter, rect: egui::Rect, fraction: f32) {
+    // Filled pie-slice in the bottom-right corner, same position as the count badge.
+    let r = 5.0_f32;
+    let center = rect.right_bottom() + egui::vec2(-r - 2.0, -r - 2.0);
+    let n = 24usize;
+    let span = std::f32::consts::TAU * fraction.clamp(0.0, 1.0);
+    let start = -std::f32::consts::FRAC_PI_2;
+    let mut points = vec![center];
+    points.extend((0..=n).map(|i| {
+        let a = start + span * (i as f32 / n as f32);
+        egui::pos2(center.x + r * a.cos(), center.y + r * a.sin())
+    }));
+    painter.add(egui::Shape::Path(egui::epaint::PathShape {
+        points,
+        closed: true,
+        fill: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 200),
+        stroke: egui::epaint::PathStroke::NONE,
+    }));
 }
 
 fn show_world_entity_tooltip(

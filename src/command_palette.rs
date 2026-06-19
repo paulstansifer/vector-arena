@@ -53,10 +53,6 @@ pub struct CommandPaletteState {
     /// For LocationTarget commands: the resolved world position of the target.
     /// Set alongside pending_command and consumed by the handler.
     pub pending_target: Option<Vec2>,
-    /// When true, the palette is in the special "select an item to identify" prompt opened by a
-    /// Scroll of Identify. Completions list the player's unidentified items, and selecting one
-    /// emits an `identify <letter>` command.
-    pub identify_mode: bool,
     /// True while the player has selected a wand and is choosing a wave target.
     pub target_los_only: bool,
     /// The wand item kind selected in step 1 of a wave command, pending target selection.
@@ -94,21 +90,7 @@ impl PaletteRegistry {
         monster_query: &Query<(Entity, &Stats, &MonsterState, &Transform), With<Monster>>,
         current_fov: Option<&geo::MultiPolygon<f32>>,
         identities: &ItemIdentities,
-        identify_mode: bool,
     ) -> Vec<PaletteEntry> {
-        // In identify mode the only choices are the player's unidentified items, regardless of
-        // what (if anything) has been typed.
-        if identify_mode {
-            return inventory_entries(
-                "identify",
-                inventory,
-                |i| !identities.is_identified(i),
-                letter_map,
-                identities,
-                true,
-            );
-        }
-
         let mut entries = Vec::new();
         for cmd in &self.commands {
             match &cmd.kind {
@@ -395,7 +377,6 @@ pub fn open_palette_system(
         }
     } else if keyboard.just_pressed(Key::Escape) {
         state.open = false;
-        state.identify_mode = false;
         state.target_los_only = false;
         state.pending_wand = None;
         state.pending_target_entity = None;
@@ -439,7 +420,6 @@ pub fn palette_system(
             &monster_query,
             fov,
             &identities,
-            palette.identify_mode,
         );
 
         let screen_rect = ctx.viewport_rect();
@@ -464,85 +444,78 @@ pub fn palette_system(
                 palette.selected_idx = 0;
             }
             PaletteUiAction::Execute(cmd) => {
-                if palette.identify_mode {
+                let tokens: Vec<&str> = cmd.split_whitespace().collect();
+                // Two-level inventory target: "{cmd_key} {item_letter} {target_letter}".
+                if let [k, _item_letter, target_letter] = tokens.as_slice() {
+                    if let Some(pc) = registry.commands.iter().find(|c| c.key == *k) {
+                        if matches!(&pc.kind, PaletteCommandKind::InventoryTarget {
+                            requires_target: true,
+                            ..
+                        }) {
+                            let tl = *target_letter;
+                            palette.pending_target = resolve_location_letter(
+                                tl,
+                                &letter_map,
+                                &monster_query,
+                                &goto_state,
+                            );
+                            palette.pending_target_entity = tl
+                                .chars()
+                                .next()
+                                .filter(|c| c.is_uppercase() || c.is_ascii_digit())
+                                .and_then(|c| letter_map.entity_for_letter(c));
+                            palette.pending_command = Some(cmd);
+                            palette.target_los_only = false;
+                            palette.open = false;
+                            palette.input.clear();
+                            return Ok(());
+                        }
+                    }
+                }
+                // Fallback: legacy target_los_only path (reached when step-1 close-reopen happened).
+                if palette.target_los_only {
+                    let target_letter = cmd.split_whitespace().last().unwrap_or("");
+                    palette.pending_target = resolve_location_letter(
+                        target_letter,
+                        &letter_map,
+                        &monster_query,
+                        &goto_state,
+                    );
+                    palette.pending_target_entity = target_letter
+                        .chars()
+                        .next()
+                        .filter(|c| c.is_uppercase() || c.is_ascii_digit())
+                        .and_then(|c| letter_map.entity_for_letter(c));
                     palette.pending_command = Some(cmd);
+                    palette.target_los_only = false;
                 } else {
-                    let tokens: Vec<&str> = cmd.split_whitespace().collect();
-                    // Two-level inventory target: "{cmd_key} {item_letter} {target_letter}".
-                    if let [k, _item_letter, target_letter] = tokens.as_slice() {
-                        if let Some(pc) = registry.commands.iter().find(|c| c.key == *k) {
-                            if matches!(&pc.kind, PaletteCommandKind::InventoryTarget {
-                                requires_target: true,
-                                ..
-                            }) {
-                                let tl = *target_letter;
+                    let key = cmd.split_whitespace().next().unwrap_or("").to_string();
+                    if let Some(pc) = registry.commands.iter().find(|c| c.key == key) {
+                        match &pc.kind {
+                            PaletteCommandKind::LocationTarget { .. } => {
+                                let rest = cmd[key.len()..].trim();
                                 palette.pending_target = resolve_location_letter(
-                                    tl,
+                                    rest,
                                     &letter_map,
                                     &monster_query,
                                     &goto_state,
                                 );
-                                palette.pending_target_entity = tl
-                                    .chars()
-                                    .next()
-                                    .filter(|c| c.is_uppercase() || c.is_ascii_digit())
-                                    .and_then(|c| letter_map.entity_for_letter(c));
-                                palette.pending_command = Some(cmd);
-                                palette.target_los_only = false;
-                                palette.open = false;
-                                palette.identify_mode = false;
-                                palette.input.clear();
-                                return Ok(());
+                                palette.pending_command = Some(key);
                             }
-                        }
-                    }
-                    // Fallback: legacy target_los_only path (reached when step-1 close-reopen happened).
-                    if palette.target_los_only {
-                        let target_letter = cmd.split_whitespace().last().unwrap_or("");
-                        palette.pending_target = resolve_location_letter(
-                            target_letter,
-                            &letter_map,
-                            &monster_query,
-                            &goto_state,
-                        );
-                        palette.pending_target_entity = target_letter
-                            .chars()
-                            .next()
-                            .filter(|c| c.is_uppercase() || c.is_ascii_digit())
-                            .and_then(|c| letter_map.entity_for_letter(c));
-                        palette.pending_command = Some(cmd);
-                        palette.target_los_only = false;
-                    } else {
-                        let key = cmd.split_whitespace().next().unwrap_or("").to_string();
-                        if let Some(pc) = registry.commands.iter().find(|c| c.key == key) {
-                            match &pc.kind {
-                                PaletteCommandKind::LocationTarget { .. } => {
-                                    let rest = cmd[key.len()..].trim();
-                                    palette.pending_target = resolve_location_letter(
-                                        rest,
-                                        &letter_map,
-                                        &monster_query,
-                                        &goto_state,
-                                    );
-                                    palette.pending_command = Some(key);
-                                }
-                                PaletteCommandKind::InventoryTarget { .. } => {
-                                    palette.pending_command = Some(cmd);
-                                }
-                                PaletteCommandKind::Instant => {
-                                    palette.pending_command = Some(key);
-                                }
+                            PaletteCommandKind::InventoryTarget { .. } => {
+                                palette.pending_command = Some(cmd);
+                            }
+                            PaletteCommandKind::Instant => {
+                                palette.pending_command = Some(key);
                             }
                         }
                     }
                 }
                 palette.open = false;
-                palette.identify_mode = false;
                 palette.input.clear();
             }
             PaletteUiAction::Close => {
                 palette.open = false;
-                palette.identify_mode = false;
                 palette.target_los_only = false;
                 palette.pending_wand = None;
                 palette.pending_target_entity = None;

@@ -4,23 +4,30 @@
 // plays at normal speed even during bullet-time.
 use std::collections::{HashMap, HashSet};
 
-use avian2d::prelude::{Collider, LinearVelocity, Position, SpatialQuery, SpatialQueryFilter};
+use avian2d::prelude::{
+    Collider, LinearVelocity, Position, RigidBody, SpatialQuery, SpatialQueryFilter,
+};
 use bevy::{prelude::*, time::Real};
 use geo::{Intersects, Line as GeoLine};
 use rand::{Rng, seq::SliceRandom};
+
+pub const WAND_COOLDOWN_SECS: f32 = 15.0;
 
 use crate::{
     GameLayer,
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     dungeon::terrain::{DungeonState, random_in_playable_area},
-    effects::scroll::{
-        AcquirementEvent, InstabilityEvent, MagicMappingEvent, MonsterConfusionEvent,
-        SummonMonsterEvent,
+    effects::{
+        projectile::{KNOCKBACK_SPEED, MagicMissile, apply_knockback},
+        scroll::{
+            AcquirementEvent, InstabilityEvent, MagicMappingEvent, MonsterConfusionEvent,
+            SummonMonsterEvent,
+        },
     },
     monster::{Monster, Stats},
     player::{ExplorationGoal, Player},
     status_effect::{StatusEffect, StatusEffects},
-    ui::{MessageLog, WorldTooltip},
+    ui::{Boredom, MessageLog, WorldTooltip},
 };
 
 // TODO: use the 'strum' crate to get lowercase colors and ALL CAPS scroll titles.
@@ -83,7 +90,6 @@ pub enum ScrollName {
     DoNotReadme,
     CodeOfConduct,
     Passwd,
-    Hosts,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -150,6 +156,36 @@ pub struct WandAttractionEvent {
     pub player_pos: Vec2,
 }
 
+/// Per-wand-instance cooldown timers. Each entry is one wand currently recharging.
+/// Multiple entries with the same gem mean that many instances of that wand are on cooldown.
+#[derive(Resource, Default)]
+pub struct WandCooldowns(pub Vec<(WandGem, f32)>);
+
+impl WandCooldowns {
+    pub fn add(&mut self, gem: WandGem) { self.0.push((gem, WAND_COOLDOWN_SECS)); }
+
+    /// How many wands of `gem` are ready (not on cooldown), given `total` in inventory.
+    pub fn ready_count(&self, gem: WandGem, total: u16) -> u16 {
+        let on_cooldown = self.0.iter().filter(|(g, _)| *g == gem).count() as u16;
+        total.saturating_sub(on_cooldown)
+    }
+
+    /// Shortest remaining cooldown for any wand of `gem`, if any are cooling down.
+    pub fn shortest_remaining(&self, gem: WandGem) -> Option<f32> {
+        self.0.iter().filter(|(g, _)| *g == gem).map(|(_, t)| *t).reduce(f32::min)
+    }
+
+    pub fn clear(&mut self) { self.0.clear(); }
+}
+
+/// Tick down wand cooldowns on virtual time so they respect bullet-time and pause.
+pub fn tick_wand_cooldowns(mut cooldowns: ResMut<WandCooldowns>, time: Res<Time>) {
+    for (_, remaining) in &mut cooldowns.0 {
+        *remaining -= time.delta_secs();
+    }
+    cooldowns.0.retain(|(_, t)| *t > 0.0);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ItemKind {
     Potion(PotionColor),
@@ -174,7 +210,6 @@ const ALL_SCROLL_NAMES: &[ScrollName] = &[
     ScrollName::DoNotReadme,
     ScrollName::CodeOfConduct,
     ScrollName::Passwd,
-    ScrollName::Hosts,
 ];
 
 pub const ALL_ITEM_KINDS: &[ItemKind] = &[
@@ -191,7 +226,6 @@ pub const ALL_ITEM_KINDS: &[ItemKind] = &[
     ItemKind::Scroll(ScrollName::DoNotReadme),
     ItemKind::Scroll(ScrollName::CodeOfConduct),
     ItemKind::Scroll(ScrollName::Passwd),
-    ItemKind::Scroll(ScrollName::Hosts),
     ItemKind::Wand(WandGem::Ruby),
     ItemKind::Wand(WandGem::Onyx),
     ItemKind::Wand(WandGem::Amber),
@@ -254,7 +288,6 @@ pub enum ScrollEffect {
     MagicMapping,
     Instability,
     Acquirement,
-    Identify,
     Forgetting,
 }
 
@@ -264,7 +297,6 @@ const ALL_SCROLL_EFFECTS: &[ScrollEffect] = &[
     ScrollEffect::MagicMapping,
     ScrollEffect::Instability,
     ScrollEffect::Acquirement,
-    ScrollEffect::Identify,
     ScrollEffect::Forgetting,
 ];
 
@@ -276,7 +308,6 @@ impl ScrollEffect {
             ScrollEffect::MagicMapping => "Magic Mapping",
             ScrollEffect::Instability => "Instability",
             ScrollEffect::Acquirement => "Acquirement",
-            ScrollEffect::Identify => "Identify",
             ScrollEffect::Forgetting => "Forgetting",
         }
     }
@@ -544,6 +575,14 @@ fn find_and_remove_item(
     Some(inventory.0.remove(inv_idx))
 }
 
+/// Identifies an item, reducing boredom if it was previously unknown.
+pub fn identify_item(item: ItemKind, identities: &mut ItemIdentities, boredom: &mut Boredom) {
+    if !identities.is_identified(item) {
+        boredom.reduce(30.0);
+    }
+    identities.identify(item);
+}
+
 /// Consumes `CommandPaletteState::pending_command` and applies item effects.
 pub fn execute_item_command(
     mut palette: ResMut<CommandPaletteState>,
@@ -568,6 +607,8 @@ pub fn execute_item_command(
     mut commands: Commands,
     letter_map: Res<crate::command_palette::LetterMap>,
     mut identities: ResMut<ItemIdentities>,
+    mut wand_cooldowns: ResMut<WandCooldowns>,
+    mut boredom: ResMut<crate::ui::Boredom>,
 ) {
     let Some(cmd) = palette.pending_command.take() else { return };
 
@@ -603,11 +644,11 @@ pub fn execute_item_command(
                 let (kind, duration) =
                     potion_status_effect(identities.potion_effect(color), &mut rng);
                 player_effects.add(kind, duration);
-                identities.identify(item);
+                identify_item(item, &mut identities, &mut boredom);
                 log.push(format!(
                     "You quaff {}. (+{} HP)",
                     item_display_name(item, 1, &identities),
-                    gained as i32
+                    gained as i32,
                 ));
             }
         }
@@ -623,7 +664,7 @@ pub fn execute_item_command(
             };
             let ItemKind::Scroll(name) = item else { return };
             let effect = identities.scroll_effect(name);
-            identities.identify(item);
+            identify_item(item, &mut identities, &mut boredom);
 
             // Every scroll restores 20 MP in addition to its identified effect.
             let mana_gained = 20.0_f32.min(stats.max_mana - stats.mana);
@@ -632,7 +673,7 @@ pub fn execute_item_command(
             log.push(format!(
                 "You read {}. (+{} MP)",
                 item_display_name(item, 1, &identities),
-                mana_gained as i32
+                mana_gained as i32,
             ));
 
             match effect {
@@ -661,18 +702,6 @@ pub fn execute_item_command(
                 ScrollEffect::Acquirement => {
                     commands.trigger(AcquirementEvent { origin: player_pos });
                 }
-                ScrollEffect::Identify => {
-                    // Defer to a follow-up palette prompt so the player can choose which of their
-                    // unidentified items to identify.
-                    if inventory.0.iter().any(|i| !identities.is_identified(*i)) {
-                        palette.open = true;
-                        palette.identify_mode = true;
-                        palette.input = "identify ".to_string();
-                        palette.selected_idx = 0;
-                    } else {
-                        log.push("...but you have nothing left to identify.");
-                    }
-                }
                 ScrollEffect::Forgetting => match identities.forget(&mut rand::thread_rng()) {
                     Some((_n, type_word)) => {
                         log.push(format!(
@@ -683,15 +712,6 @@ pub fn execute_item_command(
                         log.push("You don't remember having forgotten anything.");
                     }
                 },
-            }
-        }
-        ["identify", letter_str] => {
-            let Some(ch) = letter_str.chars().next() else { return };
-            let Some(item_kind) = letter_map.item_for_letter(ch) else { return };
-            let count = inventory.0.iter().filter(|i| **i == item_kind).count() as u16;
-            if count > 0 && !identities.is_identified(item_kind) {
-                identities.identify(item_kind);
-                log.push(format!("It is {}.", item_display_name(item_kind, count, &identities)));
             }
         }
         ["w", _] if palette.pending_target.is_some() => {
@@ -706,6 +726,12 @@ pub fn execute_item_command(
                 return;
             }
             if !inventory.0.contains(&item_kind) {
+                return;
+            }
+            let ItemKind::Wand(gem) = item_kind else { return };
+            let total = inventory.0.iter().filter(|i| **i == item_kind).count() as u16;
+            if wand_cooldowns.ready_count(gem, total) == 0 {
+                log.push("That wand is still recharging...");
                 return;
             }
             if stats.mana < WAND_MANA_COST {
@@ -742,19 +768,23 @@ pub fn execute_item_command(
                 .and_then(|ch| letter_map.item_for_letter(ch))
         });
         let Some(wand_kind) = wand_kind else { return };
-        let Some(item) =
-            find_and_remove_item(&mut inventory, |i| matches!(i, ItemKind::Wand(_)), wand_kind)
-        else {
+        let ItemKind::Wand(gem) = wand_kind else { return };
+        if !inventory.0.contains(&wand_kind) {
             return;
-        };
-        let ItemKind::Wand(gem) = item else { return };
+        }
+        let total = inventory.0.iter().filter(|i| **i == wand_kind).count() as u16;
+        if wand_cooldowns.ready_count(gem, total) == 0 {
+            log.push("That wand is still recharging...");
+            return;
+        }
         let effect = identities.wand_effect(gem);
-        identities.identify(item);
+        identify_item(wand_kind, &mut identities, &mut boredom);
         stats.mana -= WAND_MANA_COST;
+        wand_cooldowns.add(gem);
         log.push(format!(
             "You wave the {}. (−{} MP)",
-            item_display_name(item, 1, &identities),
-            WAND_MANA_COST as i32
+            item_display_name(wand_kind, 1, &identities),
+            WAND_MANA_COST as i32,
         ));
         match effect {
             WandEffect::Swapping => {
@@ -842,7 +872,6 @@ pub fn on_monster_confusion(
 }
 
 const ATTRACTION_RADIUS: f32 = 70.0;
-const ATTRACTION_SPEED: f32 = 250.0;
 
 /// Pulls every physics entity within `ATTRACTION_RADIUS` of the target toward the player,
 /// and starts the pickup animation for any ground items in the same radius.
@@ -850,7 +879,10 @@ pub fn on_wand_attraction(
     trigger: On<WandAttractionEvent>,
     mut commands: Commands,
     spatial_query: SpatialQuery,
-    mut body_query: Query<(&Transform, &mut LinearVelocity), Without<Player>>,
+    mut body_query: Query<
+        (&Transform, &mut LinearVelocity),
+        (Without<MagicMissile>, With<RigidBody>, Without<Player>),
+    >,
     items: Query<(Entity, &Transform), (With<Item>, Without<PickingUp>)>,
 ) {
     let WandAttractionEvent { target, player_pos } = *trigger.event();
@@ -864,7 +896,7 @@ pub fn on_wand_attraction(
     for entity in hits {
         let Ok((tf, mut vel)) = body_query.get_mut(entity) else { continue };
         let dir = (player_pos - tf.translation.truncate()).normalize_or_zero();
-        vel.0 = dir * ATTRACTION_SPEED;
+        apply_knockback(&mut commands, &mut vel, entity, dir, KNOCKBACK_SPEED * 4.0);
     }
 
     for (entity, tf) in &items {
