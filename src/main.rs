@@ -1,9 +1,10 @@
 use bevy::prelude::*;
 use vector_arena::{
     WORLD_HEIGHT, WORLD_WIDTH,
-    effects::{hit_particles::HitParticlesPlugin, torpor_particles::TorporParticlesPlugin},
+    effects::hit_particles::HitParticlesPlugin,
     game::GamePlugin,
     ui::{BOTTOM_PANEL_HEIGHT, TOP_PANEL_HEIGHT},
+    visuals::torpor_particles::TorporParticlesPlugin,
 };
 
 fn main() {

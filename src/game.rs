@@ -19,7 +19,6 @@ use crate::{
         },
     },
     effects::{
-        self,
         crumble_terrain::{
             Fragile, RubbleMaterial, handle_right_click_excavation, on_wand_crumbling,
         },
@@ -34,7 +33,6 @@ use crate::{
     },
     fov::{self, MOVABLE_Z, OpaqueVertices, TERRAIN_Z},
     goto,
-    indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
     item::{
         Inventory, ItemIdentities, WandCooldowns, animate_pickup, execute_item_command,
         on_wand_attraction, pickup_items, refresh_item_tooltips, register_item_commands,
@@ -42,7 +40,7 @@ use crate::{
     },
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
-    objects::{animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions},
+    effects::unstable_sigils::{animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions},
     player::{
         Player, advance_exploration, directional_move_system, execute_descend_command,
         execute_stop_command, move_player, register_player_commands, rotate_player_to_velocity,
@@ -53,6 +51,7 @@ use crate::{
     status_effect::{StatusEffects, apply_confusion_to_velocity, tick_status_effects},
     time_scale::manage_time_scale,
     ui::{Boredom, MessageLog, UiPlugin, enable_ui_input_absorption},
+    visuals::indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
 };
 
 /// Optional resource: when present, dungeon generation uses this seed instead of thread_rng.
@@ -202,8 +201,9 @@ pub fn spawn_game_world(
         ))
         .id();
 
-    let torpor_material = materials
-        .add(ColorMaterial::from(Color::Srgba(effects::torpor_particles::TORPOR_ZONE_COLOR)));
+    let torpor_material = materials.add(ColorMaterial::from(Color::Srgba(
+        crate::visuals::torpor_particles::TORPOR_ZONE_COLOR,
+    )));
     for zone in &terrain_geometry.torpor_zones {
         let mesh = geometry_to_mesh(&geo::MultiPolygon::new(vec![zone.clone()]));
         // Bounding box of the zone, for seeding ambient particles. For today's

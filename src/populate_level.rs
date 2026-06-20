@@ -14,7 +14,7 @@ use crate::{
     fov,
     item::{Inventory, Item, ItemKind, item_name, random_item_kind},
     monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterDrop, MonsterState, Stats},
-    objects::spawn_unstable_sigil,
+    effects::unstable_sigils::spawn_unstable_sigil,
     player::{MoveTarget, PLAYER_SPEED, Player},
     sprite::{SvgSprite, sprite_spec},
     status_effect::StatusEffects,

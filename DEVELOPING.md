@@ -2,43 +2,40 @@
 
 A traditional dungeom-crawl roguelike ... except that the world is 2D vector objects with physics instead of a grid. It is  built with [Bevy](https://bevyengine.org/) (0.18.1) and [Avian2D](https://github.com/Jondolf/avian) physics. BSP-generated dungeons, raycasted FOV, physics-based combat, and destructible terrain.
 
----
-
 ## Directory Structure
 
 ```
-src/
-├── main.rs                   # Binary entry point: window setup, camera, clear color
-├── lib.rs                    # Module exports, GameLayer/GameState enums, WorldBounds, AGENT_RADIUS, etc.
-├── game.rs                   # GamePlugin: all gameplay systems, startup logic, dungeon seeding
-├── player.rs                 # Player component, MoveTarget steering, click-to-move, exploration goals
-├── monster.rs                # Monster, Stats, wander/seek AI, MonsterDrop, tooltip refresh
-├── nav.rs                    # Landmass→Avian2D velocity bridge + navmesh triangulation
-├── fov.rs                    # FOV raycasting, exploration tracking, mesh overlays
-├── item.rs                   # Items, inventory, pickup animation, use dialog dispatch
-├── objects.rs                # Objects that can't be picked up (currently just unstable sigils)
-├── populate_level.rs         # Spawns player, monsters, items, and the down staircase into rooms
-├── time_scale.rs             # Global virtual-time scaling (bullet-time / pause / normal)
-├── indicator.rs              # Visual-only temporary effects (like hitflash)
-├── ui.rs                     # egui HUD: message log, stat bars, inventory, menu
-├── command_palette.rs        # General interface for complex user commands
-├── sprite.rs                 # SVG sprite loading and egui texture registration
-├── status_effect.rs          # Confusion, torpor, and other timed status effects
-├── bin/
-│   └── headless/             # Scripted headless runner (native only; see Testing section below)
-│       ├── main.rs           # Entry point; compiles to an empty program on wasm32
-│       └── runner.rs         # The actual runner implementation
-
-├── dungeon/
-│   ├── mod.rs                # Re-exports
-│   ├── bsp.rs                # Binary Space Partitioning algorithm
-│   ├── level_generation.rs   # Dungeon geometry from BSP (rooms, corridors, doors)
-│   └── terrain.rs            # Geometry → Bevy mesh / Avian collider / Landmass navmesh
-└── effects/
-    ├── mod.rs                # Re-exports
-    ├── projectile.rs         # Magic missiles, trails, knockback
-    ├── rope.rs               # Drag-to-draw rope with segment physics
-    └── crumble_terrain.rs    # Right-click excavation and rubble spawning
+  *  main.rs                  # Binary entry point: window setup, camera, clear color
+  *  lib.rs                   # Module exports, GameLayer/GameState enums, WorldBounds, AGENT_RADIUS, etc.
+  *  game.rs                  # GamePlugin: all gameplay systems, startup logic, dungeon seeding
+  *  player.rs                # Player component, MoveTarget steering, click-to-move, exploration goals
+  *  monster.rs               # Monster, Stats, wander/seek AI, MonsterDrop, tooltip refresh
+  *  nav.rs                   # Landmass→Avian2D velocity bridge + navmesh triangulation
+  *  fov.rs                   # FOV raycasting, exploration tracking, mesh overlays
+  *  item.rs                  # Items, inventory, pickup animation, use dialog dispatch
+  *  scrolls.rs               # ...scrolls have a bunch of effects that need special implementation
+  *  populate_level.rs        # Spawns level contents
+  *  time_scale.rs            # Global virtual-time scaling (bullet-time / pause / normal)
+  *  ui.rs                    # egui HUD: message log, stat bars, inventory, menu
+  *  command_palette.rs       # General interface for complex user commands
+  *  sprite.rs                # SVG sprite loading and egui texture registration
+  *  status_effect.rs         # Confusion, torpor, and other timed status effects
+  *  bin/
+     *  headless/             # Scripted headless runner (native only; see Testing section below)
+        *  main.rs            # Entry point; compiles to an empty program on wasm32
+        *  runner.rs          # The actual runner implementation
+  *  dungeon/
+     *  bsp.rs                # Binary Space Partitioning algorithm
+     *  level_generation.rs   # Dungeon geometry from BSP (rooms, corridors, doors)
+     *  terrain.rs            # Geometry → Bevy mesh / Avian collider / Landmass navmesh
+  *  effects/                 # Specific independent game systems
+     *  projectile.rs         # Magic missiles, trails, knockback
+     *  rope.rs               # Rope physics
+     *  crumble_terrain.rs    # Rock -> rubble in a region
+     *  unstable_sigils.rs    # Okay, fine, these are just explosive barrels 
+  *  visuals/                 # Visual-only systems
+     *  indicator.rs          # Currently just hitflash
+     *  torpor_particles.rs   # Particles indicating torpor fields
 ```
 
 ---
@@ -54,7 +51,6 @@ src/
 | `rand` 0.8             | RNG for dungeon generation                               |
 | `bevy_egui` 0.39.1     | UI (imported, not yet wired up)                          |
 
----
 
 ## Architecture Overview
 
@@ -88,7 +84,6 @@ Physics    → Avian2D step
 
 ```
 
----
 
 ## Time scale
 
@@ -100,7 +95,6 @@ Physics    → Avian2D step
 
 Item pickup animations and the physics fixed-timestep are both adjusted to remain smooth regardless of scale.
 
----
 
 ## Adding New Things
 

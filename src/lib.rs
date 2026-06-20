@@ -5,17 +5,16 @@ pub mod effects;
 pub mod fov;
 pub mod game;
 pub mod goto;
-pub mod indicator;
 pub mod item;
 pub mod monster;
 pub mod nav;
-pub mod objects;
 pub mod player;
 pub mod populate_level;
 pub mod sprite;
 pub mod status_effect;
 pub mod time_scale;
 pub mod ui;
+pub mod visuals;
 
 // TODO: move all these things out!
 pub const AGENT_RADIUS: f32 = 10.0;

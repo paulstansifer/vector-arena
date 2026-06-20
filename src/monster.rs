@@ -13,10 +13,10 @@ use crate::{
     command_palette::CommandPaletteState,
     dungeon::terrain::{DungeonState, random_near},
     fov::CurrentFovState,
-    indicator::StateIndicator,
     item::ItemKind,
     player::{ExplorationGoal, MoveTarget, Player},
     status_effect::StatusEffects,
+    visuals::indicator::StateIndicator,
 };
 
 pub const MONSTER_SPEED: f32 = 140.0;

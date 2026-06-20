@@ -42,11 +42,12 @@ use vector_arena::{
     dungeon::terrain::{
         DungeonCollider, DungeonState, DungeonVisuals, geometry_to_collider, geometry_to_mesh,
     },
-    effects::{hit_particles::HitParticlesPlugin, torpor_particles::TorporParticlesPlugin},
+    effects::hit_particles::HitParticlesPlugin,
     game::{DungeonSeed, GamePlugin},
     nav::{DungeonNavMesh, playable_area_to_nav_mesh},
     player::{MoveTarget, Player},
     ui::{BOTTOM_PANEL_HEIGHT, TOP_PANEL_HEIGHT},
+    visuals::torpor_particles::TorporParticlesPlugin,
 };
 
 // ── Simple file logger ────────────────────────────────────────────────────────
