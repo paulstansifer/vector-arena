@@ -8,6 +8,7 @@
 //   – pushes everything in radius 100 radially outward
 use std::f32::consts::TAU;
 
+use crate::util::safegeo::SafeMultiPolygon;
 use avian2d::prelude::*;
 use bevy::{
     asset::RenderAssetUsages,
@@ -283,7 +284,7 @@ pub fn explode_sigil(
             .iter()
             .map(|(_, pos, _, _)| create_circle_polygon(*pos, SIGIL_DAMAGE_RADIUS, 16))
             .collect();
-        let combined = MultiPolygon::new(polys);
+        let combined = SafeMultiPolygon::from_polygons(polys);
 
         for (fragile_entity, aabb) in &fragile_query {
             let rect_poly = Rect::new(Coord { x: aabb.min.x, y: aabb.min.y }, Coord {

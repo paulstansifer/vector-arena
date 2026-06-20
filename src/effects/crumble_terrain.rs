@@ -11,6 +11,7 @@ use crate::{
     },
     item::WandCrumblingEvent,
     nav::{DungeonNavMesh, playable_area_to_nav_mesh},
+    util::safegeo::{SafeMultiPolygon, SafePolygon},
 };
 use avian2d::{math::PI, prelude::*};
 use bevy::prelude::*;
@@ -43,7 +44,7 @@ pub struct Fragile;
 pub struct RubbleMaterial(pub Handle<ColorMaterial>);
 
 /// Helper to create a circular polygon approximating an excavation area
-pub fn create_circle_polygon(center: Vec2, radius: f32, points: usize) -> Polygon<f32> {
+pub fn create_circle_polygon(center: Vec2, radius: f32, points: usize) -> SafePolygon {
     use std::f32::consts::TAU;
     let mut coords = Vec::new();
     for i in 0..points {
@@ -55,7 +56,7 @@ pub fn create_circle_polygon(center: Vec2, radius: f32, points: usize) -> Polygo
     if let Some(&first) = coords.first() {
         coords.push(first);
     }
-    Polygon::new(LineString::from(coords), vec![])
+    SafePolygon(Polygon::new(LineString::from(coords), vec![]))
 }
 
 /// Subtracts an input polygon from the terrain geometry, updates the playable area,
@@ -66,7 +67,7 @@ pub fn create_circle_polygon(center: Vec2, radius: f32, points: usize) -> Polygo
 /// the normal small random tumble.
 pub fn subtract_polygon_from_terrain(
     commands: &mut Commands,
-    input_polygon: &MultiPolygon<f32>,
+    input_polygon: &SafeMultiPolygon,
     mut dungeon_state: ResMut<DungeonState>,
     mut dungeon_visuals: ResMut<DungeonVisuals>,
     mut dungeon_collider: ResMut<DungeonCollider>,
@@ -99,7 +100,8 @@ pub fn subtract_polygon_from_terrain(
     dungeon_nav_mesh.0 = nav_meshes.add(NavMesh2d { nav_mesh: valid_nav_mesh });
 
     // Break up the rubble before shrinking
-    let mut rubble_polygons: Vec<Polygon<f32>> = intersection.iter().cloned().collect();
+    let mut rubble_polygons: Vec<SafePolygon> =
+        intersection.iter().cloned().map(SafePolygon).collect();
 
     loop {
         // Find the index and radius of the largest piece
@@ -162,7 +164,7 @@ pub fn subtract_polygon_from_terrain(
         if let Some(&first) = coords.first() {
             coords.push(first);
         }
-        let cutting_half_plane = Polygon::new(LineString::from(coords), vec![]);
+        let cutting_half_plane = SafePolygon(Polygon::new(LineString::from(coords), vec![]));
 
         // Slice
         let part_1 = poly_to_slice.intersection(&cutting_half_plane);
@@ -171,7 +173,7 @@ pub fn subtract_polygon_from_terrain(
         // Add back the sliced pieces
         for p in part_1.iter().chain(part_2.iter()) {
             if p.exterior().coords().count() >= 4 {
-                rubble_polygons.push(p.clone());
+                rubble_polygons.push(SafePolygon(p.clone()));
             }
         }
     }
@@ -209,7 +211,7 @@ pub fn subtract_polygon_from_terrain(
                 let vertices: Vec<Vec2> =
                     local_poly.exterior().coords().map(|c| Vec2::new(c.x, c.y)).collect();
                 if let Some(rubble_collider) = Collider::convex_hull(vertices) {
-                    let local_multipoly = MultiPolygon::new(vec![local_poly]);
+                    let local_multipoly = SafeMultiPolygon::from(SafePolygon(local_poly));
                     let rubble_mesh = geometry_to_mesh(&local_multipoly);
 
                     let mut rng = rand::thread_rng();
@@ -251,7 +253,7 @@ fn create_irregular_circle_polygon(
     radius: f32,
     points: usize,
     rng: &mut impl rand::Rng,
-) -> Polygon<f32> {
+) -> SafePolygon {
     use std::f32::consts::TAU;
     let angle_step = TAU / (points as f32);
     let mut coords: Vec<(f32, f32)> = (0..points)
@@ -266,7 +268,53 @@ fn create_irregular_circle_polygon(
     if let Some(&first) = coords.first() {
         coords.push(first);
     }
-    Polygon::new(LineString::from(coords), vec![])
+    SafePolygon(Polygon::new(LineString::from(coords), vec![]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- create_circle_polygon edge cases ---
+
+    #[test]
+    fn test_circle_polygon_zero_radius() {
+        let poly = create_circle_polygon(Vec2::ZERO, 0.0, 16);
+        assert!(poly.exterior().coords().count() > 0);
+    }
+
+    #[test]
+    fn test_circle_polygon_negative_radius() {
+        let _poly = create_circle_polygon(Vec2::ZERO, -10.0, 16);
+    }
+
+    #[test]
+    fn test_circle_polygon_zero_points() {
+        let poly = create_circle_polygon(Vec2::ZERO, 40.0, 0);
+        // A zero-point polygon: should have an empty or trivial exterior
+        let _ = poly.exterior().coords().count();
+    }
+
+    #[test]
+    fn test_circle_polygon_one_point() { let _poly = create_circle_polygon(Vec2::ZERO, 40.0, 1); }
+
+    #[test]
+    fn test_circle_polygon_two_points() { let _poly = create_circle_polygon(Vec2::ZERO, 40.0, 2); }
+
+    #[test]
+    fn test_circle_polygon_nan_center() {
+        let _poly = create_circle_polygon(Vec2::new(f32::NAN, 0.0), 40.0, 16);
+    }
+
+    #[test]
+    fn test_circle_polygon_nan_radius() {
+        let _poly = create_circle_polygon(Vec2::ZERO, f32::NAN, 16);
+    }
+
+    #[test]
+    fn test_circle_polygon_inf_radius() {
+        let _poly = create_circle_polygon(Vec2::ZERO, f32::INFINITY, 16);
+    }
 }
 
 /// Crumbles an irregular circle of terrain around `target` (radius ~25 units).
@@ -292,7 +340,7 @@ pub fn on_wand_crumbling(
     let target = trigger.event().target;
     let mut rng = rand::thread_rng();
     let poly = create_irregular_circle_polygon(target, 160.0, 14, &mut rng);
-    let input_multipolygon = MultiPolygon::new(vec![poly]);
+    let input_multipolygon = SafeMultiPolygon::from(poly);
 
     for (entity, aabb) in &fragile_query {
         let rect_poly = Rect::new(Coord { x: aabb.min.x, y: aabb.min.y }, Coord {
@@ -358,7 +406,7 @@ pub fn handle_right_click_excavation(
     // Create a circular polygon approximating the excavation area
     let input_polygon =
         create_circle_polygon(world_position, EXCAVATION_RADIUS, EXCAVATION_CIRCLE_POINTS);
-    let input_multipolygon = MultiPolygon::new(vec![input_polygon]);
+    let input_multipolygon = SafeMultiPolygon::from(input_polygon);
 
     for (entity, aabb) in &fragile_query {
         let rect_poly = Rect::new(Coord { x: aabb.min.x, y: aabb.min.y }, Coord {

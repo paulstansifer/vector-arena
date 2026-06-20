@@ -1,10 +1,9 @@
 use bevy::prelude::*;
-use geo::MultiPolygon;
 use std::{
     path::PathBuf,
     sync::{Mutex, mpsc},
 };
-use vector_arena::dungeon::terrain;
+use vector_arena::{dungeon::terrain, util::safegeo::SafeMultiPolygon};
 
 // ── Public frame types ───────────────────────────────────────────────────
 
@@ -24,8 +23,8 @@ pub struct Frame {
     pub layers: Vec<Layer>,
 }
 
-/// Convenience: build a `Layer` from a `MultiPolygon`.
-pub fn poly_layer(poly: &MultiPolygon<f32>, color: Color, z: f32) -> Layer {
+/// Convenience: build a `Layer` from a `SafeMultiPolygon`.
+pub fn poly_layer(poly: &SafeMultiPolygon, color: Color, z: f32) -> Layer {
     Layer { mesh: terrain::geometry_to_mesh(poly), color, position: Vec2::ZERO, z }
 }
 

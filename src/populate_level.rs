@@ -1,10 +1,11 @@
 // Spawns the inhabitants and interactables of a dungeon level: player, monsters,
 // items, and the down staircase. Called after structural elements (terrain,
 // navmesh, FOV) have been put in place by `spawn_game_world`.
+use crate::util::safegeo::SafeMultiPolygon;
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::{MultiPolygon, Rect};
+use geo::Rect;
 use rand::prelude::*;
 
 use crate::{
@@ -25,7 +26,7 @@ pub fn populate(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<ColorMaterial>,
     rooms: &[Rect<f32>],
-    playable_area: &MultiPolygon<f32>,
+    playable_area: &SafeMultiPolygon,
     archipelago_id: Entity,
     depth: u32,
     saved_player: Option<(Stats, Inventory, StatusEffects)>,

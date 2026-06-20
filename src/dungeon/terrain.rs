@@ -7,7 +7,7 @@ use avian2d::prelude::*;
 use bevy::{math::Vec2, prelude::*};
 use bevy_mesh::{Indices, PrimitiveTopology};
 use geo::{
-    BoundingRect, Buffer, Contains, MultiPolygon, Polygon,
+    BoundingRect, Contains,
     algorithm::{
         buffer::BufferStyle,
         triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay},
@@ -16,14 +16,15 @@ use geo::{
 };
 use rand::Rng;
 
+use crate::util::safegeo::{SafeMultiPolygon, SafePolygon};
+
 /// Convert the terrain geometry to a Bevy mesh for rendering.
-pub fn geometry_to_mesh(geometry: &MultiPolygon<f32>) -> Mesh {
+pub fn geometry_to_mesh(geometry: &SafeMultiPolygon) -> Mesh {
     let mut positions = Vec::new();
     let mut indices = Vec::new();
     let mut normals = Vec::new();
 
     for polygon in geometry.iter() {
-        // TODO: This `.expect()` has failed before! Figure out why this can fail!
         let triangulation = polygon
             .constrained_triangulation(DelaunayTriangulationConfig::default())
             .expect("generating visual terrain mesh");
@@ -44,7 +45,7 @@ pub fn geometry_to_mesh(geometry: &MultiPolygon<f32>) -> Mesh {
 }
 
 /// Convert the terrain geometry to a solid triangle-mesh collider.
-pub fn geometry_to_collider(geometry: &MultiPolygon<f32>) -> Collider {
+pub fn geometry_to_collider(geometry: &SafeMultiPolygon) -> Collider {
     let mut shapes = Vec::new();
 
     for polygon in geometry.iter() {
@@ -86,9 +87,9 @@ impl TorporMultiplier {
 
 #[derive(Resource)]
 pub struct DungeonState {
-    pub solid_rock: MultiPolygon<f32>,
-    pub playable_area: MultiPolygon<f32>,
-    pub torpor_zones: Vec<Polygon<f32>>,
+    pub solid_rock: SafeMultiPolygon,
+    pub playable_area: SafeMultiPolygon,
+    pub torpor_zones: Vec<SafePolygon>,
 }
 
 pub fn torpor_factor_at(pos: Vec2, dungeon_state: &DungeonState) -> f32 {
@@ -119,7 +120,7 @@ pub struct PointsOfInterest {
 /// Returns a random point inside `playable_area`, eroded by `AGENT_RADIUS` so results
 /// are never right against the wall. Returns `None` after 1000 failed attempts.
 pub fn random_in_playable_area(
-    playable_area: &MultiPolygon<f32>,
+    playable_area: &SafeMultiPolygon,
     rng: &mut impl Rng,
 ) -> Option<Vec2> {
     let style =
@@ -139,7 +140,7 @@ pub fn random_in_playable_area(
 /// Returns a random point inside `playable_area` (eroded by `AGENT_RADIUS`) whose distance from
 /// `origin` lies within `[min_dist, max_dist]`. Returns `None` after 1000 failed attempts.
 pub fn random_near(
-    playable_area: &MultiPolygon<f32>,
+    playable_area: &SafeMultiPolygon,
     origin: Vec2,
     min_dist: f32,
     max_dist: f32,

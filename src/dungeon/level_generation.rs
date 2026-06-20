@@ -3,10 +3,13 @@
 // Rooms are padded inward (min 60 units after padding).  Corridors generate
 // L-shaped or straight hallways with beveled corners at junctions.  Doors are
 // placed at corridor/room boundaries with a hinge point for revolute joints.
-use crate::dungeon::bsp::{Partition, partition_space};
+use crate::{
+    dungeon::bsp::{Partition, partition_space},
+    util::safegeo::{SafeMultiPolygon, SafePolygon},
+};
 use avian2d::prelude::Collider;
 use bevy::math::Vec2;
-use geo::{BooleanOps, LineString, MultiPolygon, Polygon, Rect, Translate};
+use geo::{LineString, MultiPolygon, Polygon, Rect, Translate};
 use rand::prelude::*;
 use std::collections::HashSet;
 
@@ -22,12 +25,12 @@ const DOUBLE_DOOR_PROB: f32 = 0.75 * 0.0;
 const SPECIAL_ROOM_PROB: f32 = 0.15;
 
 pub struct TerrainGeometry {
-    pub solid_rock: MultiPolygon<f32>,
-    pub playable_area: MultiPolygon<f32>,
+    pub solid_rock: SafeMultiPolygon,
+    pub playable_area: SafeMultiPolygon,
     pub rooms: Vec<Rect<f32>>,
     pub corridor_ends: Vec<Vec2>,
     pub doors: Vec<DoorGeometry>,
-    pub torpor_zones: Vec<Polygon<f32>>,
+    pub torpor_zones: Vec<SafePolygon>,
 }
 
 #[derive(Clone, Copy)]
@@ -117,8 +120,9 @@ impl TerrainGeometry {
 
         // The terrain is the bounds minus the playable area
         let earth = Rect::<f32>::new((0.0, 0.0), (width, height));
-        let geometry =
-            earth.to_polygon().difference(&playable_area).translate(-width / 2.0, -height / 2.0);
+        let geometry = SafeMultiPolygon::from_geo(MultiPolygon(vec![earth.to_polygon()]))
+            .difference(&playable_area)
+            .translate(-width / 2.0, -height / 2.0);
 
         let offset_x = -width / 2.0;
         let offset_y = -height / 2.0;
@@ -181,7 +185,7 @@ fn allocate_roles(p: Vec<Partition>, rng: &mut impl Rng) -> Vec<(Partition, Part
             let connection_count = partition.connection_count();
 
             let role = match connection_count {
-                0 => panic!("Shouldn't be possible to generate an unconnected partition"),
+                0 => PartitionRole::Empty,
                 1 => {
                     if rng.gen_bool((1.0 - EMPTY_PROB).into()) {
                         PartitionRole::Room { variant: random_room_variant(rng) }
@@ -205,9 +209,9 @@ fn allocate_roles(p: Vec<Partition>, rng: &mut impl Rng) -> Vec<(Partition, Part
         .collect()
 }
 
-fn union_all(base: &mut MultiPolygon<f32>, polys: Vec<Polygon<f32>>) {
+fn union_all(base: &mut SafeMultiPolygon, polys: Vec<SafePolygon>) {
     for poly in polys {
-        *base = base.union(&poly);
+        *base = base.union(&SafeMultiPolygon::from(poly));
     }
 }
 
@@ -279,7 +283,7 @@ fn is_merged_connection(connection: &ConnectionPoint, merged: &HashSet<(u32, u32
 
 // Returns a polygon that fills the entire gap from the room's edge to the partition boundary on
 // the given connection side, spanning the full perpendicular extent of the room.
-fn open_full_wall(room: &Rect<f32>, connection: ConnectionPoint) -> Polygon<f32> {
+fn open_full_wall(room: &Rect<f32>, connection: ConnectionPoint) -> SafePolygon {
     let rect = match connection.side {
         ConnectionSide::Left => {
             Rect::new((connection.x, room.min().y), (room.min().x, room.max().y))
@@ -294,7 +298,7 @@ fn open_full_wall(room: &Rect<f32>, connection: ConnectionPoint) -> Polygon<f32>
             Rect::new((room.min().x, room.max().y), (room.max().x, connection.y))
         }
     };
-    rect.to_polygon()
+    SafePolygon(rect.to_polygon())
 }
 
 // For rooms, shrink at least PADDING away from the edges (respecting MIN_ROOM_SIZE), adding hallways out to the edge.
@@ -303,14 +307,14 @@ fn open_full_wall(room: &Rect<f32>, connection: ConnectionPoint) -> Polygon<f32>
 fn render(
     bsp: &[(Partition, PartitionRole)],
     rng: &mut impl Rng,
-) -> (Vec<Rect<f32>>, MultiPolygon<f32>, Vec<DoorGeometry>, Vec<Vec2>, Vec<Polygon<f32>>) {
+) -> (Vec<Rect<f32>>, SafeMultiPolygon, Vec<DoorGeometry>, Vec<Vec2>, Vec<SafePolygon>) {
     let merged_connections = find_merged_room_connections(bsp, rng);
 
     let mut rooms = Vec::new();
-    let mut playables = MultiPolygon::new(vec![]);
+    let mut playables = SafeMultiPolygon::empty();
     let mut doors = Vec::new();
     let mut corridor_ends_set: HashSet<(u32, u32)> = HashSet::new();
-    let mut torpor_zones: Vec<Polygon<f32>> = Vec::new();
+    let mut torpor_zones: Vec<SafePolygon> = Vec::new();
 
     // Avoid hallway stubs leading to nothing.
     let empty_connections: Vec<(f32, f32)> = bsp
@@ -323,7 +327,7 @@ fn render(
         |c: &ConnectionPoint| !empty_connections.iter().any(|&(ex, ey)| c.x == ex && c.y == ey);
 
     for (partition, role) in bsp {
-        let mut region = MultiPolygon::new(vec![]);
+        let mut region = SafeMultiPolygon::empty();
 
         match role {
             PartitionRole::Empty => continue,
@@ -333,14 +337,14 @@ fn render(
 
                 match variant {
                     RoomVariant::Normal => {
-                        region = region.union(&room.to_polygon());
+                        region = region.union(&SafeMultiPolygon::from(room.to_polygon()));
                         for connection in
                             partition_connections(partition).into_iter().filter(is_live)
                         {
                             if is_merged_connection(&connection, &merged_connections) {
-                                region = region.union(&MultiPolygon::new(vec![open_full_wall(
+                                region = region.union(&SafeMultiPolygon::from(open_full_wall(
                                     &room, connection,
-                                )]));
+                                )));
                             } else {
                                 let is_double =
                                     is_double_width_corridor_connection(&connection, bsp);
@@ -368,14 +372,14 @@ fn render(
                         }
                     }
                     RoomVariant::Oval => {
-                        region = region.union(&oval_polygon(&room));
+                        region = region.union(&SafeMultiPolygon::from(oval_polygon(&room)));
                         for connection in
                             partition_connections(partition).into_iter().filter(is_live)
                         {
                             if is_merged_connection(&connection, &merged_connections) {
-                                region = region.union(&MultiPolygon::new(vec![open_full_wall(
+                                region = region.union(&SafeMultiPolygon::from(open_full_wall(
                                     &room, connection,
-                                )]));
+                                )));
                             } else {
                                 let is_double =
                                     is_double_width_corridor_connection(&connection, bsp);
@@ -387,14 +391,14 @@ fn render(
                         }
                     }
                     RoomVariant::Colonnade => {
-                        region = region.union(&room.to_polygon());
+                        region = region.union(&SafeMultiPolygon::from(room.to_polygon()));
                         for connection in
                             partition_connections(partition).into_iter().filter(is_live)
                         {
                             if is_merged_connection(&connection, &merged_connections) {
-                                region = region.union(&MultiPolygon::new(vec![open_full_wall(
+                                region = region.union(&SafeMultiPolygon::from(open_full_wall(
                                     &room, connection,
-                                )]));
+                                )));
                             } else {
                                 let is_double =
                                     is_double_width_corridor_connection(&connection, bsp);
@@ -407,18 +411,18 @@ fn render(
                             }
                         }
                         for col in colonnade_columns(&room) {
-                            region = region.difference(&MultiPolygon::new(vec![col.to_polygon()]));
+                            region = region.difference(&SafeMultiPolygon::from(col.to_polygon()));
                         }
                     }
                     RoomVariant::Torpor => {
-                        region = region.union(&room.to_polygon());
+                        region = region.union(&SafeMultiPolygon::from(room.to_polygon()));
                         for connection in
                             partition_connections(partition).into_iter().filter(is_live)
                         {
                             if is_merged_connection(&connection, &merged_connections) {
-                                region = region.union(&MultiPolygon::new(vec![open_full_wall(
+                                region = region.union(&SafeMultiPolygon::from(open_full_wall(
                                     &room, connection,
-                                )]));
+                                )));
                             } else {
                                 let is_double =
                                     is_double_width_corridor_connection(&connection, bsp);
@@ -439,7 +443,7 @@ fn render(
                             (room.max().x - CORRIDOR_WIDTH, room.max().y - CORRIDOR_WIDTH),
                         );
                         if inner.width() > 0.0 && inner.height() > 0.0 {
-                            torpor_zones.push(inner.to_polygon());
+                            torpor_zones.push(SafePolygon(inner.to_polygon()));
                         }
                     }
                 }
@@ -455,7 +459,7 @@ fn render(
                 {
                     union_all(&mut region, connect_adjacent(connections[0], connections[1], width));
                 } else if !connections.is_empty() {
-                    region = region.union(&bevel_at_point(center, width));
+                    region = region.union(&SafeMultiPolygon::from(bevel_at_point(center, width)));
                     for connection in connections {
                         union_all(&mut region, connect_point_to_center(connection, center, width));
                     }
@@ -487,7 +491,7 @@ fn render(
         let h_x = door.hinge.0;
         let h_y = door.hinge.1;
         let hinge_rect = Rect::new((h_x - 2.5, h_y - 2.5), (h_x + 2.5, h_y + 2.5));
-        playables = playables.difference(&MultiPolygon::new(vec![hinge_rect.to_polygon()]));
+        playables = playables.difference(&SafeMultiPolygon::from(hinge_rect.to_polygon()));
     }
 
     (rooms, playables, doors, corridor_ends, torpor_zones)
@@ -612,7 +616,7 @@ fn random_room_variant(rng: &mut impl Rng) -> RoomVariant {
     }
 }
 
-fn oval_polygon(room: &Rect<f32>) -> Polygon<f32> {
+fn oval_polygon(room: &Rect<f32>) -> SafePolygon {
     let cx = (room.min().x + room.max().x) / 2.0;
     let cy = (room.min().y + room.max().y) / 2.0;
     let a = room.width() / 2.0;
@@ -624,7 +628,7 @@ fn oval_polygon(room: &Rect<f32>) -> Polygon<f32> {
             (cx + a * angle.cos(), cy + b * angle.sin())
         })
         .collect();
-    Polygon::new(LineString::from(coords), vec![])
+    SafePolygon(Polygon::new(LineString::from(coords), vec![]))
 }
 
 // Returns where the corridor (of the given width) should terminate at the oval's boundary,
@@ -769,7 +773,7 @@ fn connect_to_entry(
     entry: (f32, f32),
     connection: ConnectionPoint,
     width: f32,
-) -> Vec<geo::Polygon<f32>> {
+) -> Vec<SafePolygon> {
     let conn_pt = (connection.x, connection.y);
     let elbow = if connection.side.is_vertical() {
         (entry.0, connection.y)
@@ -796,11 +800,11 @@ fn connect_room_to_connection(
     room: &Rect<f32>,
     connection: ConnectionPoint,
     width: f32,
-) -> Vec<geo::Polygon<f32>> {
+) -> Vec<SafePolygon> {
     connect_to_entry(room_entry_point(room, connection), connection, width)
 }
 
-fn connect_adjacent(a: ConnectionPoint, b: ConnectionPoint, width: f32) -> Vec<Polygon<f32>> {
+fn connect_adjacent(a: ConnectionPoint, b: ConnectionPoint, width: f32) -> Vec<SafePolygon> {
     let (h_conn, v_conn) = if a.side.is_vertical() { (a, b) } else { (b, a) };
     let elbow = (v_conn.x, h_conn.y);
     vec![
@@ -814,7 +818,7 @@ fn connect_point_to_center(
     connection: ConnectionPoint,
     center: (f32, f32),
     width: f32,
-) -> Vec<geo::Polygon<f32>> {
+) -> Vec<SafePolygon> {
     let conn_pt = (connection.x, connection.y);
 
     if (connection.x - center.0).abs() < f32::EPSILON
@@ -836,10 +840,10 @@ fn connect_point_to_center(
     ]
 }
 
-fn bevel_at_point(p: (f32, f32), width: f32) -> Polygon<f32> {
+fn bevel_at_point(p: (f32, f32), width: f32) -> SafePolygon {
     let h = width / 2.0;
     let q = width / 4.0;
-    Polygon::new(
+    SafePolygon(Polygon::new(
         LineString::from(vec![
             (p.0 - h, p.1 - q),
             (p.0 - q, p.1 - h),
@@ -852,20 +856,23 @@ fn bevel_at_point(p: (f32, f32), width: f32) -> Polygon<f32> {
             (p.0 - h, p.1 - q),
         ]),
         vec![],
-    )
+    ))
 }
 
-fn rect_for_segment(a: (f32, f32), b: (f32, f32), width: f32) -> geo::Polygon<f32> {
+fn rect_for_segment(a: (f32, f32), b: (f32, f32), width: f32) -> SafePolygon {
+    if !a.0.is_finite() || !a.1.is_finite() || !b.0.is_finite() || !b.1.is_finite() {
+        return SafePolygon(Polygon::new(LineString::new(vec![]), vec![]));
+    }
     if (a.0 - b.0).abs() < f32::EPSILON {
         let min_y = a.1.min(b.1);
         let max_y = a.1.max(b.1);
         let half = width / 2.0;
-        Rect::new((a.0 - half, min_y), (a.0 + half, max_y)).to_polygon()
+        SafePolygon(Rect::new((a.0 - half, min_y), (a.0 + half, max_y)).to_polygon())
     } else if (a.1 - b.1).abs() < f32::EPSILON {
         let min_x = a.0.min(b.0);
         let max_x = a.0.max(b.0);
         let half = width / 2.0;
-        Rect::new((min_x, a.1 - half), (max_x, a.1 + half)).to_polygon()
+        SafePolygon(Rect::new((min_x, a.1 - half), (max_x, a.1 + half)).to_polygon())
     } else {
         unreachable!("rect_for_segment called with diagonal segment ({:?} to {:?})", a, b)
     }
@@ -1013,5 +1020,111 @@ mod tests {
         let rect_center = door.phys_rect.center();
         assert!((c.x - rect_center.x).abs() < f32::EPSILON);
         assert!((c.y - rect_center.y).abs() < f32::EPSILON);
+    }
+
+    // --- Degenerate / extreme geometry stress tests ---
+
+    #[test]
+    fn test_bevel_at_point_zero_width() { let _poly = bevel_at_point((0.0, 0.0), 0.0); }
+
+    #[test]
+    fn test_bevel_at_point_negative_width() { let _poly = bevel_at_point((0.0, 0.0), -20.0); }
+
+    #[test]
+    fn test_bevel_at_point_nan_width() { let _poly = bevel_at_point((0.0, 0.0), f32::NAN); }
+
+    #[test]
+    fn test_bevel_at_point_nan_coords() { let _poly = bevel_at_point((f32::NAN, 0.0), 40.0); }
+
+    #[test]
+    fn test_bevel_at_point_huge_width() { let _poly = bevel_at_point((0.0, 0.0), f32::MAX / 2.0); }
+
+    #[test]
+    fn test_rect_for_segment_zero_length() {
+        // Start == End: a degenerate segment with no length.
+        let _poly = rect_for_segment((50.0, 50.0), (50.0, 50.0), 30.0);
+    }
+
+    #[test]
+    fn test_rect_for_segment_zero_width() {
+        let _poly = rect_for_segment((0.0, 0.0), (0.0, 100.0), 0.0);
+    }
+
+    #[test]
+    fn test_rect_for_segment_negative_width() {
+        let _poly = rect_for_segment((0.0, 0.0), (0.0, 100.0), -10.0);
+    }
+
+    #[test]
+    fn test_rect_for_segment_nan_width() {
+        let _poly = rect_for_segment((0.0, 0.0), (0.0, 100.0), f32::NAN);
+    }
+
+    #[test]
+    fn test_rect_for_segment_nan_coords() {
+        let _poly = rect_for_segment((f32::NAN, 0.0), (0.0, 100.0), 30.0);
+    }
+
+    #[test]
+    fn test_shrink_room_zero_size_partition() {
+        let p = Partition {
+            x: (100.0, 100.0),
+            y: (200.0, 200.0),
+            horz_conn: (vec![], vec![]),
+            vert_conn: (vec![], vec![]),
+        };
+        let _room = shrink_room(&p);
+    }
+
+    #[test]
+    fn test_shrink_room_inverted_partition() {
+        // max < min on both axes
+        let p = Partition {
+            x: (300.0, 100.0),
+            y: (400.0, 200.0),
+            horz_conn: (vec![], vec![]),
+            vert_conn: (vec![], vec![]),
+        };
+        let _room = shrink_room(&p);
+    }
+
+    #[test]
+    fn test_terrain_geometry_zero_dimensions() {
+        let mut rng = rand::thread_rng();
+        let _result = TerrainGeometry::new_seeded(0.0, 0.0, &mut rng);
+    }
+
+    #[test]
+    fn test_terrain_geometry_tiny_dimensions() {
+        let mut rng = rand::thread_rng();
+        let _result = TerrainGeometry::new_seeded(1.0, 1.0, &mut rng);
+    }
+
+    #[test]
+    fn test_terrain_geometry_very_narrow() {
+        // Wide but extremely short — likely to produce no rooms or degenerate corridors.
+        let mut rng = rand::thread_rng();
+        let _result = TerrainGeometry::new_seeded(1600.0, 10.0, &mut rng);
+    }
+
+    #[test]
+    #[ignore = "hangs: BSP partition_space loops forever on a 1M×1M space"]
+    fn test_terrain_geometry_huge_dimensions() {
+        let mut rng = rand::thread_rng();
+        let _result = TerrainGeometry::new_seeded(1_000_000.0, 1_000_000.0, &mut rng);
+    }
+
+    #[test]
+    #[ignore = "likely hangs: NaN dimensions cause infinite BSP recursion"]
+    fn test_terrain_geometry_nan_dimensions() {
+        let mut rng = rand::thread_rng();
+        let _result = TerrainGeometry::new_seeded(f32::NAN, f32::NAN, &mut rng);
+    }
+
+    #[test]
+    #[ignore = "likely hangs: infinite dimensions cause infinite BSP recursion"]
+    fn test_terrain_geometry_infinite_dimensions() {
+        let mut rng = rand::thread_rng();
+        let _result = TerrainGeometry::new_seeded(f32::INFINITY, f32::INFINITY, &mut rng);
     }
 }

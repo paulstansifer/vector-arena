@@ -14,6 +14,7 @@ pub mod sprite;
 pub mod status_effect;
 pub mod time_scale;
 pub mod ui;
+pub mod util;
 pub mod visuals;
 
 // TODO: move all these things out!

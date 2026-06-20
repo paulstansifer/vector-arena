@@ -11,6 +11,7 @@ use vector_arena::{
         level_generation::{PartitionRole, RoomVariant, TerrainGeometry},
     },
     fov::{ExplorationState, update_fov_from_pov},
+    util::safegeo::SafeMultiPolygon,
 };
 
 #[test]
@@ -59,7 +60,8 @@ fn test_fov_point_explosion() {
     let h = world_bounds.height;
     let bg_rect =
         geo::Rect::new((-w / 2.0 - 200.0, -h / 2.0 - 200.0), (w / 2.0 + 200.0, h / 2.0 + 200.0));
-    let mut exploration_state = ExplorationState(MultiPolygon::new(vec![bg_rect.to_polygon()]));
+    let mut exploration_state =
+        ExplorationState(SafeMultiPolygon::from(MultiPolygon::new(vec![bg_rect.to_polygon()])));
 
     // Terrain spans x: 10-790, y: 10-300; camera at (400, 155) frames it well.
     let pw = preview::PreviewWindow::from_env("FOV Preview", Vec2::new(0.0, 0.0));
@@ -113,8 +115,8 @@ fn test_fov_point_explosion() {
 }
 
 fn make_frame(
-    solid_rock: &MultiPolygon<f32>,
-    exploration: &MultiPolygon<f32>,
+    solid_rock: &SafeMultiPolygon,
+    exploration: &SafeMultiPolygon,
     pt: Vec2,
 ) -> preview::Frame {
     preview::Frame {

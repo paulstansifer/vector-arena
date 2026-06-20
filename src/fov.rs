@@ -5,9 +5,7 @@
 // FOV each frame. `Opaque`/`OpaqueVertices` mark sight-blocking entities; doors use local-space
 // polygon vertices so they cast correct shadows as they swing.
 use bevy::prelude::*;
-use geo::{
-    BooleanOps, Buffer, Intersects, Line as GeoLine, LineString, MultiPolygon, Polygon, Simplify,
-};
+use geo::{Intersects, Line as GeoLine, LineString, MultiPolygon, Polygon};
 use std::ops::Range;
 
 use crate::{
@@ -15,6 +13,7 @@ use crate::{
     dungeon::terrain::{self, DungeonState},
     player::Player,
     status_effect::StatusEffects,
+    util::safegeo::{SafeMultiPolygon, SafePolygon},
 };
 
 pub const WALL_FOV_DEPTH: f32 = 4.0;
@@ -34,9 +33,9 @@ pub struct OpaqueVertices(pub Vec<Vec2>);
 /// Returns the qualifying candidate closest to `target`, or `None` if none exist.
 pub fn find_exploration_waypoint(
     target: Vec2,
-    exploration: &MultiPolygon<f32>,
-    known_blockers: &MultiPolygon<f32>,
-    playable_area: &MultiPolygon<f32>,
+    exploration: &SafeMultiPolygon,
+    known_blockers: &SafeMultiPolygon,
+    playable_area: &SafeMultiPolygon,
 ) -> Option<Vec2> {
     let step = 15.0_f32;
 
@@ -73,8 +72,8 @@ pub fn fov_arc(
     origin: Vec2,
     radius: f32,
     angle_range: Option<Range<f32>>,
-    obstacles: &geo::MultiPolygon<f32>,
-) -> Polygon<f32> {
+    obstacles: &SafeMultiPolygon,
+) -> SafePolygon {
     let segments: Vec<_> = obstacles
         .iter()
         .flat_map(|poly| std::iter::once(poly.exterior()).chain(poly.interiors()))
@@ -168,7 +167,7 @@ pub fn fov_arc(
         }
     }
 
-    Polygon::new(LineString::from(polygon_points), vec![])
+    SafePolygon(Polygon::new(LineString::from(polygon_points), vec![]))
 }
 
 const NEVER_EXPLORED_Z: f32 = 50.0;
@@ -184,10 +183,10 @@ pub struct FovMeshMarker;
 pub struct NeverExploredMeshMarker;
 
 #[derive(Resource)]
-pub struct ExplorationState(pub geo::MultiPolygon<f32>);
+pub struct ExplorationState(pub SafeMultiPolygon);
 
 #[derive(Resource)]
-pub struct CurrentFovState(pub geo::MultiPolygon<f32>);
+pub struct CurrentFovState(pub SafeMultiPolygon);
 
 pub fn spawn_fov_meshes(
     commands: &mut Commands,
@@ -212,9 +211,9 @@ pub fn spawn_fov_meshes(
     let h = window_height;
     let bg_rect =
         geo::Rect::new((-w / 2.0 - 200.0, -h / 2.0 - 200.0), (w / 2.0 + 200.0, h / 2.0 + 200.0));
-    let bg_poly = MultiPolygon::new(vec![bg_rect.to_polygon()]);
+    let bg_poly = SafeMultiPolygon::from(MultiPolygon::new(vec![bg_rect.to_polygon()]));
     commands.insert_resource(ExplorationState(bg_poly.clone()));
-    commands.insert_resource(CurrentFovState(MultiPolygon::new(vec![])));
+    commands.insert_resource(CurrentFovState(SafeMultiPolygon::empty()));
 
     commands.spawn((
         DespawnOnExit(GameState::InLevel),
@@ -256,7 +255,8 @@ pub fn update_fov(
     let radius = 600.0_f32 + (50.0_f32 - 600.0_f32) * blind_strength;
 
     // Append mobile obstacle polygons to solid_rock without unioning (fov_arc only needs segments).
-    let mut obstacle_polys: Vec<geo::Polygon<f32>> = dungeon_state.solid_rock.0.clone();
+    let mut obstacle_polys: Vec<SafePolygon> =
+        dungeon_state.solid_rock.iter().cloned().map(SafePolygon).collect();
     for (gtransform, opaque_verts) in &opaque_query {
         if opaque_verts.0.len() < 3 {
             continue;
@@ -270,9 +270,9 @@ pub fn update_fov(
             })
             .collect();
         pts.push(pts[0]);
-        obstacle_polys.push(geo::Polygon::new(geo::LineString::from(pts), vec![]));
+        obstacle_polys.push(SafePolygon(geo::Polygon::new(geo::LineString::from(pts), vec![])));
     }
-    let obstacles = geo::MultiPolygon::new(obstacle_polys);
+    let obstacles = SafeMultiPolygon::from_polygons(obstacle_polys);
 
     let (new_exp, new_fov, new_ne, new_fov_poly) =
         update_fov_from_pov(origin, radius, &obstacles, &bounds, &exploration_state.0);
@@ -297,9 +297,9 @@ pub fn update_staircase_fog_copy(
 
     let pos = stair_tf.translation.truncate();
     let half = 11.0_f32;
-    let staircase_sq = MultiPolygon::new(vec![
+    let staircase_sq = SafeMultiPolygon::from(
         geo::Rect::new((pos.x - half, pos.y - half), (pos.x + half, pos.y + half)).to_polygon(),
-    ]);
+    );
     // Awkwardly duplicate the hack we do to actually display the FOV:
     let fog_area =
         staircase_sq.difference(&current_fov.0.buffer(-1.0).buffer(1.0 + WALL_FOV_DEPTH));
@@ -312,19 +312,19 @@ pub fn update_staircase_fog_copy(
 pub fn update_fov_from_pov(
     origin: Vec2,
     radius: f32,
-    solid_rock: &MultiPolygon<f32>,
+    solid_rock: &SafeMultiPolygon,
     bounds: &WorldBounds,
-    exploration: &MultiPolygon<f32>,
-) -> (MultiPolygon<f32>, Mesh, Mesh, MultiPolygon<f32>) {
+    exploration: &SafeMultiPolygon,
+) -> (SafeMultiPolygon, Mesh, Mesh, SafeMultiPolygon) {
     let fov_poly = fov_arc(origin, radius, None, solid_rock);
-    let fov_multi = MultiPolygon::new(vec![fov_poly]);
+    let fov_multi = SafeMultiPolygon::from(fov_poly);
 
     let w = bounds.width;
     let h = bounds.height;
     // To be safe, make it larger than bounds
     let bg_rect =
         geo::Rect::new((-w / 2.0 - 200.0, -h / 2.0 - 200.0), (w / 2.0 + 200.0, h / 2.0 + 200.0));
-    let bg_poly = MultiPolygon::new(vec![bg_rect.to_polygon()]);
+    let bg_poly = SafeMultiPolygon::from(MultiPolygon::new(vec![bg_rect.to_polygon()]));
 
     // The negative buffer is a bit of a hack to remove little erroneous rays that sometimes sneak through the terrain.
     // The positive buffer allows looking at the walls.
@@ -341,10 +341,423 @@ pub fn update_fov_from_pov(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::safegeo::SafeMultiPolygon;
 
-    // Helper: a MultiPolygon rectangle.
-    fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> MultiPolygon<f32> {
-        MultiPolygon::new(vec![geo::Rect::new((x0, y0), (x1, y1)).to_polygon()])
+    fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> SafeMultiPolygon {
+        SafeMultiPolygon::from_geo(MultiPolygon::new(vec![
+            geo::Rect::new((x0, y0), (x1, y1)).to_polygon(),
+        ]))
+    }
+
+    // --- Garbage geometry constructors ---
+
+    /// Self-intersecting "bowtie": the edge (0,0)→(100,100) crosses (100,0)→(0,100).
+    fn bowtie() -> SafeMultiPolygon {
+        SafeMultiPolygon::from_geo(MultiPolygon::new(vec![Polygon::new(
+            LineString::from(vec![
+                (0.0f32, 0.0),
+                (100.0, 100.0),
+                (100.0, 0.0),
+                (0.0, 100.0),
+                (0.0, 0.0),
+            ]),
+            vec![],
+        )]))
+    }
+
+    /// All vertices collinear — zero area.
+    fn zero_area() -> SafeMultiPolygon {
+        SafeMultiPolygon::from_geo(MultiPolygon::new(vec![Polygon::new(
+            LineString::from(vec![(0.0f32, 0.0), (50.0, 0.0), (100.0, 0.0), (0.0, 0.0)]),
+            vec![],
+        )]))
+    }
+
+    /// Polygon whose exterior has only two distinct points (degenerate "edge").
+    fn two_point_degenerate() -> SafeMultiPolygon {
+        SafeMultiPolygon::from_geo(MultiPolygon::new(vec![Polygon::new(
+            LineString::from(vec![(0.0f32, 0.0), (100.0, 50.0), (0.0, 0.0)]),
+            vec![],
+        )]))
+    }
+
+    /// Exterior ring is a single repeated point.
+    fn point_polygon() -> SafeMultiPolygon {
+        SafeMultiPolygon::from_geo(MultiPolygon::new(vec![Polygon::new(
+            LineString::from(vec![(50.0f32, 50.0), (50.0, 50.0), (50.0, 50.0), (50.0, 50.0)]),
+            vec![],
+        )]))
+    }
+
+    /// Coordinates at NaN (sanitized to empty on construction).
+    fn nan_coords() -> SafeMultiPolygon {
+        SafeMultiPolygon::from_geo(MultiPolygon::new(vec![Polygon::new(
+            LineString::from(vec![
+                (f32::NAN, 0.0),
+                (100.0, 0.0),
+                (100.0, 100.0),
+                (0.0, 100.0),
+                (f32::NAN, 0.0),
+            ]),
+            vec![],
+        )]))
+    }
+
+    /// Coordinates at ±Infinity (sanitized to empty on construction).
+    fn inf_coords() -> SafeMultiPolygon {
+        SafeMultiPolygon::from_geo(MultiPolygon::new(vec![Polygon::new(
+            LineString::from(vec![
+                (f32::NEG_INFINITY, f32::NEG_INFINITY),
+                (f32::INFINITY, f32::NEG_INFINITY),
+                (f32::INFINITY, f32::INFINITY),
+                (f32::NEG_INFINITY, f32::INFINITY),
+                (f32::NEG_INFINITY, f32::NEG_INFINITY),
+            ]),
+            vec![],
+        )]))
+    }
+
+    /// Coordinates near f32::MAX.
+    fn huge_coords() -> SafeMultiPolygon {
+        let h = f32::MAX / 4.0;
+        SafeMultiPolygon::from_geo(MultiPolygon::new(vec![Polygon::new(
+            LineString::from(vec![(-h, -h), (h, -h), (h, h), (-h, h), (-h, -h)]),
+            vec![],
+        )]))
+    }
+
+    /// Exterior ring with many consecutive duplicate vertices.
+    fn duplicate_vertices() -> SafeMultiPolygon {
+        SafeMultiPolygon::from_geo(MultiPolygon::new(vec![Polygon::new(
+            LineString::from(vec![
+                (0.0f32, 0.0),
+                (0.0, 0.0),
+                (100.0, 0.0),
+                (100.0, 0.0),
+                (100.0, 100.0),
+                (100.0, 100.0),
+                (0.0, 100.0),
+                (0.0, 0.0),
+            ]),
+            vec![],
+        )]))
+    }
+
+    /// Tiny 5×5 square — near-degenerate for most buffer/triangulation operations.
+    fn tiny_square() -> SafeMultiPolygon { rect(-2.5, -2.5, 2.5, 2.5) }
+
+    /// Hole larger than its exterior — geometrically invalid.
+    fn inverted_hole() -> SafeMultiPolygon {
+        let exterior = LineString::from(vec![
+            (0.0f32, 0.0),
+            (10.0, 0.0),
+            (10.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+        ]);
+        let hole = LineString::from(vec![
+            (-1000.0f32, -1000.0),
+            (1000.0, -1000.0),
+            (1000.0, 1000.0),
+            (-1000.0, 1000.0),
+            (-1000.0, -1000.0),
+        ]);
+        SafeMultiPolygon::from_geo(MultiPolygon::new(vec![Polygon::new(exterior, vec![hole])]))
+    }
+
+    /// An extremely thin sliver (1-unit wide, 200-unit long).
+    fn sliver() -> SafeMultiPolygon { rect(0.0, 0.0, 200.0, 0.5) }
+
+    // --- fov_arc stress tests ---
+
+    #[test]
+    fn test_fov_arc_empty_obstacles() {
+        let result = fov_arc(Vec2::ZERO, 100.0, None, &SafeMultiPolygon::empty());
+        assert!(result.exterior().coords().count() > 0);
+    }
+
+    #[test]
+    fn test_fov_arc_zero_radius() {
+        let _result = fov_arc(Vec2::ZERO, 0.0, None, &SafeMultiPolygon::empty());
+    }
+
+    #[test]
+    fn test_fov_arc_negative_radius() {
+        let _result = fov_arc(Vec2::ZERO, -10.0, None, &SafeMultiPolygon::empty());
+    }
+
+    #[test]
+    fn test_fov_arc_nan_radius() {
+        let _result = fov_arc(Vec2::ZERO, f32::NAN, None, &SafeMultiPolygon::empty());
+    }
+
+    #[test]
+    fn test_fov_arc_nan_origin() {
+        let _result = fov_arc(Vec2::new(f32::NAN, 0.0), 100.0, None, &SafeMultiPolygon::empty());
+    }
+
+    #[test]
+    fn test_fov_arc_infinite_origin() {
+        let _result =
+            fov_arc(Vec2::new(f32::INFINITY, 0.0), 100.0, None, &SafeMultiPolygon::empty());
+    }
+
+    #[test]
+    fn test_fov_arc_self_intersecting_obstacle() {
+        let _result = fov_arc(Vec2::ZERO, 200.0, None, &bowtie());
+    }
+
+    #[test]
+    fn test_fov_arc_zero_area_obstacle() {
+        let _result = fov_arc(Vec2::ZERO, 200.0, None, &zero_area());
+    }
+
+    #[test]
+    fn test_fov_arc_two_point_degenerate_obstacle() {
+        let _result = fov_arc(Vec2::ZERO, 200.0, None, &two_point_degenerate());
+    }
+
+    #[test]
+    fn test_fov_arc_point_polygon_obstacle() {
+        let _result = fov_arc(Vec2::ZERO, 200.0, None, &point_polygon());
+    }
+
+    #[test]
+    fn test_fov_arc_nan_obstacle_coords() {
+        let _result = fov_arc(Vec2::ZERO, 200.0, None, &nan_coords());
+    }
+
+    #[test]
+    fn test_fov_arc_inf_obstacle_coords() {
+        let _result = fov_arc(Vec2::ZERO, 200.0, None, &inf_coords());
+    }
+
+    #[test]
+    fn test_fov_arc_huge_obstacle_coords() {
+        let _result = fov_arc(Vec2::ZERO, 200.0, None, &huge_coords());
+    }
+
+    #[test]
+    fn test_fov_arc_duplicate_vertices_obstacle() {
+        let _result = fov_arc(Vec2::ZERO, 200.0, None, &duplicate_vertices());
+    }
+
+    #[test]
+    fn test_fov_arc_inverted_hole_obstacle() {
+        let _result = fov_arc(Vec2::ZERO, 200.0, None, &inverted_hole());
+    }
+
+    #[test]
+    fn test_fov_arc_sliver_obstacle() { let _result = fov_arc(Vec2::ZERO, 200.0, None, &sliver()); }
+
+    #[test]
+    fn test_fov_arc_origin_inside_obstacle() {
+        // Origin is fully enclosed inside the obstacle polygon.
+        let enclosing = SafeMultiPolygon::from_geo(MultiPolygon::new(vec![Polygon::new(
+            LineString::from(vec![
+                (-500.0f32, -500.0),
+                (500.0, -500.0),
+                (500.0, 500.0),
+                (-500.0, 500.0),
+                (-500.0, -500.0),
+            ]),
+            vec![],
+        )]));
+        let _result = fov_arc(Vec2::ZERO, 300.0, None, &enclosing);
+    }
+
+    // --- find_exploration_waypoint stress tests ---
+
+    #[test]
+    fn test_waypoint_empty_exploration() {
+        let result = find_exploration_waypoint(
+            Vec2::new(100.0, 0.0),
+            &SafeMultiPolygon::empty(),
+            &SafeMultiPolygon::empty(),
+            &rect(-100.0, -50.0, 0.0, 50.0),
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_waypoint_nan_target() {
+        let _result = find_exploration_waypoint(
+            Vec2::new(f32::NAN, 0.0),
+            &rect(0.0, -50.0, 200.0, 50.0),
+            &SafeMultiPolygon::empty(),
+            &rect(-200.0, -50.0, 0.0, 50.0),
+        );
+    }
+
+    #[test]
+    fn test_waypoint_self_intersecting_exploration() {
+        let _result = find_exploration_waypoint(
+            Vec2::new(100.0, 0.0),
+            &bowtie(),
+            &SafeMultiPolygon::empty(),
+            &rect(-200.0, -200.0, 200.0, 200.0),
+        );
+    }
+
+    #[test]
+    fn test_waypoint_nan_in_exploration() {
+        let _result = find_exploration_waypoint(
+            Vec2::new(100.0, 0.0),
+            &nan_coords(),
+            &SafeMultiPolygon::empty(),
+            &rect(-200.0, -200.0, 200.0, 200.0),
+        );
+    }
+
+    #[test]
+    fn test_waypoint_nan_in_blockers() {
+        let _result = find_exploration_waypoint(
+            Vec2::new(100.0, 0.0),
+            &rect(0.0, -50.0, 200.0, 50.0),
+            &nan_coords(),
+            &rect(-200.0, -50.0, 0.0, 50.0),
+        );
+    }
+
+    #[test]
+    fn test_waypoint_inf_in_exploration() {
+        let _result = find_exploration_waypoint(
+            Vec2::new(100.0, 0.0),
+            &inf_coords(),
+            &SafeMultiPolygon::empty(),
+            &rect(-200.0, -200.0, 200.0, 200.0),
+        );
+    }
+
+    #[test]
+    fn test_waypoint_inverted_hole_exploration() {
+        let _result = find_exploration_waypoint(
+            Vec2::new(100.0, 0.0),
+            &inverted_hole(),
+            &SafeMultiPolygon::empty(),
+            &rect(-200.0, -200.0, 200.0, 200.0),
+        );
+    }
+
+    #[test]
+    fn test_waypoint_zero_area_exploration() {
+        let _result = find_exploration_waypoint(
+            Vec2::new(100.0, 0.0),
+            &zero_area(),
+            &SafeMultiPolygon::empty(),
+            &rect(-200.0, -200.0, 200.0, 200.0),
+        );
+    }
+
+    // --- update_fov_from_pov stress tests ---
+
+    fn standard_bounds() -> crate::WorldBounds {
+        crate::WorldBounds { width: 800.0, height: 600.0 }
+    }
+
+    #[test]
+    fn test_update_fov_from_pov_empty_obstacles() {
+        let exploration = rect(-400.0, -300.0, 400.0, 300.0);
+        let _result = update_fov_from_pov(
+            Vec2::ZERO,
+            300.0,
+            &SafeMultiPolygon::empty(),
+            &standard_bounds(),
+            &exploration,
+        );
+    }
+
+    #[test]
+    fn test_update_fov_from_pov_self_intersecting_obstacles() {
+        let exploration = rect(-400.0, -300.0, 400.0, 300.0);
+        let _result =
+            update_fov_from_pov(Vec2::ZERO, 300.0, &bowtie(), &standard_bounds(), &exploration);
+    }
+
+    #[test]
+    fn test_update_fov_from_pov_zero_area_obstacles() {
+        let exploration = rect(-400.0, -300.0, 400.0, 300.0);
+        let _result =
+            update_fov_from_pov(Vec2::ZERO, 300.0, &zero_area(), &standard_bounds(), &exploration);
+    }
+
+    #[test]
+    fn test_update_fov_from_pov_nan_obstacles() {
+        let exploration = rect(-400.0, -300.0, 400.0, 300.0);
+        let _result =
+            update_fov_from_pov(Vec2::ZERO, 300.0, &nan_coords(), &standard_bounds(), &exploration);
+    }
+
+    #[test]
+    fn test_update_fov_from_pov_inf_obstacles() {
+        let exploration = rect(-400.0, -300.0, 400.0, 300.0);
+        let _result =
+            update_fov_from_pov(Vec2::ZERO, 300.0, &inf_coords(), &standard_bounds(), &exploration);
+    }
+
+    #[test]
+    fn test_update_fov_from_pov_sliver_obstacles() {
+        let exploration = rect(-400.0, -300.0, 400.0, 300.0);
+        let _result =
+            update_fov_from_pov(Vec2::ZERO, 300.0, &sliver(), &standard_bounds(), &exploration);
+    }
+
+    #[test]
+    fn test_update_fov_from_pov_tiny_square_obstacles() {
+        let exploration = rect(-400.0, -300.0, 400.0, 300.0);
+        let _result = update_fov_from_pov(
+            Vec2::ZERO,
+            300.0,
+            &tiny_square(),
+            &standard_bounds(),
+            &exploration,
+        );
+    }
+
+    #[test]
+    fn test_update_fov_from_pov_bowtie_exploration() {
+        let _result = update_fov_from_pov(
+            Vec2::ZERO,
+            300.0,
+            &SafeMultiPolygon::empty(),
+            &standard_bounds(),
+            &bowtie(),
+        );
+    }
+
+    #[test]
+    fn test_update_fov_from_pov_empty_exploration() {
+        let _result = update_fov_from_pov(
+            Vec2::ZERO,
+            300.0,
+            &SafeMultiPolygon::empty(),
+            &standard_bounds(),
+            &SafeMultiPolygon::empty(),
+        );
+    }
+
+    #[test]
+    fn test_update_fov_from_pov_zero_radius() {
+        let exploration = rect(-400.0, -300.0, 400.0, 300.0);
+        let _result = update_fov_from_pov(
+            Vec2::ZERO,
+            0.0,
+            &SafeMultiPolygon::empty(),
+            &standard_bounds(),
+            &exploration,
+        );
+    }
+
+    #[test]
+    fn test_update_fov_from_pov_huge_coords_obstacles() {
+        let exploration = rect(-400.0, -300.0, 400.0, 300.0);
+        let _result = update_fov_from_pov(
+            Vec2::ZERO,
+            300.0,
+            &huge_coords(),
+            &standard_bounds(),
+            &exploration,
+        );
     }
 
     /// The frontier of exploration lies exactly on the boundary of `playable_area` (the shared
@@ -358,7 +771,7 @@ mod tests {
         // Every sampled point on that edge is on the boundary of playable_area, not its interior.
         let exploration = rect(0.0, -50.0, 200.0, 50.0);
         let playable_area = rect(-200.0, -50.0, 0.0, 50.0);
-        let known_blockers = MultiPolygon::new(vec![]);
+        let known_blockers = SafeMultiPolygon::empty();
         let target = Vec2::new(300.0, 0.0);
 
         let result =
@@ -375,7 +788,7 @@ mod tests {
     fn test_waypoint_narrow_frontier() {
         let exploration = rect(0.0, -7.0, 200.0, 7.0);
         let playable_area = rect(-200.0, -7.0, 0.0, 7.0);
-        let known_blockers = MultiPolygon::new(vec![]);
+        let known_blockers = SafeMultiPolygon::empty();
         let target = Vec2::new(300.0, 0.0);
 
         let result =
@@ -391,12 +804,12 @@ mod tests {
     fn test_waypoint_picks_closest_frontier() {
         // Two unexplored strips both fronting x=0 from the playable area.
         // Upper strip (y=20..50) is closer to the target at (300, 30) than lower (y=-50..-20).
-        let exploration = MultiPolygon::new(vec![
+        let exploration = SafeMultiPolygon::from_geo(MultiPolygon::new(vec![
             geo::Rect::new((0.0_f32, -50.0), (200.0_f32, -20.0)).to_polygon(),
             geo::Rect::new((0.0_f32, 20.0), (200.0_f32, 50.0)).to_polygon(),
-        ]);
+        ]));
         let playable_area = rect(-200.0, -50.0, 0.0, 50.0);
-        let known_blockers = MultiPolygon::new(vec![]);
+        let known_blockers = SafeMultiPolygon::empty();
         let target = Vec2::new(300.0, 30.0);
 
         let result =

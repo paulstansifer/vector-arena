@@ -53,6 +53,7 @@ use crate::{
     status_effect::{StatusEffects, apply_confusion_to_velocity, tick_status_effects},
     time_scale::manage_time_scale,
     ui::{Boredom, MessageLog, UiPlugin, enable_ui_input_absorption},
+    util::safegeo::SafeMultiPolygon,
     visuals::indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
 };
 
@@ -207,7 +208,7 @@ pub fn spawn_game_world(
         crate::visuals::torpor_particles::TORPOR_ZONE_COLOR,
     )));
     for zone in &terrain_geometry.torpor_zones {
-        let mesh = geometry_to_mesh(&geo::MultiPolygon::new(vec![zone.clone()]));
+        let mesh = geometry_to_mesh(&SafeMultiPolygon::from(zone.clone()));
         // Bounding box of the zone, for seeding ambient particles. For today's
         // rectangular zones this matches the zone exactly.
         let bbox = zone.bounding_rect().expect("torpor zone is non-empty");

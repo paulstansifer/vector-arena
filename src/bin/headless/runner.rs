@@ -47,6 +47,7 @@ use vector_arena::{
     nav::{DungeonNavMesh, playable_area_to_nav_mesh},
     player::{MoveTarget, Player},
     ui::{BOTTOM_PANEL_HEIGHT, TOP_PANEL_HEIGHT},
+    util::safegeo::SafeMultiPolygon,
     visuals::torpor_particles::TorporParticlesPlugin,
 };
 
@@ -412,8 +413,12 @@ fn cmd_level_blank(app: &mut App, log: &mut Log) {
         coord! { x: -rw, y: -rh },
     ]);
 
-    let solid_rock = geo::MultiPolygon::new(vec![Polygon::new(world_ring, vec![room_ring_hole])]);
-    let playable_area = geo::MultiPolygon::new(vec![Polygon::new(room_ring_open, vec![])]);
+    let solid_rock =
+        SafeMultiPolygon::from(geo::MultiPolygon::new(vec![Polygon::new(world_ring, vec![
+            room_ring_hole,
+        ])]));
+    let playable_area =
+        SafeMultiPolygon::from(geo::MultiPolygon::new(vec![Polygon::new(room_ring_open, vec![])]));
 
     let terrain_mesh = geometry_to_mesh(&solid_rock);
     let terrain_collider = geometry_to_collider(&solid_rock);

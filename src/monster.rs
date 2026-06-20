@@ -2,10 +2,11 @@
 // `MonsterState` drives behavior each frame: sleeping monsters ignore the player,
 // wandering ones path to a random nearby location at half speed, seeking ones chase
 // the player, tired ones rest briefly, and distracted ones path to a fixed point.
+use crate::util::safegeo::SafeMultiPolygon;
 use avian2d::prelude::LinearVelocity;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::{Contains, Intersects, MultiPolygon};
+use geo::{Contains, Intersects};
 
 use bevy_egui::egui;
 
@@ -93,7 +94,7 @@ fn tick_state(
     dist_to_player: f32,
     should_seek: bool,
     blind_strength: f32,
-    playable_area: &MultiPolygon<f32>,
+    playable_area: &SafeMultiPolygon,
     dt: f32,
     rng: &mut impl rand::Rng,
 ) {
@@ -304,7 +305,7 @@ pub fn update_monster_ai(
 /// Pick a navigable wandering destination (or sleep if rejection sampling fails)
 fn wander_somewhere(
     origin: Vec2,
-    playable_area: &MultiPolygon<f32>,
+    playable_area: &SafeMultiPolygon,
     rng: &mut impl rand::Rng,
 ) -> MonsterState {
     match random_near(playable_area, origin, 50.0, MONSTER_WANDER_RANGE, rng) {

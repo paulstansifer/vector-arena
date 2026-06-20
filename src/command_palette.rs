@@ -12,6 +12,7 @@ use crate::{
     monster::{Monster, MonsterState, Stats},
     player::{ExplorationGoal, MoveTarget, Player},
     sprite::SpriteEguiTextures,
+    util::safegeo::SafeMultiPolygon,
 };
 
 pub enum PaletteCommandKind {
@@ -88,7 +89,7 @@ impl PaletteRegistry {
         letter_map: &LetterMap,
         goto_state: &GotoState,
         monster_query: &Query<(Entity, &Stats, &MonsterState, &Transform), With<Monster>>,
-        current_fov: Option<&geo::MultiPolygon<f32>>,
+        current_fov: Option<&SafeMultiPolygon>,
         identities: &ItemIdentities,
     ) -> Vec<PaletteEntry> {
         let mut entries = Vec::new();
@@ -258,7 +259,7 @@ pub fn targeting_sub_completions(
     goto_state: &GotoState,
     letter_map: &LetterMap,
     monster_query: &Query<(Entity, &Stats, &MonsterState, &Transform), With<Monster>>,
-    current_fov: Option<&geo::MultiPolygon<f32>>,
+    current_fov: Option<&SafeMultiPolygon>,
 ) -> Vec<PaletteEntry> {
     use geo::Contains;
     let in_fov = |pos: Vec2| -> bool {

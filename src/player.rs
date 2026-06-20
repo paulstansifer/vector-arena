@@ -7,7 +7,7 @@ use std::time::Duration;
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::{BooleanOps, Contains};
+use geo::Contains;
 
 use bevy::input::keyboard::Key;
 

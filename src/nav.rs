@@ -6,14 +6,12 @@
 use crate::{
     dungeon::terrain::{TORPOR_FACTOR, TorporMultiplier},
     status_effect::StatusEffects,
+    util::safegeo::{SafeMultiPolygon, SafePolygon},
 };
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::{
-    BooleanOps, MultiPolygon, Polygon,
-    algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay},
-};
+use geo::algorithm::triangulate_delaunay::{DelaunayTriangulationConfig, TriangulateDelaunay};
 use std::{collections::HashMap, sync::Arc};
 
 pub const STEERING_GAIN: f32 = 40.0;
@@ -43,12 +41,11 @@ pub struct DungeonNavMesh(pub Handle<NavMesh2d>);
 /// Torpor zones are triangulated as a separate pass (type index 1) so that zone
 /// boundaries align exactly with triangle edges — no triangle straddles the boundary.
 pub fn playable_area_to_nav_mesh(
-    playable_area: &MultiPolygon<f32>,
-    torpor_zones: &[Polygon<f32>],
+    playable_area: &SafeMultiPolygon,
+    torpor_zones: &[SafePolygon],
 ) -> Arc<ValidNavigationMesh2d> {
     // bevy_landmass::nav_mesh::bevy_mesh_to_landmass_nav_mesh might simplify this somewhat, but it doesn't seem respect agent radius, so I guess we still need to handle that ourselves.
     use geo::{
-        Buffer,
         algorithm::buffer::BufferStyle,
         buffer::{LineCap, LineJoin},
     };
@@ -70,7 +67,7 @@ pub fn playable_area_to_nav_mesh(
         ((x * 1000.0).round() as i64, (y * 1000.0).round() as i64)
     };
 
-    let mut add_region = |region: &MultiPolygon<f32>, type_idx: usize| {
+    let mut add_region = |region: &SafeMultiPolygon, type_idx: usize| {
         for polygon in region.iter() {
             let Ok(triangulation) =
                 polygon.constrained_triangulation(DelaunayTriangulationConfig::default())
@@ -107,7 +104,8 @@ pub fn playable_area_to_nav_mesh(
         let expand_style = BufferStyle::new(crate::AGENT_RADIUS)
             .line_cap(LineCap::Square)
             .line_join(LineJoin::Bevel);
-        let torpor_mp = MultiPolygon::new(torpor_zones.to_vec()).buffer_with_style(expand_style);
+        let torpor_mp = SafeMultiPolygon::from_polygons(torpor_zones.iter().cloned())
+            .buffer_with_style(expand_style);
         // Two-pass triangulation keeps zone boundaries as exact triangle edges,
         // so no triangle straddles the torpor/non-torpor boundary.
         add_region(&eroded.difference(&torpor_mp), 0);
@@ -116,7 +114,6 @@ pub fn playable_area_to_nav_mesh(
 
     let nav_mesh = NavigationMesh2d { vertices, polygons, polygon_type_indices, height_mesh: None };
 
-    // TODO: validate() sometimes fails (try destroying a lot of terrain)
     Arc::new(nav_mesh.validate().expect("playable area nav mesh should be valid"))
 }
 

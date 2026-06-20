@@ -4,7 +4,6 @@
 // the read handler itself stays small.
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::{BooleanOps, Buffer, Simplify};
 
 use crate::{
     AGENT_RADIUS, GameState,

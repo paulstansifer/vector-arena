@@ -440,14 +440,14 @@ fn monster_stopped_by_wall() {
 #[test]
 fn body_stops_at_dungeon_terrain_wall() {
     use geo::{BooleanOps, MultiPolygon, Rect};
+    use vector_arena::util::safegeo::SafeMultiPolygon;
 
     // Build solid_rock exactly as level_generation does: full bounds minus playable area.
-    let earth: geo::Polygon<f32> =
-        Rect::new((-100.0_f32, -100.0_f32), (100.0_f32, 100.0_f32)).to_polygon();
-    let room: MultiPolygon<f32> = MultiPolygon::new(vec![
+    let earth = Rect::new((-100.0_f32, -100.0_f32), (100.0_f32, 100.0_f32)).to_polygon();
+    let room = MultiPolygon::new(vec![
         Rect::new((-60.0_f32, -60.0_f32), (60.0_f32, 60.0_f32)).to_polygon(),
     ]);
-    let solid_rock: MultiPolygon<f32> = earth.difference(&room);
+    let solid_rock = SafeMultiPolygon::from_geo(earth.difference(&room));
 
     let mut app = physics_app(Vec2::ZERO, /* ropes */ false);
 
