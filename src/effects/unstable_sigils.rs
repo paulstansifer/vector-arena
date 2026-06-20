@@ -16,7 +16,7 @@ use bevy::{
     prelude::*,
 };
 use bevy_landmass::prelude::NavMesh2d;
-use geo::{Coord, Intersects, MultiPolygon, Rect};
+use geo::{Coord, Intersects, Rect};
 use rand::Rng;
 
 use crate::{

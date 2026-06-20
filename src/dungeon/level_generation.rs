@@ -609,8 +609,13 @@ fn room_entry_point(room: &Rect<f32>, connection: ConnectionPoint) -> (f32, f32)
 
 fn random_room_variant(rng: &mut impl Rng) -> RoomVariant {
     if rng.gen_bool(SPECIAL_ROOM_PROB as f64) {
+        match rng.gen_range(0..1) {
+            0 => RoomVariant::Colonnade,
+            2 => RoomVariant::Torpor,
+            _ => unreachable!(),
+        }
         // TODO: oval rooms cause big performance problems. Investigate.
-        if rng.gen_bool(0.5) { RoomVariant::Colonnade } else { RoomVariant::Torpor }
+        // if rng.gen_bool(0.5) { RoomVariant::Colonnade } else { RoomVariant::Torpor }
     } else {
         RoomVariant::Normal
     }

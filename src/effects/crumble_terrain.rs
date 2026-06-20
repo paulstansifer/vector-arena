@@ -16,10 +16,7 @@ use crate::{
 use avian2d::{math::PI, prelude::*};
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::{
-    BooleanOps, BoundingRect, Buffer, Centroid, Coord, Intersects, LineString, MultiPolygon,
-    Polygon, Rect, Translate,
-};
+use geo::{BoundingRect, Centroid, Coord, Intersects, LineString, Polygon, Rect, Translate};
 use rand::Rng;
 
 /// Radius (world units) of the circle subtracted from solid rock per right-click.
