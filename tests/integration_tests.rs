@@ -1,3 +1,4 @@
+#[path = "test_lib/physics.rs"]
 mod test_lib;
 use test_lib::{loc, physics_app, tick};
 

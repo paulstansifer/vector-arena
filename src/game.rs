@@ -30,6 +30,9 @@ use crate::{
         },
         rope,
         scroll::{on_acquirement, on_instability, on_magic_mapping, on_summon_monster},
+        unstable_sigils::{
+            animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions,
+        },
     },
     fov::{self, MOVABLE_Z, OpaqueVertices, TERRAIN_Z},
     goto,
@@ -40,7 +43,6 @@ use crate::{
     },
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
-    effects::unstable_sigils::{animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions},
     player::{
         Player, advance_exploration, directional_move_system, execute_descend_command,
         execute_stop_command, move_player, register_player_commands, rotate_player_to_velocity,

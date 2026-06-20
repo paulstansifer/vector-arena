@@ -117,11 +117,18 @@ cargo test                    # run all tests
 cargo test start_complete_game  # full-game smoke test only
 ```
 
-Integration tests live in `tests/`. They share helpers from `tests/test_lib.rs`:
+Integration tests live in `tests/`. Shared helpers live under `tests/test_lib/` (a subdirectory, not a top-level `.rs` file, so Cargo does not compile them as standalone test binaries). Each test file imports only the helper file it needs via `#[path]`, so unused helpers from other files don't produce dead-code warnings:
+
+| Helper file           | Imported by                       | Provides                             |
+| --------------------- | --------------------------------- | ------------------------------------ |
+| `test_lib/physics.rs` | `integration_tests`, `rope_tests` | `physics_app`, `tick`, `loc`         |
+| `test_lib/game.rs`    | `game_tests`                      | `headless_game_app`, `tick`          |
+| `test_lib/preview.rs` | `fov_performance`                 | `PreviewWindow`, `Frame`, `Layer`, … |
 
 - **`physics_app(gravity, ropes)`** — minimal app with Avian2D physics, no window.
 - **`headless_game_app(seed)`** — full game app with no window/Winit; drives the game via `app.update()` directly. Used by the startup smoke test in `tests/game_tests.rs`.
 - **`tick(app)`** — advance one 60 Hz frame (advances `Time<Virtual>` then calls `app.update()`).
+- **`loc(app, entity)`** — read an entity's world-space `Transform` translation.
 
 `GamePlugin { headless: true }` is used in test contexts to skip egui-dependent plugins while still initialising all gameplay systems.
 

@@ -1,5 +1,5 @@
-mod test_lib;
-use test_lib::preview;
+#[path = "test_lib/preview.rs"]
+mod preview;
 
 use bevy::prelude::*;
 use geo::{CoordsIter, MultiPolygon};

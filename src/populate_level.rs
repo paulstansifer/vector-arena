@@ -10,11 +10,10 @@ use rand::prelude::*;
 use crate::{
     AGENT_RADIUS, GameLayer, GameState, Staircase, StaircaseFogCopy,
     dungeon::terrain::{TorporMultiplier, random_in_playable_area},
-    effects::projectile::MonsterShootTimer,
+    effects::{projectile::MonsterShootTimer, unstable_sigils::spawn_unstable_sigil},
     fov,
     item::{Inventory, Item, ItemKind, item_name, random_item_kind},
     monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterDrop, MonsterState, Stats},
-    effects::unstable_sigils::spawn_unstable_sigil,
     player::{MoveTarget, PLAYER_SPEED, Player},
     sprite::{SvgSprite, sprite_spec},
     status_effect::StatusEffects,

@@ -6,7 +6,7 @@
 // For interactive scripted testing, use the headless binary instead:
 //   cargo run --bin headless -- 'wait 1s; snap /tmp/foo.png'
 
-#[path = "test_lib.rs"]
+#[path = "test_lib/game.rs"]
 mod test_lib;
 use test_lib::{headless_game_app, tick};
 
