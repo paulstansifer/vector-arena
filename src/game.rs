@@ -1,6 +1,9 @@
 // Core game plugin: all gameplay systems and startup logic.
 // Separated from main.rs so integration tests can build the game without a window.
-use avian2d::prelude::*;
+use avian2d::{
+    diagnostics::ui::{PhysicsDiagnosticsUiPlugin, PhysicsDiagnosticsUiSettings},
+    prelude::*,
+};
 use bevy::prelude::*;
 use bevy_egui::{EguiPrimaryContextPass, input::egui_wants_any_pointer_input};
 use bevy_landmass::{NavMeshHandle, prelude::*};
@@ -313,7 +316,12 @@ impl Plugin for GamePlugin {
             avian2d::PhysicsPlugins::default(),
             Landmass2dPlugin::default(),
             rope::RopePlugin,
+            PhysicsDiagnosticsUiPlugin,
         ));
+        app.insert_resource(PhysicsDiagnosticsUiSettings {
+            enabled: false,
+            show_average_times: true,
+        });
 
         if self.headless {
             // In headless mode, skip egui-dependent plugins and stub their resources.

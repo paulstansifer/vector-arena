@@ -7,9 +7,11 @@ use rand::Rng;
 
 use geo::Contains;
 
+use avian2d::{diagnostics::ui::PhysicsDiagnosticsUiSettings, prelude::RigidBody};
+
 use crate::{
     DungeonDepth, GameState,
-    fov::CurrentFovState,
+    fov::{CurrentFovState, ExplorationState},
     item::{
         Inventory, ItemIdentities, ItemKind, WAND_COOLDOWN_SECS, WandCooldowns, item_display_name,
     },
@@ -80,6 +82,20 @@ impl MessageLog {
 struct UiState {
     messages_expanded: bool,
     menu_open: bool,
+    perf_overlay: bool,
+}
+
+struct PerfStats {
+    fov_vertices: usize,
+    exp_vertices: usize,
+    phys_objects: usize,
+}
+
+fn count_mp_vertices(mp: &crate::util::safegeo::SafeMultiPolygon) -> usize {
+    mp.iter()
+        .flat_map(|p| std::iter::once(p.exterior()).chain(p.interiors()))
+        .map(|ls| ls.coords().count())
+        .sum()
 }
 
 const BOREDOM_MAX: f32 = 60.0;
@@ -144,7 +160,19 @@ impl Plugin for UiPlugin {
             .add_systems(EguiPrimaryContextPass, crate::monster::render_monster_markers)
             .add_systems(Update, crate::monster::refresh_monster_tooltips)
             .add_systems(Update, show_world_entity_tooltip)
-            .add_systems(Update, tick_boredom.run_if(in_state(GameState::InLevel)));
+            .add_systems(Update, tick_boredom.run_if(in_state(GameState::InLevel)))
+            .add_systems(Update, toggle_perf_overlay);
+    }
+}
+
+fn toggle_perf_overlay(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut ui_state: ResMut<UiState>,
+    mut physics_diag: ResMut<PhysicsDiagnosticsUiSettings>,
+) {
+    if keys.just_pressed(KeyCode::KeyP) && keys.pressed(KeyCode::ControlLeft) {
+        ui_state.perf_overlay = !ui_state.perf_overlay;
+        physics_diag.enabled = ui_state.perf_overlay;
     }
 }
 
@@ -164,6 +192,9 @@ fn ui_system(
     identities: Res<ItemIdentities>,
     wand_cooldowns: Res<WandCooldowns>,
     boredom: Res<Boredom>,
+    current_fov: Option<Res<CurrentFovState>>,
+    exploration_state: Option<Res<ExplorationState>>,
+    rigid_body_query: Query<(), With<RigidBody>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -177,7 +208,17 @@ fn ui_system(
         return Ok(());
     };
 
-    if render_message_bar(ctx, &message_log, ui_state.messages_expanded) {
+    let perf_stats = if ui_state.perf_overlay {
+        Some(PerfStats {
+            fov_vertices: current_fov.as_ref().map(|f| count_mp_vertices(&f.0)).unwrap_or(0),
+            exp_vertices: exploration_state.as_ref().map(|e| count_mp_vertices(&e.0)).unwrap_or(0),
+            phys_objects: rigid_body_query.iter().count(),
+        })
+    } else {
+        None
+    };
+
+    if render_message_bar(ctx, &message_log, ui_state.messages_expanded, perf_stats.as_ref()) {
         ui_state.messages_expanded = !ui_state.messages_expanded;
     }
 
@@ -226,38 +267,66 @@ fn ui_system(
 }
 
 /// Top bar: latest message with optional expanded log. Returns true if the row was clicked.
-fn render_message_bar(ctx: &egui::Context, log: &MessageLog, expanded: bool) -> bool {
+/// When `perf` is Some, the top bar shows performance stats instead of the message log.
+fn render_message_bar(
+    ctx: &egui::Context,
+    log: &MessageLog,
+    expanded: bool,
+    perf: Option<&PerfStats>,
+) -> bool {
     let panel = egui::TopBottomPanel::top("message_bar");
     // Lock the panel to an exact height when collapsed so the level edge aligns precisely.
     // When expanded, let the panel grow naturally to show the full log.
     let panel = if expanded { panel } else { panel.exact_height(TOP_PANEL_HEIGHT) };
+    // In perf mode suppress the panel's own background so we can paint only the right half.
+    let panel_fill = ctx.style().visuals.panel_fill;
+    let panel = if perf.is_some() { panel.frame(egui::Frame::new()) } else { panel };
     panel
         .show(ctx, |ui| {
-            let latest = log.iter().next_back().unwrap_or("—");
-
             let row_height = ui.spacing().interact_size.y;
-            let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), row_height),
-                egui::Sense::click(),
-            );
-            ui.painter().text(
-                rect.left_center() + egui::vec2(6.0, 0.0),
-                egui::Align2::LEFT_CENTER,
-                latest,
-                egui::FontId::default(),
-                ui.visuals().text_color(),
-            );
+            let full_width = ui.available_width();
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(full_width, row_height), egui::Sense::click());
 
-            if expanded {
-                egui::ScrollArea::vertical().max_height(200.0).stick_to_bottom(true).show(
-                    ui,
-                    |ui| {
-                        ui.set_min_width(ui.available_width());
-                        for msg in log.iter() {
-                            ui.label(msg);
-                        }
-                    },
+            if let Some(p) = perf {
+                // Paint background only on the right half; left half stays transparent.
+                let text_rect = egui::Rect::from_min_size(
+                    egui::pos2(rect.min.x + full_width / 2.0, rect.min.y),
+                    egui::vec2(full_width / 2.0, rect.height()),
                 );
+                ui.painter().rect_filled(text_rect, 0.0, panel_fill);
+                let text = format!(
+                    "fov v:{}  exp v:{}  phys o:{}",
+                    p.fov_vertices, p.exp_vertices, p.phys_objects
+                );
+                ui.painter().text(
+                    text_rect.left_center() + egui::vec2(6.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    &text,
+                    egui::FontId::default(),
+                    ui.visuals().text_color(),
+                );
+            } else {
+                let latest = log.iter().next_back().unwrap_or("—");
+                ui.painter().text(
+                    rect.left_center() + egui::vec2(6.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    latest,
+                    egui::FontId::default(),
+                    ui.visuals().text_color(),
+                );
+
+                if expanded {
+                    egui::ScrollArea::vertical().max_height(200.0).stick_to_bottom(true).show(
+                        ui,
+                        |ui| {
+                            ui.set_min_width(ui.available_width());
+                            for msg in log.iter() {
+                                ui.label(msg);
+                            }
+                        },
+                    );
+                }
             }
 
             response.clicked()

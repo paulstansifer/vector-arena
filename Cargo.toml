@@ -16,7 +16,7 @@ bevy = { version = "0.18.1", default-features = false, features = [
     "debug",
     "bevy_dev_tools",
 ] }
-avian2d = "0.5"
+avian2d = { version = "0.5", features = ["bevy_diagnostic", "diagnostic_ui"] }
 bevy_mesh = "0.18"
 geo = "0.32"
 rand = "0.8"
