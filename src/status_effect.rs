@@ -84,6 +84,7 @@ impl StatusEffects {
             .iter()
             .filter_map(|e| {
                 if let StatusEffect::Confused { wander_dir } = e.kind {
+                    let s = e.effective_strength();
                     if s > 0.0 { Some((s, wander_dir)) } else { None }
                 } else {
                     None

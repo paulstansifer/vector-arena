@@ -24,7 +24,7 @@ pub const MONSTER_MAX_HP: f32 = 20.0;
 pub const MONSTER_SEEK_RANGE: f32 = 300.0;
 const MONSTER_WANDER_SPEED: f32 = MONSTER_SPEED * 0.5;
 const MONSTER_WANDER_RANGE: f32 = 200.0;
-const WANDER_ARRIVE_DIST: f32 = 30.0;
+pub const WANDER_ARRIVE_DIST: f32 = 100.0;
 const FOCUS_DIST: f32 = 250.0;
 /// Don't get tired if the player is this close.
 
@@ -43,6 +43,11 @@ pub struct Monster;
 /// The AI system reads and removes this each frame to trigger a Seeking transition.
 #[derive(Component)]
 pub struct AlertedByMissile;
+
+/// Inserted when a monster fires a magic missile. Keeps the monster stationary until
+/// the timer (virtual seconds) reaches zero.
+#[derive(Component)]
+pub struct MonsterShootFreeze(pub f32);
 
 /// Item this monster will drop when killed. If absent, the monster drops nothing.
 #[derive(Component)]
@@ -200,6 +205,8 @@ pub fn update_monster_ai(
             &mut AgentSettings,
             Option<&AlertedByMissile>,
             Option<&StatusEffects>,
+            Option<&mut MonsterShootFreeze>,
+            &mut LinearVelocity,
         ),
         With<Monster>,
     >,
@@ -217,8 +224,17 @@ pub fn update_monster_ai(
     let solid_rock = &dungeon_state.solid_rock;
     let dt = time.delta_secs();
 
-    for (entity, transform, mut state, mut target, mut settings, alerted, effects) in
-        monster_query.iter_mut()
+    for (
+        entity,
+        transform,
+        mut state,
+        mut target,
+        mut settings,
+        alerted,
+        effects,
+        maybe_freeze,
+        mut vel,
+    ) in monster_query.iter_mut()
     {
         let monster_pos = transform.translation.truncate();
 
@@ -272,6 +288,15 @@ pub fn update_monster_ai(
                 MonsterState::Wandering { .. } => 'w',
             };
             commands.entity(entity).insert(StateIndicator::new(ch, 1.5));
+        }
+
+        if let Some(mut freeze) = maybe_freeze {
+            freeze.0 -= dt;
+            settings.desired_speed = 0.0;
+            vel.0 = Vec2::ZERO;
+            if freeze.0 <= 0.0 {
+                commands.entity(entity).remove::<MonsterShootFreeze>();
+            }
         }
     }
 }

@@ -16,7 +16,9 @@ use crate::{
     fov,
     indicator::HitFlash,
     item::{Item, item_name},
-    monster::{AlertedByMissile, Monster, MonsterDrop, Stats},
+    monster::{
+        AlertedByMissile, Monster, MonsterDrop, MonsterShootFreeze, Stats, WANDER_ARRIVE_DIST,
+    },
     player::Player,
     sprite::{SvgSprite, sprite_spec},
     status_effect::StatusEffects,
@@ -27,7 +29,7 @@ pub const MISSILE_KEY: &str = "z";
 
 pub const MISSILE_SPEED: f32 = 3500.0;
 pub const MISSILE_MAX_DISTANCE: f32 = 1000.0;
-pub const MONSTER_FIRE_RANGE: f32 = 100.0;
+pub const MONSTER_FIRE_RANGE: f32 = 200.0;
 pub const KNOCKBACK_SPEED: f32 = 600.0;
 const KNOCKBACK_COOLDOWN: f32 = 0.1; // virtual seconds; prevents double-hits per pass
 const MISSILE_DAMAGE: f32 = 10.0;
@@ -218,7 +220,7 @@ pub fn monster_fire_missiles(
     time: Res<Time>,
     player_query: Single<&Transform, With<Player>>,
     mut monster_query: Query<
-        (&Transform, &mut MonsterShootTimer, Option<&StatusEffects>),
+        (Entity, &Transform, &mut MonsterShootTimer, Option<&StatusEffects>),
         With<Monster>,
     >,
     mut commands: Commands,
@@ -226,21 +228,28 @@ pub fn monster_fire_missiles(
 ) {
     let player_pos = player_query.translation.truncate();
 
-    for (transform, mut timer, effects) in monster_query.iter_mut() {
+    for (entity, transform, mut timer, effects) in monster_query.iter_mut() {
         timer.0 -= time.delta_secs();
         if timer.0 > 0.0 {
             continue;
         }
 
-        *timer = MonsterShootTimer::new();
-
         let monster_pos = transform.translation.truncate();
-        if monster_pos.distance(player_pos) > MONSTER_FIRE_RANGE {
+        let mut rng = rand::thread_rng();
+
+        // Fire twice as often when close to the player.
+        let dist = monster_pos.distance(player_pos);
+        timer.0 = if dist <= WANDER_ARRIVE_DIST * 1.1 {
+            rng.gen_range(0.5..1.0_f32)
+        } else {
+            rng.gen_range(1.0..2.0_f32)
+        };
+
+        if dist > MONSTER_FIRE_RANGE {
             continue;
         }
 
         let base_dir = (player_pos - monster_pos).normalize_or_zero();
-        let mut rng = rand::thread_rng();
         let direction = confuse_direction(base_dir, effects, &mut rng);
         let damage_multiplier = effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
         spawn_missile(
@@ -251,6 +260,7 @@ pub fn monster_fire_missiles(
             false,
             damage_multiplier,
         );
+        commands.entity(entity).try_insert(MonsterShootFreeze(0.5));
     }
 }
 
