@@ -121,6 +121,22 @@ impl MagicMissile {
     }
 }
 
+/// Randomly rotates `direction` by up to ±(strength × 45°) with probability = strength.
+fn confuse_direction(
+    direction: Vec2,
+    effects: Option<&StatusEffects>,
+    rng: &mut impl rand::Rng,
+) -> Vec2 {
+    let strength = effects.map(|e| e.confusion_strength()).unwrap_or(0.0);
+    if strength <= 0.0 || rng.gen_range(0.0_f32..1.0) >= strength {
+        return direction;
+    }
+    let max_angle = strength * std::f32::consts::FRAC_PI_4;
+    let offset = rng.gen_range(-max_angle..max_angle);
+    let (sin, cos) = offset.sin_cos();
+    Vec2::new(direction.x * cos - direction.y * sin, direction.x * sin + direction.y * cos)
+}
+
 fn spawn_missile(
     commands: &mut Commands,
     missile_assets: &MissileAssets,
@@ -187,11 +203,13 @@ pub fn execute_missile_command(
         return;
     }
     let player_pos = player_tf.translation.truncate();
-    let direction = (target_pos - player_pos).normalize_or_zero();
-    if direction == Vec2::ZERO {
+    let base_dir = (target_pos - player_pos).normalize_or_zero();
+    if base_dir == Vec2::ZERO {
         return;
     }
     stats.mana -= MISSILE_MANA_COST;
+    let mut rng = rand::thread_rng();
+    let direction = confuse_direction(base_dir, player_effects, &mut rng);
     let damage_multiplier = player_effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
     spawn_missile(&mut commands, &missile_assets, player_pos, direction, true, damage_multiplier);
 }
@@ -221,7 +239,9 @@ pub fn monster_fire_missiles(
             continue;
         }
 
-        let direction = (player_pos - monster_pos).normalize_or_zero();
+        let base_dir = (player_pos - monster_pos).normalize_or_zero();
+        let mut rng = rand::thread_rng();
+        let direction = confuse_direction(base_dir, effects, &mut rng);
         let damage_multiplier = effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
         spawn_missile(
             &mut commands,

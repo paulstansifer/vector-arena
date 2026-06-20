@@ -59,7 +59,8 @@ pub struct ActiveStatusEffect {
 
 impl ActiveStatusEffect {
     pub fn new(kind: StatusEffect, duration: f32) -> Self {
-        Self { kind, base_strength: 1.0, remaining: duration }
+        let base_strength = if matches!(kind, StatusEffect::Confused { .. }) { 0.5 } else { 1.0 };
+        Self { kind, base_strength, remaining: duration }
     }
 
     /// Strength in [0, 1]. Ramps from 1 → 0 over the last RAMP_DOWN_SECS.
@@ -83,8 +84,6 @@ impl StatusEffects {
             .iter()
             .filter_map(|e| {
                 if let StatusEffect::Confused { wander_dir } = e.kind {
-                    // HACK: make confusedness top out at 0.6:
-                    let s = e.effective_strength() * 0.6;
                     if s > 0.0 { Some((s, wander_dir)) } else { None }
                 } else {
                     None
@@ -123,6 +122,22 @@ impl StatusEffects {
                 acc
             }
         })
+    }
+
+    /// Returns the effective strength of the strongest active Confused effect, if any.
+    /// (No movement cap — used for missile mis-aim.)
+    pub fn confusion_strength(&self) -> f32 {
+        self.0
+            .iter()
+            .filter_map(|e| {
+                if matches!(e.kind, StatusEffect::Confused { .. }) {
+                    let s = e.effective_strength();
+                    if s > 0.0 { Some(s) } else { None }
+                } else {
+                    None
+                }
+            })
+            .fold(0.0_f32, f32::max)
     }
 
     pub fn displacing_strength(&self) -> f32 {

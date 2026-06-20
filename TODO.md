@@ -11,6 +11,7 @@
   * The test setup is causing a lot of unusedness warnings visible in the editor, but not `cargo check`.
   * "g h" is treated the same as pressing "h", instead of going to that spot.
   * Add a "vortex" dungeon feature (and a scroll that creates one).
+    * Tried this. Meh? Stashed it.
   * Add more rooms:
     * Octagonal rooms
     * Rooms with a walled off portion in the middle, always containing a monster and an item.
