@@ -16,8 +16,9 @@ use crate::{
     dungeon::{
         level_generation::TerrainGeometry,
         terrain::{
-            DungeonCollider, DungeonState, DungeonVisuals, PointsOfInterest, TerrainMarker,
-            TorporZoneParticles, geometry_to_collider, geometry_to_mesh, sync_dungeon_to_entities,
+            DungeonCollider, DungeonState, DungeonVisuals, GlassWallsMarker, PointsOfInterest,
+            TerrainMarker, TorporZoneParticles, geometry_to_collider, geometry_to_mesh,
+            glass_wall_border, sync_dungeon_to_entities, sync_glass_walls_to_entities,
             update_torpor_multipliers,
         },
     },
@@ -175,9 +176,14 @@ pub fn spawn_game_world(
     let terrain_mesh_handle = meshes.add(terrain_mesh);
     let nav_mesh_handle = nav_meshes.add(NavMesh2d { nav_mesh: valid_nav_mesh });
 
+    let glass_border = glass_wall_border(&terrain_geometry.glass_walls);
+    let glass_border_mesh_handle = meshes.add(geometry_to_mesh(&glass_border));
+    let glass_collider = geometry_to_collider(&terrain_geometry.glass_walls);
+
     let dungeon_state = DungeonState {
         solid_rock: terrain_geometry.solid_rock.clone(),
         playable_area: terrain_geometry.playable_area.clone(),
+        glass_walls: terrain_geometry.glass_walls.clone(),
         torpor_zones: terrain_geometry.torpor_zones.clone(),
     };
     let dungeon_visuals = DungeonVisuals(terrain_mesh_handle.clone());
@@ -206,6 +212,22 @@ pub fn spawn_game_world(
             ]),
         ))
         .id();
+
+    commands.spawn((
+        DespawnOnExit(GameState::InLevel),
+        GlassWallsMarker,
+        Mesh2d(glass_border_mesh_handle),
+        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgba(0.5, 0.85, 0.9, 1.0)))),
+        Transform::from_translation(Vec3::new(0.0, 0.0, TERRAIN_Z + 0.1)),
+        glass_collider,
+        RigidBody::Static,
+        CollisionLayers::new(GameLayer::Wall, [
+            GameLayer::Wall,
+            GameLayer::Dynamic,
+            GameLayer::Missile,
+            GameLayer::Rope,
+        ]),
+    ));
 
     let torpor_material = materials.add(ColorMaterial::from(Color::Srgba(
         crate::visuals::torpor_particles::TORPOR_ZONE_COLOR,
@@ -417,6 +439,7 @@ impl Plugin for GamePlugin {
                 },
             )
             .add_systems(Update, sync_dungeon_to_entities)
+            .add_systems(Update, sync_glass_walls_to_entities)
             .add_systems(Update, execute_missile_command)
             .add_systems(Update, monster_fire_missiles)
             .add_systems(Update, update_missiles)

@@ -105,7 +105,7 @@ pub fn populate(
         ));
     }
 
-    let sigil_count = rng.gen_range(1..=5);
+    let sigil_count = rng.gen_range(0..=3).min(rng.gen_range(1..=3));
     for _ in 0..sigil_count {
         let Some(pt) = random_in_playable_area(playable_area, rng) else { continue };
         spawn_unstable_sigil(commands, meshes, materials, pt, rng);

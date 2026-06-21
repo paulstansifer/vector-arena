@@ -60,6 +60,9 @@ pub fn geometry_to_collider(geometry: &SafeMultiPolygon) -> Collider {
         }
     }
 
+    if shapes.is_empty() {
+        return Collider::circle(0.0);
+    }
     Collider::compound(shapes)
 }
 
@@ -89,6 +92,7 @@ impl TorporMultiplier {
 pub struct DungeonState {
     pub solid_rock: SafeMultiPolygon,
     pub playable_area: SafeMultiPolygon,
+    pub glass_walls: SafeMultiPolygon,
     pub torpor_zones: Vec<SafePolygon>,
 }
 
@@ -111,6 +115,9 @@ pub struct DungeonCollider(pub Collider);
 
 #[derive(Resource)]
 pub struct DungeonVisuals(pub Handle<Mesh>);
+
+#[derive(Component)]
+pub struct GlassWallsMarker;
 
 #[derive(Resource)]
 pub struct PointsOfInterest {
@@ -176,4 +183,26 @@ pub fn sync_dungeon_to_entities(
     {
         *collider = dungeon_collider.0.clone();
     }
+}
+
+/// Bevy system to recompute the glass walls mesh and collider from `DungeonState` when it changes.
+pub fn sync_glass_walls_to_entities(
+    dungeon_state: Res<DungeonState>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut query: Query<(&mut Mesh2d, &mut Collider), With<GlassWallsMarker>>,
+) {
+    if !dungeon_state.is_changed() {
+        return;
+    }
+    let Ok((mut mesh, mut collider)) = query.single_mut() else { return };
+    let border = glass_wall_border(&dungeon_state.glass_walls);
+    mesh.0 = meshes.add(geometry_to_mesh(&border));
+    *collider = geometry_to_collider(&dungeon_state.glass_walls);
+}
+
+/// Computes the 2-unit inner-border ring of the glass walls polygon for rendering.
+pub fn glass_wall_border(glass_walls: &SafeMultiPolygon) -> SafeMultiPolygon {
+    glass_walls.difference(&glass_walls.buffer_with_style(
+        BufferStyle::new(-2.0).line_cap(LineCap::Square).line_join(LineJoin::Bevel),
+    ))
 }

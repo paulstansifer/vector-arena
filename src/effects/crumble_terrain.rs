@@ -16,7 +16,11 @@ use crate::{
 use avian2d::{math::PI, prelude::*};
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::{BoundingRect, Centroid, Coord, Intersects, LineString, Polygon, Rect, Translate};
+use geo::{
+    BoundingRect, Centroid, Coord, Intersects, LineString, Polygon, Rect, Translate,
+    algorithm::buffer::BufferStyle,
+    buffer::{LineCap, LineJoin},
+};
 use rand::Rng;
 
 /// Radius (world units) of the circle subtracted from solid rock per right-click.
@@ -81,8 +85,14 @@ pub fn subtract_polygon_from_terrain(
     let new_terrain = dungeon_state.solid_rock.difference(input_polygon);
     dungeon_state.solid_rock = new_terrain.clone();
 
-    // Expand the playable area by the intersection
-    let new_playable_area = dungeon_state.playable_area.union(&intersection);
+    // Destroy any glass walls hit — no debris, just expand playable area.
+    // sync_glass_walls_to_entities will pick up the DungeonState change and rebuild the mesh/collider.
+    let glass_intersection = dungeon_state.glass_walls.intersection(input_polygon);
+    dungeon_state.glass_walls = dungeon_state.glass_walls.difference(input_polygon);
+
+    // Expand the playable area by solid_rock and glass_wall intersections
+    let new_playable_area =
+        dungeon_state.playable_area.union(&intersection).union(&glass_intersection);
     dungeon_state.playable_area = new_playable_area.clone();
 
     // Update the terrain visual mesh Resource
@@ -186,11 +196,6 @@ pub fn subtract_polygon_from_terrain(
     });
 
     // Shrink the rubble pieces and round off sharp corners.
-    use geo::{
-        algorithm::buffer::BufferStyle,
-        buffer::{LineCap, LineJoin},
-    };
-
     let style = BufferStyle::new(-RUBBLE_SHRINK)
         .line_cap(LineCap::Round(PI / 4.0))
         .line_join(LineJoin::Round(PI / 4.0));

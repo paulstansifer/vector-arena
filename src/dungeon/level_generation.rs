@@ -27,6 +27,7 @@ const SPECIAL_ROOM_PROB: f32 = 0.15;
 pub struct TerrainGeometry {
     pub solid_rock: SafeMultiPolygon,
     pub playable_area: SafeMultiPolygon,
+    pub glass_walls: SafeMultiPolygon,
     pub rooms: Vec<Rect<f32>>,
     pub corridor_ends: Vec<Vec2>,
     pub doors: Vec<DoorGeometry>,
@@ -115,19 +116,21 @@ impl TerrainGeometry {
         allocated_partitions: Vec<(Partition, PartitionRole)>,
         rng: &mut impl Rng,
     ) -> Self {
-        let (rooms, playable_area, doors, corridor_ends, torpor_zones) =
+        let (rooms, playable_area, doors, corridor_ends, torpor_zones, glass_walls_pre) =
             render(&allocated_partitions, rng);
 
-        // The terrain is the bounds minus the playable area
+        // The terrain is the bounds minus the playable area, minus glass walls (which have their own entity).
         let earth = Rect::<f32>::new((0.0, 0.0), (width, height));
         let geometry = SafeMultiPolygon::from_geo(MultiPolygon(vec![earth.to_polygon()]))
             .difference(&playable_area)
+            .difference(&glass_walls_pre)
             .translate(-width / 2.0, -height / 2.0);
 
         let offset_x = -width / 2.0;
         let offset_y = -height / 2.0;
 
         let playable_area = playable_area.translate(offset_x, offset_y);
+        let glass_walls = glass_walls_pre.translate(offset_x, offset_y);
 
         let rooms = rooms.into_iter().map(|r| r.translate(offset_x, offset_y)).collect();
 
@@ -152,6 +155,7 @@ impl TerrainGeometry {
         TerrainGeometry {
             solid_rock: geometry,
             playable_area,
+            glass_walls,
             rooms,
             corridor_ends,
             doors,
@@ -169,6 +173,12 @@ pub enum RoomVariant {
     Oval,
     Colonnade,
     Torpor,
+}
+
+impl RoomVariant {
+    fn rectangular_borders(self) -> bool {
+        matches!(self, RoomVariant::Normal | RoomVariant::Colonnade | RoomVariant::Torpor)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -301,13 +311,71 @@ fn open_full_wall(room: &Rect<f32>, connection: ConnectionPoint) -> SafePolygon 
     SafePolygon(rect.to_polygon())
 }
 
+// Returns a glass wall polygon filling the gap between two spatially-adjacent rooms (no BSP
+// connector), with 50% probability. Returns None if not adjacent, no common span, or skipped.
+fn glass_wall_between(
+    p_i: &Partition,
+    p_j: &Partition,
+    r_i: &Rect<f32>,
+    r_j: &Rect<f32>,
+    rng: &mut impl Rng,
+) -> Option<SafePolygon> {
+    // Detect horizontal adjacency: p_i to the left of p_j
+    let poly = if p_i.x.1 == p_j.x.0 {
+        let y0 = r_i.min().y.max(r_j.min().y);
+        let y1 = r_i.max().y.min(r_j.max().y);
+        if y1 <= y0 {
+            return None;
+        }
+        Rect::new((r_i.max().x, y0), (r_j.min().x, y1))
+    } else if p_j.x.1 == p_i.x.0 {
+        // p_j to the left of p_i
+        let y0 = r_i.min().y.max(r_j.min().y);
+        let y1 = r_i.max().y.min(r_j.max().y);
+        if y1 <= y0 {
+            return None;
+        }
+        Rect::new((r_j.max().x, y0), (r_i.min().x, y1))
+    } else if p_i.y.1 == p_j.y.0 {
+        // p_i below p_j
+        let x0 = r_i.min().x.max(r_j.min().x);
+        let x1 = r_i.max().x.min(r_j.max().x);
+        if x1 <= x0 {
+            return None;
+        }
+        Rect::new((x0, r_i.max().y), (x1, r_j.min().y))
+    } else if p_j.y.1 == p_i.y.0 {
+        // p_j below p_i
+        let x0 = r_i.min().x.max(r_j.min().x);
+        let x1 = r_i.max().x.min(r_j.max().x);
+        if x1 <= x0 {
+            return None;
+        }
+        Rect::new((x0, r_j.max().y), (x1, r_i.min().y))
+    } else {
+        return None;
+    };
+
+    if !rng.gen_bool(0.5) {
+        return None;
+    }
+    Some(SafePolygon(poly.to_polygon()))
+}
+
 // For rooms, shrink at least PADDING away from the edges (respecting MIN_ROOM_SIZE), adding hallways out to the edge.
 // For corridors, if there are two connections, draw a straight hallway between them; otherwise, draw hallways from all connections to the center point.
-// Returns rooms, a multipolygon representing passable space, doors, and corridor endpoints.
+// Returns rooms, a multipolygon representing passable space, doors, corridor endpoints, torpor zones, and glass walls.
 fn render(
     bsp: &[(Partition, PartitionRole)],
     rng: &mut impl Rng,
-) -> (Vec<Rect<f32>>, SafeMultiPolygon, Vec<DoorGeometry>, Vec<Vec2>, Vec<SafePolygon>) {
+) -> (
+    Vec<Rect<f32>>,
+    SafeMultiPolygon,
+    Vec<DoorGeometry>,
+    Vec<Vec2>,
+    Vec<SafePolygon>,
+    SafeMultiPolygon,
+) {
     let merged_connections = find_merged_room_connections(bsp, rng);
 
     let mut rooms = Vec::new();
@@ -494,7 +562,36 @@ fn render(
         playables = playables.difference(&SafeMultiPolygon::from(hinge_rect.to_polygon()));
     }
 
-    (rooms, playables, doors, corridor_ends, torpor_zones)
+    // Generate glass walls between spatially-adjacent rooms that have no BSP connector.
+    let room_infos: Vec<(&Partition, RoomVariant, Rect<f32>)> = bsp
+        .iter()
+        .filter_map(|(partition, role)| {
+            if let PartitionRole::Room { variant } = role {
+                Some((partition, *variant, shrink_room(partition)))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut glass_walls = SafeMultiPolygon::empty();
+    for i in 0..room_infos.len() {
+        for j in (i + 1)..room_infos.len() {
+            let (p_i, v_i, r_i) = &room_infos[i];
+            let (p_j, v_j, r_j) = &room_infos[j];
+            if !v_i.rectangular_borders() || !v_j.rectangular_borders() {
+                continue;
+            }
+            if partitions_share_connection(p_i, p_j) {
+                continue;
+            }
+            if let Some(poly) = glass_wall_between(p_i, p_j, r_i, r_j, rng) {
+                glass_walls = glass_walls.union(&SafeMultiPolygon::from(poly));
+            }
+        }
+    }
+
+    (rooms, playables, doors, corridor_ends, torpor_zones, glass_walls)
 }
 
 #[derive(Copy, Clone)]
