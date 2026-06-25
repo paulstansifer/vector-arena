@@ -320,14 +320,15 @@ fn glass_wall_between(
     r_j: &Rect<f32>,
     rng: &mut impl Rng,
 ) -> Option<SafePolygon> {
-    // Detect horizontal adjacency: p_i to the left of p_j
-    let poly = if p_i.x.1 == p_j.x.0 {
+    // shrink_along_wall: whether to inset along the y axis (true) or x axis (false)
+    let (mut poly, shrink_y) = if p_i.x.1 == p_j.x.0 {
+        // Detect horizontal adjacency: p_i to the left of p_j
         let y0 = r_i.min().y.max(r_j.min().y);
         let y1 = r_i.max().y.min(r_j.max().y);
         if y1 <= y0 {
             return None;
         }
-        Rect::new((r_i.max().x, y0), (r_j.min().x, y1))
+        (Rect::new((r_i.max().x, y0), (r_j.min().x, y1)), true)
     } else if p_j.x.1 == p_i.x.0 {
         // p_j to the left of p_i
         let y0 = r_i.min().y.max(r_j.min().y);
@@ -335,7 +336,7 @@ fn glass_wall_between(
         if y1 <= y0 {
             return None;
         }
-        Rect::new((r_j.max().x, y0), (r_i.min().x, y1))
+        (Rect::new((r_j.max().x, y0), (r_i.min().x, y1)), true)
     } else if p_i.y.1 == p_j.y.0 {
         // p_i below p_j
         let x0 = r_i.min().x.max(r_j.min().x);
@@ -343,7 +344,7 @@ fn glass_wall_between(
         if x1 <= x0 {
             return None;
         }
-        Rect::new((x0, r_i.max().y), (x1, r_j.min().y))
+        (Rect::new((x0, r_i.max().y), (x1, r_j.min().y)), false)
     } else if p_j.y.1 == p_i.y.0 {
         // p_j below p_i
         let x0 = r_i.min().x.max(r_j.min().x);
@@ -351,10 +352,27 @@ fn glass_wall_between(
         if x1 <= x0 {
             return None;
         }
-        Rect::new((x0, r_j.max().y), (x1, r_i.min().y))
+        (Rect::new((x0, r_j.max().y), (x1, r_i.min().y)), false)
     } else {
         return None;
     };
+
+    if rng.gen_bool(0.75) {
+        let inset: f32 = rng.gen_range(10.0..=40.0);
+        poly = if shrink_y {
+            Rect::new((poly.min().x, poly.min().y + inset), (poly.max().x, poly.max().y - inset))
+        } else {
+            Rect::new((poly.min().x + inset, poly.min().y), (poly.max().x - inset, poly.max().y))
+        };
+        if poly.width() <= 0.0 || poly.height() <= 0.0 {
+            return None;
+        }
+    }
+
+    let span = if shrink_y { poly.height() } else { poly.width() };
+    if span < 10.0 {
+        return None;
+    }
 
     if !rng.gen_bool(0.5) {
         return None;
