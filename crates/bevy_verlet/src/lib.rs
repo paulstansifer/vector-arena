@@ -70,7 +70,14 @@ use systems::{
 
 /// Prelude
 pub mod prelude {
-    pub use crate::{components::*, config::*, VerletPlugin};
+    pub use crate::{components::*, config::*, VerletPlugin, VerletSet};
+}
+
+/// System set labels for ordering against Verlet phases.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum VerletSet {
+    /// The Verlet integration step (`update_points`).
+    Points,
 }
 
 /// Plugin for Verlet physics
@@ -79,19 +86,40 @@ pub struct VerletPlugin {
     /// Custom time step in seconds for verlet physics, if set to `None` physics
     /// will run every [`FixedUpdate`] frame
     pub time_step: Option<f64>,
+    /// When `true`, only `update_points` is registered; stick constraint
+    /// solving and tension handling are left to the caller.
+    pub custom_sticks: bool,
 }
 
 impl Plugin for VerletPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<VerletConfig>();
-        let system_set = (update_points, update_sticks, handle_stick_constraints).chain();
-        if let Some(step) = self.time_step {
-            app.add_systems(
-                FixedUpdate,
-                system_set.run_if(on_timer(Duration::from_secs_f64(step))),
-            );
+
+        if self.custom_sticks {
+            let points_sys = update_points.in_set(VerletSet::Points);
+            if let Some(step) = self.time_step {
+                app.add_systems(
+                    FixedUpdate,
+                    points_sys.run_if(on_timer(Duration::from_secs_f64(step))),
+                );
+            } else {
+                app.add_systems(FixedUpdate, points_sys);
+            }
         } else {
-            app.add_systems(FixedUpdate, system_set);
+            let system_set = (
+                update_points.in_set(VerletSet::Points),
+                update_sticks,
+                handle_stick_constraints,
+            )
+                .chain();
+            if let Some(step) = self.time_step {
+                app.add_systems(
+                    FixedUpdate,
+                    system_set.run_if(on_timer(Duration::from_secs_f64(step))),
+                );
+            } else {
+                app.add_systems(FixedUpdate, system_set);
+            }
         }
         #[cfg(feature = "debug")]
         {
@@ -112,6 +140,7 @@ impl VerletPlugin {
     pub const fn new(time_step: f64) -> Self {
         Self {
             time_step: Some(time_step),
+            custom_sticks: false,
         }
     }
 }

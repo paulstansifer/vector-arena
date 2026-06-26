@@ -24,12 +24,13 @@ pub fn physics_app(gravity: Vec2, ropes: bool) -> App {
     .insert_resource(Gravity(gravity));
 
     if ropes {
-        app.add_plugins(VerletPlugin::default()).insert_resource(VerletConfig {
-            gravity: gravity.extend(0.0),
-            friction: 0.02,
-            sticks_computation_depth: 5,
-            parallel_processing: false,
-        });
+        app.add_plugins(VerletPlugin { custom_sticks: true, ..VerletPlugin::default() })
+            .insert_resource(VerletConfig {
+                gravity: gravity.extend(0.0),
+                friction: 0.02,
+                sticks_computation_depth: 5,
+                parallel_processing: false,
+            });
         vector_arena::effects::rope::add_rope_test_systems(&mut app);
     }
 
