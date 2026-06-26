@@ -64,6 +64,7 @@ fn setup_rope(app: &mut App, end_anchor: Option<Entity>) -> (Entity, Entity) {
         Vec2::new(N as f32 * SEGMENT_TARGET_LEN, 0.0),
         &spatial_query,
         &anchor_query,
+        None,
     );
     state.apply(app.world_mut());
 

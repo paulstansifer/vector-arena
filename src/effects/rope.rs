@@ -34,6 +34,20 @@ pub struct RopeEndAnchor {
     pub local: Vec3, // attachment point in the tracked entity's local space
 }
 
+const ROPE_VISUAL_THICKNESS: f32 = 2.5;
+
+#[derive(Component)]
+struct RopeSegment {
+    point_a: Entity,
+    point_b: Entity,
+}
+
+#[derive(Resource)]
+pub struct RopeVisuals {
+    mesh: Handle<Mesh>,
+    material: Handle<ColorMaterial>,
+}
+
 #[derive(Resource, Default)]
 pub struct RopeDragState {
     start: Option<Vec2>,
@@ -45,14 +59,15 @@ impl Plugin for RopePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(VerletPlugin { custom_sticks: true, ..VerletPlugin::default() })
             .insert_resource(VerletConfig {
-                gravity: Vec3::new(0.0, -200.0, 0.0),
+                gravity: Vec3::new(0.0, 0.0, 0.0),
                 friction: 0.02,
                 sticks_computation_depth: 5,
                 parallel_processing: true,
             })
             .init_resource::<RopeDragState>()
+            .add_systems(Startup, init_rope_visuals)
             .add_systems(Update, handle_rope_drag)
-            .add_systems(Update, draw_rope)
+            .add_systems(Update, update_rope_segment_transforms)
             .add_systems(FixedPreUpdate, update_tracked_anchors)
             .add_systems(
                 FixedUpdate,
@@ -72,6 +87,7 @@ fn handle_rope_drag(
     mut commands: Commands,
     spatial_query: SpatialQuery,
     anchor_query: Query<(&GlobalTransform, &RigidBody)>,
+    visuals: Res<RopeVisuals>,
 ) {
     let Some(cursor_pos) = window.cursor_position() else { return };
     let (cam, cam_tf) = *camera;
@@ -82,7 +98,14 @@ fn handle_rope_drag(
             drag_state.start = Some(world_pos);
         } else {
             let start = drag_state.start.take().unwrap();
-            spawn_rope(&mut commands, start, world_pos, &spatial_query, &anchor_query);
+            spawn_rope(
+                &mut commands,
+                start,
+                world_pos,
+                &spatial_query,
+                &anchor_query,
+                Some(&visuals),
+            );
         }
     }
 }
@@ -93,6 +116,7 @@ pub fn spawn_rope(
     end: Vec2,
     spatial_query: &SpatialQuery,
     anchor_query: &Query<(&GlobalTransform, &RigidBody)>,
+    visuals: Option<&RopeVisuals>,
 ) {
     let total = (end - start).length();
     if total < SEGMENT_TARGET_LEN {
@@ -136,27 +160,60 @@ pub fn spawn_rope(
     }
 
     for i in 0..n_segs {
-        commands.spawn((DespawnOnExit(GameState::InLevel), VerletStick {
+        let a = start.lerp(end, i as f32 / n_segs as f32);
+        let b = start.lerp(end, (i + 1) as f32 / n_segs as f32);
+        let mut stick_cmd = commands.spawn((DespawnOnExit(GameState::InLevel), VerletStick {
             point_a_entity: points[i],
             point_b_entity: points[i + 1],
             length: stick_len,
         }));
+        if let Some(vis) = visuals {
+            let mid = (a + b) * 0.5;
+            let delta = b - a;
+            stick_cmd.insert((
+                RopeSegment { point_a: points[i], point_b: points[i + 1] },
+                Mesh2d(vis.mesh.clone()),
+                MeshMaterial2d(vis.material.clone()),
+                Transform {
+                    translation: mid.extend(MOVABLE_Z),
+                    rotation: Quat::from_rotation_z(delta.y.atan2(delta.x)),
+                    scale: Vec3::new(stick_len, ROPE_VISUAL_THICKNESS, 1.0),
+                },
+            ));
+        }
     }
 
     commands.spawn((DespawnOnExit(GameState::InLevel), Rope { points }));
 }
 
-fn draw_rope(ropes: Query<&Rope>, points: Query<&Transform, With<RopePoint>>, mut gizmos: Gizmos) {
-    for rope in &ropes {
-        for window in rope.points.windows(2) {
-            let Ok(tf_a) = points.get(window[0]) else { continue };
-            let Ok(tf_b) = points.get(window[1]) else { continue };
-            gizmos.line_2d(
-                tf_a.translation.truncate(),
-                tf_b.translation.truncate(),
-                Color::srgb(0.65, 0.45, 0.25),
-            );
+fn init_rope_visuals(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    commands.insert_resource(RopeVisuals {
+        mesh: meshes.add(Rectangle::new(1.0, 1.0)),
+        material: materials.add(ColorMaterial::from(Color::srgb(0.65, 0.45, 0.25))),
+    });
+}
+
+fn update_rope_segment_transforms(
+    mut segments: Query<(&RopeSegment, &mut Transform)>,
+    points: Query<&Transform, (With<RopePoint>, Without<RopeSegment>)>,
+) {
+    for (seg, mut tf) in &mut segments {
+        let Ok(tf_a) = points.get(seg.point_a) else { continue };
+        let Ok(tf_b) = points.get(seg.point_b) else { continue };
+        let a = tf_a.translation.truncate();
+        let b = tf_b.translation.truncate();
+        let delta = b - a;
+        let dist = delta.length();
+        if dist < 1e-5 {
+            continue;
         }
+        tf.translation = ((a + b) * 0.5).extend(MOVABLE_Z);
+        tf.rotation = Quat::from_rotation_z(delta.y.atan2(delta.x));
+        tf.scale.x = dist;
     }
 }
 
