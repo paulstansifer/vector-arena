@@ -384,14 +384,15 @@ fn apply_rope_tension(
 
             // Only constrain when the adjacent stick is actually taut.
             let Some(&rest_len) = stick_lengths.get(&(endpoint_e, neighbor_e)) else { continue };
-            if dist <= rest_len {
+            let rope_stretchedness = dist / rest_len;
+            if rope_stretchedness <= 1.0 {
                 continue;
             }
 
             // Zero out the velocity component pulling the body further from the rope.
             let vel_away = body_vel.dot(away_dir);
             if vel_away > 0.0 {
-                body_vel.0 -= away_dir * vel_away;
+                body_vel.0 -= away_dir * vel_away * rope_stretchedness;
             }
         }
     }

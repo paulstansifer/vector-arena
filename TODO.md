@@ -16,9 +16,9 @@
   * Monsters should attack more
   * Different kinds of monsters!
   * Maybe the default monster attack shouldn't look like magic missile. Melee?
-  * Confusion should have a chance of causing missiles to fire in the wrong direction.
   * Try adding doors back.
-  * Add glass terrain (randomly use it for thin walls that have no connection.)
+  * Add a Scroll Of Binding (creates a temporary rope holding a monster to a random point of terrain ... or you if there's no monster in LOS).
+    * Change confusion from being a potion to being a scroll, and make it work the same way
 
   # Larger projects
   * Think about how to break this into a library + game definition
