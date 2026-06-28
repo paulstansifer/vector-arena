@@ -20,7 +20,7 @@ use geo::{Coord, Intersects, Rect};
 use rand::Rng;
 
 use crate::{
-    GameLayer, GameState,
+    GameLayer, LevelEntity,
     command_palette::LetterMap,
     dungeon::terrain::{DungeonCollider, DungeonState, DungeonVisuals},
     effects::crumble_terrain::{
@@ -94,7 +94,7 @@ pub fn spawn_unstable_sigil(
     let mesh_handle = meshes.add(mesh);
 
     commands.spawn((
-        DespawnOnExit(GameState::InLevel),
+        LevelEntity,
         UnstableSignil {
             angles,
             angle_vels,
@@ -354,17 +354,20 @@ pub fn explode_sigil(
                 && let Some(mut stats) = stats_opt
             {
                 let was_alive = stats.hp > 0.0;
-                stats.hp -= SIGIL_DAMAGE;
 
                 if is_player {
                     player_damaged = true;
-                    stats.hp = stats.hp.max(0.0);
-                } else if is_monster && was_alive && stats.hp <= 0.0 {
+                    crate::player::deal_damage_to_player(&mut stats, SIGIL_DAMAGE);
+                } else {
+                    stats.hp -= SIGIL_DAMAGE;
+                }
+
+                if is_monster && was_alive && stats.hp <= 0.0 {
                     if let Some(drop) = drop_opt {
                         let kind = drop.0;
                         let (svg_path, param) = sprite_spec(kind);
                         commands.spawn((
-                            DespawnOnExit(GameState::InLevel),
+                            LevelEntity,
                             Item(kind),
                             WorldTooltip(item_name(kind, 1).to_string()),
                             SvgSprite { svg_path: svg_path.into(), param: Some(param) },
@@ -389,7 +392,7 @@ pub fn explode_sigil(
         let exp_mesh_handle = meshes.add(exp_mesh);
         let exp_mat_handle = materials.add(ColorMaterial::from(Color::BLACK));
         commands.spawn((
-            DespawnOnExit(GameState::InLevel),
+            LevelEntity,
             SigilExplosionAnim {
                 start_angles: *start_angles,
                 tangents: *tangents,

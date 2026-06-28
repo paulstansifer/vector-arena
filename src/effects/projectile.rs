@@ -9,7 +9,7 @@ use rand::Rng;
 use std::collections::HashSet;
 
 use crate::{
-    AGENT_RADIUS, GameLayer, GameState,
+    AGENT_RADIUS, GameLayer, LevelEntity,
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     dungeon::terrain::TorporMultiplier,
     effects::crumble_terrain::Rubble,
@@ -155,7 +155,7 @@ fn spawn_missile(
     };
 
     commands.spawn((
-        DespawnOnExit(GameState::InLevel),
+        LevelEntity,
         MagicMissile::new(fired_by_player, spawn_pos, direction * MISSILE_SPEED, damage_multiplier),
         TorporMultiplier(1.0),
         Mesh2d(missile_assets.mesh.clone()),
@@ -487,14 +487,13 @@ pub fn apply_damage_on_hit(
     };
     let Some(ref mut stats) = stats_opt else { return };
 
-    let was_alive = stats.hp > 0.0;
     let attempted = MISSILE_DAMAGE * event.damage_multiplier;
-    let before_hp = stats.hp;
-    stats.hp -= attempted;
-    // Actual HP removed = min(attempted, pre-hit HP), clamped to ≥ 0.
-    let damage_dealt = attempted.min(before_hp.max(0.0));
+    let damage_dealt;
 
     if is_monster {
+        let before_hp = stats.hp;
+        stats.hp -= attempted;
+        damage_dealt = attempted.min(before_hp.max(0.0));
         if event.fired_by_player {
             commands.entity(event.hit_entity).insert(AlertedByMissile);
         }
@@ -516,7 +515,7 @@ pub fn apply_damage_on_hit(
                     (path.to_string(), p)
                 };
                 commands.spawn((
-                    DespawnOnExit(GameState::InLevel),
+                    LevelEntity,
                     Item(kind),
                     WorldTooltip(item_name(kind, 1).to_string()),
                     SvgSprite { svg_path, param: Some(param) },
@@ -527,10 +526,9 @@ pub fn apply_damage_on_hit(
             commands.entity(event.hit_entity).despawn();
         }
     } else if is_player {
-        if was_alive && stats.hp <= 0.0 {
-            message_log.push("Ouch!");
-        }
-        stats.hp = stats.hp.max(0.0);
+        damage_dealt = crate::player::deal_damage_to_player(stats, attempted);
+    } else {
+        damage_dealt = 0.0;
     }
 
     commands.trigger(MissileDamageDealt {
@@ -604,7 +602,7 @@ fn spawn_trail_segment(
     let glow_color = trail_color(fired_by_player, true, 1.0);
 
     commands.spawn((
-        DespawnOnExit(GameState::InLevel),
+        LevelEntity,
         MissileTrail {
             source_missile: missile_entity,
             fired_by_player,
@@ -619,7 +617,7 @@ fn spawn_trail_segment(
             .with_scale(Vec3::new(segment_len, 1.0, 1.0)),
     ));
     commands.spawn((
-        DespawnOnExit(GameState::InLevel),
+        LevelEntity,
         MissileTrail {
             source_missile: missile_entity,
             fired_by_player,

@@ -325,6 +325,7 @@ impl Plugin for CommandPalettePlugin {
 pub fn open_palette_system(
     keyboard: Res<ButtonInput<Key>>,
     mut state: ResMut<CommandPaletteState>,
+    current_state: Res<State<crate::GameState>>,
     mut player_query: Query<
         (Entity, &mut MoveTarget, &mut AgentTarget2d, &mut LinearVelocity, &Inventory),
         With<Player>,
@@ -333,6 +334,10 @@ pub fn open_palette_system(
     registry: Res<PaletteRegistry>,
     letter_map: Res<LetterMap>,
 ) {
+    if *current_state.get() == crate::GameState::GameOver {
+        return;
+    }
+
     if !state.open {
         let open_with = if keyboard.just_pressed(Key::Space) {
             Some(String::new())

@@ -11,7 +11,8 @@ use geo::BoundingRect;
 use rand::SeedableRng;
 
 use crate::{
-    AGENT_RADIUS, DungeonDepth, GameLayer, GameState, WORLD_HEIGHT, WORLD_WIDTH, WorldBounds,
+    AGENT_RADIUS, DungeonDepth, GameLayer, GameState, LevelEntity, WORLD_HEIGHT, WORLD_WIDTH,
+    WorldBounds,
     command_palette::{CommandPalettePlugin, LetterMap, open_palette_system},
     dungeon::{
         level_generation::TerrainGeometry,
@@ -48,9 +49,9 @@ use crate::{
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
     player::{
-        Player, advance_exploration, directional_move_system, execute_descend_command,
-        execute_stop_command, move_player, register_player_commands, rotate_player_to_velocity,
-        set_target_on_click,
+        Player, advance_exploration, check_player_death, directional_move_system,
+        execute_descend_command, execute_stop_command, move_player, register_player_commands,
+        rotate_player_to_velocity, set_target_on_click,
     },
     populate_level,
     sprite::SpritePlugin,
@@ -67,6 +68,12 @@ pub struct DungeonSeed(pub u64);
 
 #[derive(Resource, Default)]
 pub struct SavedPlayer(pub Option<(Stats, Inventory, StatusEffects)>);
+
+fn despawn_level_entities(mut commands: Commands, query: Query<Entity, With<LevelEntity>>) {
+    for entity in query.iter() {
+        commands.entity(entity).try_despawn();
+    }
+}
 
 fn on_enter_restart(
     mut commands: Commands,
@@ -164,7 +171,7 @@ pub fn spawn_game_world(
 
     let mut archipelago = Archipelago2d::new(ArchipelagoOptions::from_agent_radius(AGENT_RADIUS));
     archipelago.set_type_index_cost(1, TORPOR_NAV_COST).expect("torpor nav cost is positive");
-    let archipelago_id = commands.spawn((DespawnOnExit(GameState::InLevel), archipelago)).id();
+    let archipelago_id = commands.spawn((LevelEntity, archipelago)).id();
 
     let terrain_geometry = TerrainGeometry::new_seeded(WORLD_WIDTH, WORLD_HEIGHT, &mut rng);
 
@@ -197,7 +204,7 @@ pub fn spawn_game_world(
 
     let terrain_entity = commands
         .spawn((
-            DespawnOnExit(GameState::InLevel),
+            LevelEntity,
             TerrainMarker,
             Mesh2d(terrain_mesh_handle),
             MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.2, 0.2, 0.2)))),
@@ -214,7 +221,7 @@ pub fn spawn_game_world(
         .id();
 
     commands.spawn((
-        DespawnOnExit(GameState::InLevel),
+        LevelEntity,
         GlassWallsMarker,
         Mesh2d(glass_border_mesh_handle),
         MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgba(0.5, 0.85, 0.9, 1.0)))),
@@ -241,7 +248,7 @@ pub fn spawn_game_world(
             Vec2::new((bbox.min().x + bbox.max().x) / 2.0, (bbox.min().y + bbox.max().y) / 2.0);
         let half_size = Vec2::new(bbox.width() / 2.0, bbox.height() / 2.0);
         commands.spawn((
-            DespawnOnExit(GameState::InLevel),
+            LevelEntity,
             Mesh2d(meshes.add(mesh)),
             MeshMaterial2d(torpor_material.clone()),
             Transform::from_translation(Vec3::new(0.0, 0.0, TERRAIN_Z + 0.1)),
@@ -256,7 +263,7 @@ pub fn spawn_game_world(
 
         let door_entity = commands
             .spawn((
-                DespawnOnExit(GameState::InLevel),
+                LevelEntity,
                 Fragile,
                 OpaqueVertices(door.disp_corners()),
                 Mesh2d(meshes.add(Rectangle::new(disp.x, disp.y))),
@@ -271,7 +278,7 @@ pub fn spawn_game_world(
         let hinge = door.hinge_vec();
         let joint_entity = commands
             .spawn((
-                DespawnOnExit(GameState::InLevel),
+                LevelEntity,
                 RevoluteJoint::new(door_entity, terrain_entity)
                     .with_local_anchor1(hinge - center)
                     .with_local_anchor2(hinge),
@@ -286,7 +293,7 @@ pub fn spawn_game_world(
 
     fov::spawn_fov_meshes(commands, meshes, materials, WORLD_WIDTH, WORLD_HEIGHT);
 
-    commands.spawn((DespawnOnExit(GameState::InLevel), NavMeshIslandMarker, Island2dBundle {
+    commands.spawn((LevelEntity, NavMeshIslandMarker, Island2dBundle {
         island: Island,
         archipelago_ref: ArchipelagoRef2d::new(archipelago_id),
         nav_mesh: NavMeshHandle(nav_mesh_handle),
@@ -389,8 +396,14 @@ impl Plugin for GamePlugin {
             .add_systems(Startup, goto::register_goto_command)
             .add_systems(Startup, register_player_commands)
             .add_systems(Startup, register_missile_command)
-            .add_systems(OnEnter(GameState::Restart), on_enter_restart)
-            .add_systems(OnEnter(GameState::Descend), on_enter_descend)
+            .add_systems(
+                OnEnter(GameState::Restart),
+                (despawn_level_entities, on_enter_restart).chain(),
+            )
+            .add_systems(
+                OnEnter(GameState::Descend),
+                (despawn_level_entities, on_enter_descend).chain(),
+            )
             .add_systems(OnExit(GameState::InLevel), save_player_on_exit)
             .add_systems(Update, tick_status_effects)
             .add_systems(Update, update_torpor_multipliers)
@@ -403,7 +416,7 @@ impl Plugin for GamePlugin {
             .add_observer(on_acquirement)
             .add_observer(on_wand_crumbling)
             .add_observer(on_wand_attraction)
-            .add_systems(Update, set_target_on_click)
+            .add_systems(Update, set_target_on_click.run_if(in_state(GameState::InLevel)))
             .add_systems(Update, move_player.after(update_torpor_multipliers))
             .add_systems(Update, nav::apply_nav_velocity.after(move_player))
             .add_systems(
@@ -412,8 +425,9 @@ impl Plugin for GamePlugin {
             )
             .add_systems(Update, rotate_player_to_velocity.after(move_player))
             .add_systems(Update, advance_exploration.after(move_player))
-            .add_systems(Update, execute_stop_command)
-            .add_systems(Update, execute_descend_command)
+            .add_systems(Update, execute_stop_command.run_if(in_state(GameState::InLevel)))
+            .add_systems(Update, execute_descend_command.run_if(in_state(GameState::InLevel)))
+            .add_systems(Update, check_player_death.run_if(in_state(GameState::InLevel)))
             .add_systems(Update, monster::update_monster_ai)
             .add_systems(
                 Update,

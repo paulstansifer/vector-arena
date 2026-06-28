@@ -9,7 +9,7 @@ use geo::{Intersects, Line as GeoLine, LineString, MultiPolygon, Polygon};
 use std::ops::Range;
 
 use crate::{
-    GameState, Staircase, StaircaseFogCopy, WorldBounds,
+    LevelEntity, Staircase, StaircaseFogCopy, WorldBounds,
     dungeon::terrain::{self, DungeonState},
     player::Player,
     status_effect::StatusEffects,
@@ -197,7 +197,7 @@ pub fn spawn_fov_meshes(
 ) {
     let fov_material = materials.add(ColorMaterial::from(Color::srgb(0.7, 0.7, 0.7)));
     commands.spawn((
-        DespawnOnExit(GameState::InLevel),
+        LevelEntity,
         FovMeshMarker,
         Mesh2d(
             meshes.add(Mesh::new(bevy_mesh::PrimitiveTopology::TriangleList, Default::default())),
@@ -216,7 +216,7 @@ pub fn spawn_fov_meshes(
     commands.insert_resource(CurrentFovState(SafeMultiPolygon::empty()));
 
     commands.spawn((
-        DespawnOnExit(GameState::InLevel),
+        LevelEntity,
         NeverExploredMeshMarker,
         Mesh2d(meshes.add(terrain::geometry_to_mesh(&bg_poly))),
         MeshMaterial2d(never_explored_material),

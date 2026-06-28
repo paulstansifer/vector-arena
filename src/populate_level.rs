@@ -9,7 +9,7 @@ use geo::Rect;
 use rand::prelude::*;
 
 use crate::{
-    AGENT_RADIUS, GameLayer, GameState, Staircase, StaircaseFogCopy,
+    AGENT_RADIUS, GameLayer, LevelEntity, Staircase, StaircaseFogCopy,
     dungeon::terrain::{TorporMultiplier, random_in_playable_area},
     effects::{projectile::MonsterShootTimer, unstable_sigils::spawn_unstable_sigil},
     fov,
@@ -46,7 +46,7 @@ pub fn populate(
     ));
 
     commands.spawn((
-        DespawnOnExit(GameState::InLevel),
+        LevelEntity,
         (Player, initial_inventory, initial_stats, initial_effects, TorporMultiplier(1.0)),
         SvgSprite { svg_path: "sprites/wizard.svg".into(), param: None },
         Transform::from_translation(player_position.extend(fov::MOVABLE_Z))
@@ -97,7 +97,7 @@ pub fn populate(
 
         let (svg_path, param) = sprite_spec(kind);
         commands.spawn((
-            DespawnOnExit(GameState::InLevel),
+            LevelEntity,
             Item(kind),
             WorldTooltip(item_name(kind, 1).to_string()),
             SvgSprite { svg_path: svg_path.into(), param: Some(param) },
@@ -128,7 +128,7 @@ pub fn spawn_monster(
 ) -> Entity {
     let monster = commands
         .spawn((
-            DespawnOnExit(GameState::InLevel),
+            LevelEntity,
             (
                 Monster,
                 MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
@@ -171,7 +171,7 @@ fn spawn_staircase(
     position: Vec2,
 ) {
     commands.spawn((
-        DespawnOnExit(GameState::InLevel),
+        LevelEntity,
         Staircase,
         SvgSprite { svg_path: "sprites/hatch.svg".into(), param: None },
         Transform::from_translation(position.extend(fov::ON_FLOOR_Z)).with_scale(Vec3::splat(0.4)),
@@ -185,7 +185,7 @@ fn spawn_staircase(
         bevy::asset::RenderAssetUsages::default(),
     ));
     commands.spawn((
-        DespawnOnExit(GameState::InLevel),
+        LevelEntity,
         StaircaseFogCopy,
         Visibility::default(),
         Mesh2d(fog_mesh),

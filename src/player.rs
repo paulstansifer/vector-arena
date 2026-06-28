@@ -362,3 +362,25 @@ pub fn directional_move_system(
     *agent_target = AgentTarget2d::None;
     commands.entity(entity).remove::<ExplorationGoal>();
 }
+
+/// Applies `amount` damage to the player's stats, clamping HP at 0.
+/// Returns the actual HP lost (may be less than `amount` if HP was already low).
+pub fn deal_damage_to_player(stats: &mut crate::monster::Stats, amount: f32) -> f32 {
+    let before = stats.hp.max(0.0);
+    stats.hp = (stats.hp - amount).max(0.0);
+    before - stats.hp
+}
+
+/// Detects the moment player HP hits zero and transitions to the GameOver screen.
+/// Runs only in InLevel state so it fires at most once per death.
+pub fn check_player_death(
+    player_query: Query<&crate::monster::Stats, With<Player>>,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut log: ResMut<MessageLog>,
+) {
+    let Ok(stats) = player_query.single() else { return };
+    if stats.hp <= 0.0 {
+        log.push("Alas! You have been slain!");
+        next_state.set(GameState::GameOver);
+    }
+}

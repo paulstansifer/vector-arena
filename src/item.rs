@@ -558,6 +558,12 @@ pub fn register_item_commands(mut registry: ResMut<PaletteRegistry>) {
             requires_target: true,
         },
     });
+    registry.commands.push(PaletteCommand {
+        key: "e".to_string(),
+        description: "examine inventory".to_string(),
+        icon: None,
+        kind: PaletteCommandKind::InventoryTarget { item_filter: |_| true, requires_target: false },
+    });
 }
 
 const WAND_MANA_COST: f32 = 5.0;
@@ -713,6 +719,9 @@ pub fn execute_item_command(
                     }
                 },
             }
+        }
+        ["e", _] => {
+            // Examine: read-only; no effect.
         }
         ["w", _] if palette.pending_target.is_some() => {
             // Step 2: world-click target — pending_target set by the click handler.

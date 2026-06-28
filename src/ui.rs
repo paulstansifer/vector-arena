@@ -11,7 +11,8 @@ use avian2d::{diagnostics::ui::PhysicsDiagnosticsUiSettings, prelude::RigidBody}
 
 use crate::{
     DungeonDepth, GameState,
-    fov::{CurrentFovState, ExplorationState},
+    command_palette::CommandPaletteState,
+    fov::CurrentFovState,
     item::{
         Inventory, ItemIdentities, ItemKind, WAND_COOLDOWN_SECS, WandCooldowns, item_display_name,
     },
@@ -137,7 +138,7 @@ fn tick_boredom(
         boredom.seconds -= 15.0;
         log.push("You're so bored that it hurts! (-10 HP)");
         if let Ok(mut stats) = player_query.single_mut() {
-            stats.hp = (stats.hp - 10.0).max(0.0);
+            crate::player::deal_damage_to_player(&mut stats, 10.0);
         }
     }
 }
@@ -187,13 +188,14 @@ fn ui_system(
     message_log: Res<MessageLog>,
     mut app_exit: MessageWriter<AppExit>,
     mut next_state: ResMut<NextState<GameState>>,
+    current_game_state: Res<State<GameState>>,
     depth: Res<DungeonDepth>,
     sprite_textures: Res<SpriteEguiTextures>,
-    identities: Res<ItemIdentities>,
+    mut identities: ResMut<ItemIdentities>,
     wand_cooldowns: Res<WandCooldowns>,
+    mut palette: ResMut<CommandPaletteState>,
     boredom: Res<Boredom>,
     current_fov: Option<Res<CurrentFovState>>,
-    exploration_state: Option<Res<ExplorationState>>,
     rigid_body_query: Query<(), With<RigidBody>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
@@ -211,7 +213,7 @@ fn ui_system(
     let perf_stats = if ui_state.perf_overlay {
         Some(PerfStats {
             fov_vertices: current_fov.as_ref().map(|f| count_mp_vertices(&f.0)).unwrap_or(0),
-            exp_vertices: exploration_state.as_ref().map(|e| count_mp_vertices(&e.0)).unwrap_or(0),
+            exp_vertices: 0,
             phys_objects: rigid_body_query.iter().count(),
         })
     } else {
@@ -220,6 +222,22 @@ fn ui_system(
 
     if render_message_bar(ctx, &message_log, ui_state.messages_expanded, perf_stats.as_ref()) {
         ui_state.messages_expanded = !ui_state.messages_expanded;
+    }
+
+    if *current_game_state.get() == GameState::GameOver {
+        let result = render_game_over(ctx);
+        if result.open_inventory {
+            for &item in &inventory.0 {
+                identities.identify(item);
+            }
+            palette.open = true;
+            palette.input = "e ".to_string();
+            palette.selected_idx = 0;
+        }
+        if result.restart {
+            next_state.set(GameState::Restart);
+        }
+        return Ok(());
     }
 
     let item_counts = collect_item_counts(inventory);
@@ -264,6 +282,56 @@ fn ui_system(
     }
 
     Ok(())
+}
+
+#[derive(Default)]
+struct GameOverActions {
+    open_inventory: bool,
+    restart: bool,
+}
+
+fn render_game_over(ctx: &egui::Context) -> GameOverActions {
+    let mut actions = GameOverActions::default();
+
+    egui::CentralPanel::default()
+        .frame(egui::Frame::new().fill(egui::Color32::from_rgba_unmultiplied(30, 30, 30, 200)))
+        .show(ctx, |ui| {
+            let full_rect = ui.available_rect_before_wrap();
+            let mut centered = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(full_rect)
+                    .layout(egui::Layout::top_down(egui::Align::Center)),
+            );
+
+            let content_height = 120.0;
+            let top_pad = (full_rect.height() - content_height).max(0.0) / 2.0;
+            centered.add_space(top_pad);
+
+            centered.label(
+                egui::RichText::new("Game Over")
+                    .size(36.0)
+                    .color(egui::Color32::from_rgb(220, 60, 60))
+                    .strong(),
+            );
+            centered.add_space(16.0);
+
+            if centered
+                .add(egui::Button::new("Restart").min_size(egui::vec2(120.0, 28.0)))
+                .clicked()
+            {
+                actions.restart = true;
+            }
+            centered.add_space(8.0);
+
+            if centered
+                .add(egui::Button::new("View Inventory").min_size(egui::vec2(120.0, 28.0)))
+                .clicked()
+            {
+                actions.open_inventory = true;
+            }
+        });
+
+    actions
 }
 
 /// Top bar: latest message with optional expanded log. Returns true if the row was clicked.

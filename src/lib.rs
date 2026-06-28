@@ -35,7 +35,14 @@ pub enum GameState {
     Restart,
     Descend,
     InLevel,
+    GameOver,
 }
+
+/// Marks entities that belong to the current level and should be cleaned up when
+/// starting over (Restart) or descending. NOT despawned when entering GameOver so
+/// the dungeon remains visible under the game-over overlay.
+#[derive(bevy::prelude::Component)]
+pub struct LevelEntity;
 
 #[derive(bevy::prelude::Component)]
 pub struct Staircase;

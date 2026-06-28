@@ -11,7 +11,7 @@ use avian2d::prelude::*;
 use bevy::{input::keyboard::Key, platform::collections::HashMap, prelude::*};
 use bevy_verlet::prelude::*;
 
-use crate::{GameLayer, GameState, fov::MOVABLE_Z};
+use crate::{GameLayer, LevelEntity, fov::MOVABLE_Z};
 
 pub const SEGMENT_TARGET_LEN: f32 = 10.0;
 // How far from any collider surface a click can be and still anchor.
@@ -135,7 +135,7 @@ pub fn spawn_rope(
         let t = i as f32 / (n_pts - 1) as f32;
         let pos = start.lerp(end, t);
         let mut entity_cmd = commands.spawn((
-            DespawnOnExit(GameState::InLevel),
+            LevelEntity,
             RopePoint,
             VerletPoint::default(),
             Transform::from_translation(pos.extend(MOVABLE_Z)),
@@ -162,7 +162,7 @@ pub fn spawn_rope(
     for i in 0..n_segs {
         let a = start.lerp(end, i as f32 / n_segs as f32);
         let b = start.lerp(end, (i + 1) as f32 / n_segs as f32);
-        let mut stick_cmd = commands.spawn((DespawnOnExit(GameState::InLevel), VerletStick {
+        let mut stick_cmd = commands.spawn((LevelEntity, VerletStick {
             point_a_entity: points[i],
             point_b_entity: points[i + 1],
             length: stick_len,
@@ -183,7 +183,7 @@ pub fn spawn_rope(
         }
     }
 
-    commands.spawn((DespawnOnExit(GameState::InLevel), Rope { points }));
+    commands.spawn((LevelEntity, Rope { points }));
 }
 
 fn init_rope_visuals(

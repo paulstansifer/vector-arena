@@ -9,7 +9,7 @@
 use bevy::prelude::*;
 use bevy_enoki::prelude::*;
 
-use crate::{GameState, effects::projectile::MissileDamageDealt};
+use crate::{LevelEntity, effects::projectile::MissileDamageDealt};
 
 /// Real seconds for a burst to fully fade out.
 const LIFETIME: f32 = 1.45;
@@ -58,7 +58,7 @@ fn spawn_hit_burst(
 
     let effect = effects.add(create_hit_burst_effect(count, r, g, b));
     commands.spawn((
-        DespawnOnExit(GameState::InLevel),
+        LevelEntity,
         // Real-time fallback in case virtual time is paused when the burst fires.
         HitBurstExpiry(time.elapsed_secs() + LIFETIME + 0.5),
         ParticleSpawner::<ColorParticle2dMaterial>::default(),
