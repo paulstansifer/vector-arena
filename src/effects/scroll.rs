@@ -2,16 +2,23 @@
 // identified `ScrollEffect` and, for the four effects below, triggers one of these events; each
 // observer carries its own system access (meshes, archipelago, exploration, monster queries) so
 // the read handler itself stays small.
+use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
+use geo::{Intersects, Line as GeoLine};
+use rand::seq::SliceRandom;
 
 use crate::{
-    AGENT_RADIUS, GameState,
+    AGENT_RADIUS, GameLayer, GameState,
     command_palette::LetterMap,
     dungeon::terrain::{self, DungeonState, random_near},
-    effects::unstable_sigils::spawn_unstable_sigil,
+    effects::{
+        rope::{RopeVisuals, spawn_rope},
+        unstable_sigils::spawn_unstable_sigil,
+    },
     fov::{self, ExplorationState, NeverExploredMeshMarker, WALL_FOV_DEPTH},
     item::{Item, item_name, random_item_kind},
+    monster::Monster,
     populate_level::spawn_monster,
     sprite::{SvgSprite, sprite_spec},
     ui::{MessageLog, WorldTooltip},
@@ -37,6 +44,11 @@ pub struct MonsterConfusionEvent {
 
 #[derive(Event)]
 pub struct AcquirementEvent {
+    pub origin: Vec2,
+}
+
+#[derive(Event)]
+pub struct BindingEvent {
     pub origin: Vec2,
 }
 
@@ -144,4 +156,70 @@ pub fn on_acquirement(
     }
 
     log.push("Were those things there before?");
+}
+
+const BINDING_RAY_MAX: f32 = 600.0;
+
+/// Randomly picks a monster in LOS, casts a ray from it in its movement direction, and attaches
+/// a rope between the monster and the first terrain surface the ray hits.
+pub fn on_binding(
+    trigger: On<BindingEvent>,
+    monsters: Query<(Entity, &Transform, &LinearVelocity), With<Monster>>,
+    dungeon_state: Res<DungeonState>,
+    anchor_query: Query<(&GlobalTransform, &RigidBody)>,
+    spatial_query: SpatialQuery,
+    rope_visuals: Res<RopeVisuals>,
+    mut commands: Commands,
+    mut log: ResMut<MessageLog>,
+) {
+    let origin = trigger.event().origin;
+    let mut rng = rand::thread_rng();
+
+    let los_monsters: Vec<_> = monsters
+        .iter()
+        .filter(|(_, tf, _)| {
+            let mpos = tf.translation.truncate();
+            let seg = GeoLine::new(geo::Coord { x: origin.x, y: origin.y }, geo::Coord {
+                x: mpos.x,
+                y: mpos.y,
+            });
+            !dungeon_state.solid_rock.intersects(&seg)
+        })
+        .collect();
+
+    let Some(&(_, tf, vel)) = los_monsters.choose(&mut rng) else {
+        log.push("There is nothing nearby to bind.");
+        return;
+    };
+    let monster_pos = tf.translation.truncate();
+
+    // Use the monster's velocity direction; fall back to the direction away from the reader.
+    let raw_dir = if vel.0.length() > 1.0 {
+        vel.0
+    } else {
+        let d = monster_pos - origin;
+        if d.length() > 1e-5 { d } else { Vec2::X }
+    };
+    let Ok(dir) = Dir2::new(raw_dir) else {
+        log.push("The scroll fizzles.");
+        return;
+    };
+
+    let wall_filter = SpatialQueryFilter::from_mask([GameLayer::Wall]);
+    let Some(hit) = spatial_query.cast_ray(monster_pos, dir, BINDING_RAY_MAX, true, &wall_filter)
+    else {
+        log.push("The scroll fizzles.");
+        return;
+    };
+
+    let terrain_point = monster_pos + *dir * hit.distance;
+    spawn_rope(
+        &mut commands,
+        monster_pos,
+        terrain_point,
+        &spatial_query,
+        &anchor_query,
+        Some(&rope_visuals),
+    );
+    log.push("Mystic cords bind the creature to the wall!");
 }

@@ -34,7 +34,7 @@ use crate::{
             spawn_missile_trails, tick_knockback_cooldowns, update_missile_trails, update_missiles,
         },
         rope,
-        scroll::{on_acquirement, on_instability, on_magic_mapping, on_summon_monster},
+        scroll::{on_acquirement, on_binding, on_instability, on_magic_mapping, on_summon_monster},
         unstable_sigils::{
             animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions,
         },
@@ -414,6 +414,7 @@ impl Plugin for GamePlugin {
             .add_observer(on_magic_mapping)
             .add_observer(on_instability)
             .add_observer(on_acquirement)
+            .add_observer(on_binding)
             .add_observer(on_wand_crumbling)
             .add_observer(on_wand_attraction)
             .add_systems(Update, set_target_on_click.run_if(in_state(GameState::InLevel)))

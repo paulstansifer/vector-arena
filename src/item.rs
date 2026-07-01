@@ -20,8 +20,8 @@ use crate::{
     effects::{
         projectile::{KNOCKBACK_SPEED, MagicMissile, apply_knockback},
         scroll::{
-            AcquirementEvent, InstabilityEvent, MagicMappingEvent, MonsterConfusionEvent,
-            SummonMonsterEvent,
+            AcquirementEvent, BindingEvent, InstabilityEvent, MagicMappingEvent,
+            MonsterConfusionEvent, SummonMonsterEvent,
         },
     },
     monster::{Monster, Stats},
@@ -90,6 +90,7 @@ pub enum ScrollName {
     DoNotReadme,
     CodeOfConduct,
     Passwd,
+    Hosts,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -210,6 +211,7 @@ const ALL_SCROLL_NAMES: &[ScrollName] = &[
     ScrollName::DoNotReadme,
     ScrollName::CodeOfConduct,
     ScrollName::Passwd,
+    ScrollName::Hosts,
 ];
 
 pub const ALL_ITEM_KINDS: &[ItemKind] = &[
@@ -226,6 +228,7 @@ pub const ALL_ITEM_KINDS: &[ItemKind] = &[
     ItemKind::Scroll(ScrollName::DoNotReadme),
     ItemKind::Scroll(ScrollName::CodeOfConduct),
     ItemKind::Scroll(ScrollName::Passwd),
+    ItemKind::Scroll(ScrollName::Hosts),
     ItemKind::Wand(WandGem::Ruby),
     ItemKind::Wand(WandGem::Onyx),
     ItemKind::Wand(WandGem::Amber),
@@ -289,6 +292,7 @@ pub enum ScrollEffect {
     Instability,
     Acquirement,
     Forgetting,
+    Binding,
 }
 
 const ALL_SCROLL_EFFECTS: &[ScrollEffect] = &[
@@ -298,6 +302,7 @@ const ALL_SCROLL_EFFECTS: &[ScrollEffect] = &[
     ScrollEffect::Instability,
     ScrollEffect::Acquirement,
     ScrollEffect::Forgetting,
+    ScrollEffect::Binding,
 ];
 
 impl ScrollEffect {
@@ -309,6 +314,7 @@ impl ScrollEffect {
             ScrollEffect::Instability => "Instability",
             ScrollEffect::Acquirement => "Acquirement",
             ScrollEffect::Forgetting => "Forgetting",
+            ScrollEffect::Binding => "Binding",
         }
     }
 }
@@ -707,6 +713,9 @@ pub fn execute_item_command(
                 }
                 ScrollEffect::Acquirement => {
                     commands.trigger(AcquirementEvent { origin: player_pos });
+                }
+                ScrollEffect::Binding => {
+                    commands.trigger(BindingEvent { origin: player_pos });
                 }
                 ScrollEffect::Forgetting => match identities.forget(&mut rand::thread_rng()) {
                     Some((_n, type_word)) => {
