@@ -26,6 +26,7 @@ use crate::{
     effects::{
         crumble_terrain::{
             Fragile, RubbleMaterial, handle_right_click_excavation, on_wand_crumbling,
+            spawn_rubble_piece,
         },
         projectile::{
             apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit, apply_knockback_on_hit,
@@ -289,6 +290,9 @@ pub fn spawn_game_world(
 
     commands.insert_resource(WorldBounds { width: WORLD_WIDTH, height: WORLD_HEIGHT });
     let rubble_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.5, 0.5)));
+    for piece in &terrain_geometry.rubble_pieces {
+        spawn_rubble_piece(commands, meshes, &rubble_material, piece, None);
+    }
     commands.insert_resource(RubbleMaterial(rubble_material));
 
     fov::spawn_fov_meshes(commands, meshes, materials, WORLD_WIDTH, WORLD_HEIGHT);
@@ -305,6 +309,7 @@ pub fn spawn_game_world(
         materials,
         &terrain_geometry.rooms,
         &terrain_geometry.playable_area,
+        &terrain_geometry.chamber_centers,
         archipelago_id,
         depth,
         saved_player,

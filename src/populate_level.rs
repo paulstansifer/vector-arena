@@ -27,6 +27,7 @@ pub fn populate(
     materials: &mut Assets<ColorMaterial>,
     rooms: &[Rect<f32>],
     playable_area: &SafeMultiPolygon,
+    chamber_centers: &[Vec2],
     archipelago_id: Entity,
     depth: u32,
     saved_player: Option<(Stats, Inventory, StatusEffects)>,
@@ -86,6 +87,32 @@ pub fn populate(
             drop,
             rng,
         );
+    }
+
+    // Chamber-room vaults always hold a monster and a treasure, regardless of the random rolls
+    // used for the rest of the level.
+    for &chamber_pos in chamber_centers {
+        spawn_monster(
+            commands,
+            materials,
+            monster_mesh.clone(),
+            archipelago_id,
+            chamber_pos,
+            monster_letters,
+            None,
+            rng,
+        );
+
+        let kind = random_item_kind(rng);
+        let (svg_path, param) = sprite_spec(kind);
+        commands.spawn((
+            LevelEntity,
+            Item(kind),
+            WorldTooltip(item_name(kind, 1).to_string()),
+            SvgSprite { svg_path: svg_path.into(), param: Some(param) },
+            Transform::from_translation(chamber_pos.extend(fov::ON_FLOOR_Z))
+                .with_scale(Vec3::splat(0.4)),
+        ));
     }
 
     let item_count = rng.gen_range(4..=5);

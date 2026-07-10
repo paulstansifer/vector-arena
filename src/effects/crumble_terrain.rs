@@ -195,55 +195,66 @@ pub fn subtract_polygon_from_terrain(
         }
     });
 
-    // Shrink the rubble pieces and round off sharp corners.
+    for poly in rubble_polygons {
+        spawn_rubble_piece(commands, meshes, rubble_material, &poly, outward_impulse);
+    }
+}
+
+/// Shrinks and rounds off a single rubble polygon's corners, then spawns a Dynamic `Rubble`
+/// entity for each resulting piece (buffering can occasionally split one polygon into several).
+/// `outward_impulse`: if `Some((origin, speed))`, the piece also gets a velocity directed away
+/// from `origin`, on top of its normal small random tumble. Shared by excavation debris
+/// (`subtract_polygon_from_terrain`) and pre-placed rubble-room obstacles.
+pub fn spawn_rubble_piece(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    rubble_material: &Handle<ColorMaterial>,
+    poly: &SafePolygon,
+    outward_impulse: Option<(Vec2, f32)>,
+) {
     let style = BufferStyle::new(-RUBBLE_SHRINK)
         .line_cap(LineCap::Round(PI / 4.0))
         .line_join(LineJoin::Round(PI / 4.0));
 
-    for poly in rubble_polygons {
-        // Buffer each individual polygon with the round style to shrink and round off corners
-        let shrunk_poly_multi = poly.buffer_with_style(style.clone());
-        for shrunk_poly in shrunk_poly_multi.iter() {
-            if shrunk_poly.exterior().coords().count() < 4 {
-                continue;
-            }
-            if let Some(centroid) = shrunk_poly.centroid() {
-                let center = Vec2::new(centroid.x(), centroid.y());
-                let local_poly = shrunk_poly.translate(-center.x, -center.y);
-                let vertices: Vec<Vec2> =
-                    local_poly.exterior().coords().map(|c| Vec2::new(c.x, c.y)).collect();
-                if let Some(rubble_collider) = Collider::convex_hull(vertices) {
-                    let local_multipoly = SafeMultiPolygon::from(SafePolygon(local_poly));
-                    let rubble_mesh = geometry_to_mesh(&local_multipoly);
+    // Buffer the polygon with the round style to shrink and round off corners.
+    let shrunk_poly_multi = poly.buffer_with_style(style);
+    for shrunk_poly in shrunk_poly_multi.iter() {
+        if shrunk_poly.exterior().coords().count() < 4 {
+            continue;
+        }
+        if let Some(centroid) = shrunk_poly.centroid() {
+            let center = Vec2::new(centroid.x(), centroid.y());
+            let local_poly = shrunk_poly.translate(-center.x, -center.y);
+            let vertices: Vec<Vec2> =
+                local_poly.exterior().coords().map(|c| Vec2::new(c.x, c.y)).collect();
+            if let Some(rubble_collider) = Collider::convex_hull(vertices) {
+                let local_multipoly = SafeMultiPolygon::from(SafePolygon(local_poly));
+                let rubble_mesh = geometry_to_mesh(&local_multipoly);
 
-                    let mut rng = rand::thread_rng();
-                    let angle: f32 = rng.gen_range(0.0..std::f32::consts::TAU);
-                    let random_speed: f32 = rng.gen_range(10.0..30.0);
-                    let random_vel = Vec2::new(angle.cos(), angle.sin()) * random_speed;
-                    let directed_vel = outward_impulse.map_or(Vec2::ZERO, |(origin, speed)| {
-                        (center - origin).normalize_or_zero() * speed
-                    });
-                    let velocity = LinearVelocity(random_vel + directed_vel);
+                let mut rng = rand::thread_rng();
+                let angle: f32 = rng.gen_range(0.0..std::f32::consts::TAU);
+                let random_speed: f32 = rng.gen_range(10.0..30.0);
+                let random_vel = Vec2::new(angle.cos(), angle.sin()) * random_speed;
+                let directed_vel = outward_impulse.map_or(Vec2::ZERO, |(origin, speed)| {
+                    (center - origin).normalize_or_zero() * speed
+                });
+                let velocity = LinearVelocity(random_vel + directed_vel);
 
-                    commands.spawn((
-                        LevelEntity,
-                        Rubble,
-                        Mesh2d(meshes.add(rubble_mesh)),
-                        MeshMaterial2d(rubble_material.clone()),
-                        Transform::from_translation(center.extend(10.0)), // Set Z to 10.0 to render on top
-                        RigidBody::Dynamic,
-                        rubble_collider,
-                        CollisionLayers::new(
-                            GameLayer::Dynamic,
-                            [GameLayer::Wall, GameLayer::Dynamic],
-                        ),
-                        velocity,
-                        LinearDamping(1.5),
-                        AngularDamping(1.5),
-                        Friction::new(3.0),
-                        Restitution::new(0.4),
-                    ));
-                }
+                commands.spawn((
+                    LevelEntity,
+                    Rubble,
+                    Mesh2d(meshes.add(rubble_mesh)),
+                    MeshMaterial2d(rubble_material.clone()),
+                    Transform::from_translation(center.extend(10.0)), // Set Z to 10.0 to render on top
+                    RigidBody::Dynamic,
+                    rubble_collider,
+                    CollisionLayers::new(GameLayer::Dynamic, [GameLayer::Wall, GameLayer::Dynamic]),
+                    velocity,
+                    LinearDamping(1.5),
+                    AngularDamping(1.5),
+                    Friction::new(3.0),
+                    Restitution::new(0.4),
+                ));
             }
         }
     }

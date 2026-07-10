@@ -21,8 +21,23 @@ pub const CORRIDOR_WIDTH: f32 = 35.0;
 const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
 const DOOR_PROB: f32 = 0.25 * 0.0;
 const DOUBLE_DOOR_PROB: f32 = 0.75 * 0.0;
-/// Probability a room gets a special variant (high for testing)
-const SPECIAL_ROOM_PROB: f32 = 0.15;
+/// Probability a room gets a special variant
+const SPECIAL_ROOM_PROB: f32 = 0.08;
+
+/// Length cut off each wall to form an octagon room's diagonal corners.
+const OCTAGON_BEVEL: f32 = 30.0;
+/// Side length of a chamber room's inner treasure vault.
+const CHAMBER_SIZE: f32 = 45.0;
+/// Thickness of the wall separating a chamber vault from the rest of the room.
+const CHAMBER_WALL_THICKNESS: f32 = 5.0;
+/// Number of rubble obstacles scattered around a rubble room.
+const RUBBLE_COUNT: usize = 20;
+/// Size range (diameter) of a single rubble obstacle.
+const RUBBLE_SIZE: std::ops::Range<f32> = 15.0..30.0;
+/// Margin kept clear of rubble near a room's walls/connections.
+const RUBBLE_MARGIN: f32 = 20.0;
+/// Thickness of the walkway in a ring room (and the solid island it encloses).
+const RING_THICKNESS: f32 = CORRIDOR_WIDTH;
 
 pub struct TerrainGeometry {
     pub solid_rock: SafeMultiPolygon,
@@ -32,6 +47,11 @@ pub struct TerrainGeometry {
     pub corridor_ends: Vec<Vec2>,
     pub doors: Vec<DoorGeometry>,
     pub torpor_zones: Vec<SafePolygon>,
+    /// Center points of chamber-room vaults, each guaranteed a monster and a treasure.
+    pub chamber_centers: Vec<Vec2>,
+    /// Shapes of movable rubble obstacles scattered through rubble rooms, to be spawned as
+    /// Dynamic `Rubble` entities (see `effects::crumble_terrain::spawn_rubble_piece`).
+    pub rubble_pieces: Vec<SafePolygon>,
 }
 
 #[derive(Clone, Copy)]
@@ -116,8 +136,16 @@ impl TerrainGeometry {
         allocated_partitions: Vec<(Partition, PartitionRole)>,
         rng: &mut impl Rng,
     ) -> Self {
-        let (rooms, playable_area, doors, corridor_ends, torpor_zones, glass_walls_pre) =
-            render(&allocated_partitions, rng);
+        let (
+            rooms,
+            playable_area,
+            doors,
+            corridor_ends,
+            torpor_zones,
+            glass_walls_pre,
+            chamber_centers,
+            rubble_pieces,
+        ) = render(&allocated_partitions, rng);
 
         // The terrain is the bounds minus the playable area, minus glass walls (which have their own entity).
         let earth = Rect::<f32>::new((0.0, 0.0), (width, height));
@@ -152,6 +180,12 @@ impl TerrainGeometry {
 
         let torpor_zones =
             torpor_zones.into_iter().map(|p| p.translate(offset_x, offset_y)).collect();
+        let chamber_centers = chamber_centers
+            .into_iter()
+            .map(|pos| Vec2::new(pos.x + offset_x, pos.y + offset_y))
+            .collect();
+        let rubble_pieces =
+            rubble_pieces.into_iter().map(|p| p.translate(offset_x, offset_y)).collect();
         TerrainGeometry {
             solid_rock: geometry,
             playable_area,
@@ -160,6 +194,8 @@ impl TerrainGeometry {
             corridor_ends,
             doors,
             torpor_zones,
+            chamber_centers,
+            rubble_pieces,
         }
     }
 }
@@ -173,11 +209,27 @@ pub enum RoomVariant {
     Oval,
     Colonnade,
     Torpor,
+    /// Diagonally beveled corners, cut only where no hallway connects nearby.
+    Octagon,
+    /// A small walled-off vault in the middle of the room, holding a monster and treasure.
+    Chamber,
+    /// Scattered immovable rubble obstacles.
+    Rubble,
+    /// A rectangular ring of walkway around a solid island.
+    Ring,
 }
 
 impl RoomVariant {
     fn rectangular_borders(self) -> bool {
-        matches!(self, RoomVariant::Normal | RoomVariant::Colonnade | RoomVariant::Torpor)
+        matches!(
+            self,
+            RoomVariant::Normal
+                | RoomVariant::Colonnade
+                | RoomVariant::Torpor
+                | RoomVariant::Chamber
+                | RoomVariant::Rubble
+                | RoomVariant::Ring
+        )
     }
 }
 
@@ -393,6 +445,8 @@ fn render(
     Vec<Vec2>,
     Vec<SafePolygon>,
     SafeMultiPolygon,
+    Vec<Vec2>,
+    Vec<SafePolygon>,
 ) {
     let merged_connections = find_merged_room_connections(bsp, rng);
 
@@ -401,6 +455,8 @@ fn render(
     let mut doors = Vec::new();
     let mut corridor_ends_set: HashSet<(u32, u32)> = HashSet::new();
     let mut torpor_zones: Vec<SafePolygon> = Vec::new();
+    let mut chamber_centers: Vec<Vec2> = Vec::new();
+    let mut rubble_pieces: Vec<SafePolygon> = Vec::new();
 
     // Avoid hallway stubs leading to nothing.
     let empty_connections: Vec<(f32, f32)> = bsp
@@ -532,6 +588,189 @@ fn render(
                             torpor_zones.push(SafePolygon(inner.to_polygon()));
                         }
                     }
+                    RoomVariant::Octagon => {
+                        let connections: Vec<_> =
+                            partition_connections(partition).into_iter().filter(is_live).collect();
+                        let bevel = octagon_bevel_corners(&room, &connections);
+                        region =
+                            region.union(&SafeMultiPolygon::from(octagon_polygon(&room, bevel)));
+                        for connection in connections {
+                            if is_merged_connection(&connection, &merged_connections) {
+                                region = region.union(&SafeMultiPolygon::from(open_full_wall(
+                                    &room, connection,
+                                )));
+                            } else {
+                                let is_double =
+                                    is_double_width_corridor_connection(&connection, bsp);
+                                let width =
+                                    if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                                union_all(
+                                    &mut region,
+                                    connect_room_to_connection(&room, connection, width),
+                                );
+
+                                let door_prob =
+                                    if is_double { DOUBLE_DOOR_PROB } else { DOOR_PROB };
+                                if rng.gen_bool(door_prob as f64) {
+                                    let room_entry = room_entry_point(&room, connection);
+                                    if is_double {
+                                        let (d1, d2) =
+                                            create_double_door(connection.side, room_entry);
+                                        doors.push(d1);
+                                        doors.push(d2);
+                                    } else {
+                                        doors.push(create_door(connection.side, room_entry));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    RoomVariant::Chamber => {
+                        region = region.union(&SafeMultiPolygon::from(room.to_polygon()));
+                        for connection in
+                            partition_connections(partition).into_iter().filter(is_live)
+                        {
+                            if is_merged_connection(&connection, &merged_connections) {
+                                region = region.union(&SafeMultiPolygon::from(open_full_wall(
+                                    &room, connection,
+                                )));
+                            } else {
+                                let is_double =
+                                    is_double_width_corridor_connection(&connection, bsp);
+                                let width =
+                                    if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                                union_all(
+                                    &mut region,
+                                    connect_room_to_connection(&room, connection, width),
+                                );
+
+                                let door_prob =
+                                    if is_double { DOUBLE_DOOR_PROB } else { DOOR_PROB };
+                                if rng.gen_bool(door_prob as f64) {
+                                    let room_entry = room_entry_point(&room, connection);
+                                    if is_double {
+                                        let (d1, d2) =
+                                            create_double_door(connection.side, room_entry);
+                                        doors.push(d1);
+                                        doors.push(d2);
+                                    } else {
+                                        doors.push(create_door(connection.side, room_entry));
+                                    }
+                                }
+                            }
+                        }
+
+                        let cx = (room.min().x + room.max().x) / 2.0;
+                        let cy = (room.min().y + room.max().y) / 2.0;
+                        let half = CHAMBER_SIZE / 2.0;
+                        let inner = Rect::new((cx - half, cy - half), (cx + half, cy + half));
+                        let outer_half = half + CHAMBER_WALL_THICKNESS;
+                        let outer = Rect::new(
+                            (cx - outer_half, cy - outer_half),
+                            (cx + outer_half, cy + outer_half),
+                        );
+                        // Only carve the vault if the room comfortably contains it.
+                        if room.width() > outer.width() + 10.0
+                            && room.height() > outer.height() + 10.0
+                        {
+                            region = region.difference(&SafeMultiPolygon::from(outer.to_polygon()));
+                            region = region.union(&SafeMultiPolygon::from(inner.to_polygon()));
+
+                            let side = [
+                                ConnectionSide::Left,
+                                ConnectionSide::Right,
+                                ConnectionSide::Bottom,
+                                ConnectionSide::Top,
+                            ][rng.gen_range(0..4)];
+                            let (room_entry, opening) = chamber_opening(inner, outer, side);
+                            region = region.union(&SafeMultiPolygon::from(opening));
+                            doors.push(create_door(side, room_entry));
+                            chamber_centers.push(Vec2::new(cx, cy));
+                        }
+                    }
+                    RoomVariant::Rubble => {
+                        region = region.union(&SafeMultiPolygon::from(room.to_polygon()));
+                        for connection in
+                            partition_connections(partition).into_iter().filter(is_live)
+                        {
+                            if is_merged_connection(&connection, &merged_connections) {
+                                region = region.union(&SafeMultiPolygon::from(open_full_wall(
+                                    &room, connection,
+                                )));
+                            } else {
+                                let is_double =
+                                    is_double_width_corridor_connection(&connection, bsp);
+                                let width =
+                                    if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                                union_all(
+                                    &mut region,
+                                    connect_room_to_connection(&room, connection, width),
+                                );
+
+                                let door_prob =
+                                    if is_double { DOUBLE_DOOR_PROB } else { DOOR_PROB };
+                                if rng.gen_bool(door_prob as f64) {
+                                    let room_entry = room_entry_point(&room, connection);
+                                    if is_double {
+                                        let (d1, d2) =
+                                            create_double_door(connection.side, room_entry);
+                                        doors.push(d1);
+                                        doors.push(d2);
+                                    } else {
+                                        doors.push(create_door(connection.side, room_entry));
+                                    }
+                                }
+                            }
+                        }
+                        // Room stays fully open; the rubble itself is spawned as movable
+                        // (Dynamic) entities rather than baked into the terrain.
+                        rubble_pieces.extend(rubble_piece_polygons(&room, rng));
+                    }
+                    RoomVariant::Ring => {
+                        let inner = Rect::new(
+                            (room.min().x + RING_THICKNESS, room.min().y + RING_THICKNESS),
+                            (room.max().x - RING_THICKNESS, room.max().y - RING_THICKNESS),
+                        );
+                        let outer_poly = SafeMultiPolygon::from(room.to_polygon());
+                        let ring = if inner.width() > 0.0 && inner.height() > 0.0 {
+                            outer_poly.difference(&SafeMultiPolygon::from(inner.to_polygon()))
+                        } else {
+                            outer_poly
+                        };
+                        region = region.union(&ring);
+                        for connection in
+                            partition_connections(partition).into_iter().filter(is_live)
+                        {
+                            if is_merged_connection(&connection, &merged_connections) {
+                                region = region.union(&SafeMultiPolygon::from(open_full_wall(
+                                    &room, connection,
+                                )));
+                            } else {
+                                let is_double =
+                                    is_double_width_corridor_connection(&connection, bsp);
+                                let width =
+                                    if is_double { CORRIDOR_WIDTH * 2.0 } else { CORRIDOR_WIDTH };
+                                union_all(
+                                    &mut region,
+                                    connect_room_to_connection(&room, connection, width),
+                                );
+
+                                let door_prob =
+                                    if is_double { DOUBLE_DOOR_PROB } else { DOOR_PROB };
+                                if rng.gen_bool(door_prob as f64) {
+                                    let room_entry = room_entry_point(&room, connection);
+                                    if is_double {
+                                        let (d1, d2) =
+                                            create_double_door(connection.side, room_entry);
+                                        doors.push(d1);
+                                        doors.push(d2);
+                                    } else {
+                                        doors.push(create_door(connection.side, room_entry));
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             PartitionRole::Corridor { double_width } => {
@@ -609,7 +848,16 @@ fn render(
         }
     }
 
-    (rooms, playables, doors, corridor_ends, torpor_zones, glass_walls)
+    (
+        rooms,
+        playables,
+        doors,
+        corridor_ends,
+        torpor_zones,
+        glass_walls,
+        chamber_centers,
+        rubble_pieces,
+    )
 }
 
 #[derive(Copy, Clone)]
@@ -652,12 +900,17 @@ fn make_door(
 }
 
 fn create_door(side: ConnectionSide, room_entry: (f32, f32)) -> DoorGeometry {
+    create_sized_door(side, room_entry, CORRIDOR_WIDTH)
+}
+
+/// Like `create_door`, but for an opening of arbitrary `width` (e.g. a chamber vault's doorway).
+fn create_sized_door(side: ConnectionSide, room_entry: (f32, f32), width: f32) -> DoorGeometry {
     let thickness = 5.0;
-    let phys_len = CORRIDOR_WIDTH - 4.0;
+    let phys_len = width - 4.0;
     let entry_mid = if side.is_vertical() { room_entry.1 } else { room_entry.0 };
 
     let phys_span = (entry_mid - phys_len / 2.0, entry_mid + phys_len / 2.0);
-    let disp_span = (entry_mid - CORRIDOR_WIDTH / 2.0, entry_mid + CORRIDOR_WIDTH / 2.0);
+    let disp_span = (entry_mid - width / 2.0, entry_mid + width / 2.0);
 
     make_door(side, room_entry, thickness, phys_span, disp_span, true)
 }
@@ -724,16 +977,173 @@ fn room_entry_point(room: &Rect<f32>, connection: ConnectionPoint) -> (f32, f32)
 
 fn random_room_variant(rng: &mut impl Rng) -> RoomVariant {
     if rng.gen_bool(SPECIAL_ROOM_PROB as f64) {
-        match rng.gen_range(0..1) {
+        // Oval rooms are excluded here pending investigation of a performance problem (see TODO
+        // near `RoomVariant::Oval`'s uses).
+        match rng.gen_range(0..6) {
             0 => RoomVariant::Colonnade,
-            2 => RoomVariant::Torpor,
+            1 => RoomVariant::Torpor,
+            2 => RoomVariant::Octagon,
+            3 => RoomVariant::Chamber,
+            4 => RoomVariant::Rubble,
+            5 => RoomVariant::Ring,
             _ => unreachable!(),
         }
-        // TODO: oval rooms cause big performance problems. Investigate.
-        // if rng.gen_bool(0.5) { RoomVariant::Colonnade } else { RoomVariant::Torpor }
     } else {
         RoomVariant::Normal
     }
+}
+
+/// Which of a room's four corners (BL, BR, TR, TL) are far enough from any live connection's
+/// entry point to be safely cut into a diagonal bevel.
+fn octagon_bevel_corners(room: &Rect<f32>, connections: &[ConnectionPoint]) -> [bool; 4] {
+    let mut blocked = [false; 4];
+    for connection in connections {
+        let entry = room_entry_point(room, *connection);
+        match connection.side {
+            ConnectionSide::Left => {
+                if entry.1 - room.min().y < OCTAGON_BEVEL {
+                    blocked[0] = true;
+                }
+                if room.max().y - entry.1 < OCTAGON_BEVEL {
+                    blocked[3] = true;
+                }
+            }
+            ConnectionSide::Right => {
+                if entry.1 - room.min().y < OCTAGON_BEVEL {
+                    blocked[1] = true;
+                }
+                if room.max().y - entry.1 < OCTAGON_BEVEL {
+                    blocked[2] = true;
+                }
+            }
+            ConnectionSide::Bottom => {
+                if entry.0 - room.min().x < OCTAGON_BEVEL {
+                    blocked[0] = true;
+                }
+                if room.max().x - entry.0 < OCTAGON_BEVEL {
+                    blocked[1] = true;
+                }
+            }
+            ConnectionSide::Top => {
+                if entry.0 - room.min().x < OCTAGON_BEVEL {
+                    blocked[3] = true;
+                }
+                if room.max().x - entry.0 < OCTAGON_BEVEL {
+                    blocked[2] = true;
+                }
+            }
+        }
+    }
+    [!blocked[0], !blocked[1], !blocked[2], !blocked[3]]
+}
+
+/// Builds a room polygon with diagonal bevels cut into the corners marked `true` in `bevel`
+/// (indices: bottom-left, bottom-right, top-right, top-left), each cutting off `OCTAGON_BEVEL`
+/// units of the two adjoining walls.
+fn octagon_polygon(room: &Rect<f32>, bevel: [bool; 4]) -> SafePolygon {
+    let (x0, y0) = (room.min().x, room.min().y);
+    let (x1, y1) = (room.max().x, room.max().y);
+    let b = OCTAGON_BEVEL.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0);
+
+    let mut coords: Vec<(f32, f32)> = Vec::new();
+    if bevel[0] {
+        coords.push((x0 + b, y0));
+    } else {
+        coords.push((x0, y0));
+    }
+    if bevel[1] {
+        coords.push((x1 - b, y0));
+        coords.push((x1, y0 + b));
+    } else {
+        coords.push((x1, y0));
+    }
+    if bevel[2] {
+        coords.push((x1, y1 - b));
+        coords.push((x1 - b, y1));
+    } else {
+        coords.push((x1, y1));
+    }
+    if bevel[3] {
+        coords.push((x0 + b, y1));
+        coords.push((x0, y1 - b));
+    } else {
+        coords.push((x0, y1));
+    }
+    if bevel[0] {
+        coords.push((x0, y0 + b));
+    }
+    if let Some(&first) = coords.first() {
+        coords.push(first);
+    }
+    SafePolygon(Polygon::new(LineString::from(coords), vec![]))
+}
+
+/// Returns the point on the chamber vault's inner wall where a door should sit, and the polygon
+/// of the wall gap (from outer to inner boundary) that must be carved to let the door through.
+fn chamber_opening(
+    inner: Rect<f32>,
+    outer: Rect<f32>,
+    side: ConnectionSide,
+) -> ((f32, f32), SafePolygon) {
+    let hw = CORRIDOR_WIDTH / 2.0;
+    let cx = (inner.min().x + inner.max().x) / 2.0;
+    let cy = (inner.min().y + inner.max().y) / 2.0;
+
+    match side {
+        ConnectionSide::Left => {
+            let rect = Rect::new((outer.min().x, cy - hw), (inner.min().x, cy + hw));
+            ((inner.min().x, cy), SafePolygon(rect.to_polygon()))
+        }
+        ConnectionSide::Right => {
+            let rect = Rect::new((inner.max().x, cy - hw), (outer.max().x, cy + hw));
+            ((inner.max().x, cy), SafePolygon(rect.to_polygon()))
+        }
+        ConnectionSide::Bottom => {
+            let rect = Rect::new((cx - hw, outer.min().y), (cx + hw, inner.min().y));
+            ((cx, inner.min().y), SafePolygon(rect.to_polygon()))
+        }
+        ConnectionSide::Top => {
+            let rect = Rect::new((cx - hw, inner.max().y), (cx + hw, outer.max().y));
+            ((cx, inner.max().y), SafePolygon(rect.to_polygon()))
+        }
+    }
+}
+
+/// Generates ~`RUBBLE_COUNT` immovable jagged rock obstacles scattered through `room`'s
+/// interior, kept clear of the walls by `RUBBLE_MARGIN` so they never block a connection.
+fn rubble_piece_polygons(room: &Rect<f32>, rng: &mut impl Rng) -> Vec<SafePolygon> {
+    let min_x = room.min().x + RUBBLE_MARGIN;
+    let max_x = room.max().x - RUBBLE_MARGIN;
+    let min_y = room.min().y + RUBBLE_MARGIN;
+    let max_y = room.max().y - RUBBLE_MARGIN;
+    if max_x <= min_x || max_y <= min_y {
+        return Vec::new();
+    }
+
+    (0..RUBBLE_COUNT)
+        .map(|_| {
+            let size = rng.gen_range(RUBBLE_SIZE);
+            let center = Vec2::new(rng.gen_range(min_x..max_x), rng.gen_range(min_y..max_y));
+            let angle: f32 = rng.gen_range(0.0..std::f32::consts::TAU);
+            irregular_blob(center, size / 2.0, angle, rng)
+        })
+        .collect()
+}
+
+/// A small irregular polygon (jittered heptagon) used for rubble obstacles.
+fn irregular_blob(center: Vec2, radius: f32, base_angle: f32, rng: &mut impl Rng) -> SafePolygon {
+    const POINTS: usize = 7;
+    let mut coords: Vec<(f32, f32)> = (0..POINTS)
+        .map(|i| {
+            let angle = base_angle + std::f32::consts::TAU * i as f32 / POINTS as f32;
+            let r = radius * rng.gen_range(0.6..1.0);
+            (center.x + r * angle.cos(), center.y + r * angle.sin())
+        })
+        .collect();
+    if let Some(&first) = coords.first() {
+        coords.push(first);
+    }
+    SafePolygon(Polygon::new(LineString::from(coords), vec![]))
 }
 
 fn oval_polygon(room: &Rect<f32>) -> SafePolygon {
@@ -1001,7 +1411,108 @@ fn rect_for_segment(a: (f32, f32), b: (f32, f32), width: f32) -> SafePolygon {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use geo::BoundingRect;
+    use geo::{Area, BoundingRect, Contains};
+
+    fn partition_300x300(
+        horz_conn: (Vec<f32>, Vec<f32>),
+        vert_conn: (Vec<f32>, Vec<f32>),
+    ) -> Partition {
+        Partition { x: (0.0, 300.0), y: (0.0, 300.0), horz_conn, vert_conn }
+    }
+
+    #[test]
+    fn test_octagon_bevels_corners_with_no_nearby_connection() {
+        // A single connection on the right side, far from every corner.
+        let partition = partition_300x300((Vec::new(), vec![150.0]), (Vec::new(), Vec::new()));
+        let bsp = vec![(partition, PartitionRole::Room { variant: RoomVariant::Octagon })];
+        let mut rng = rand::thread_rng();
+        let (_, playables, ..) = render(&bsp, &mut rng);
+
+        // Room is (10,10)-(290,290) after shrink_room's padding; every corner should be bevelled.
+        assert!(!playables.contains(&geo::Point::new(10.5, 10.5)), "BL corner should be cut");
+        assert!(!playables.contains(&geo::Point::new(289.5, 10.5)), "BR corner should be cut");
+        assert!(!playables.contains(&geo::Point::new(289.5, 289.5)), "TR corner should be cut");
+        assert!(!playables.contains(&geo::Point::new(10.5, 289.5)), "TL corner should be cut");
+        assert!(playables.contains(&geo::Point::new(150.0, 150.0)), "center should stay playable");
+    }
+
+    #[test]
+    fn test_octagon_skips_bevel_near_connection() {
+        // A connection entering right next to the bottom-left corner.
+        let partition = partition_300x300((vec![15.0], Vec::new()), (Vec::new(), Vec::new()));
+        let bsp = vec![(partition, PartitionRole::Room { variant: RoomVariant::Octagon })];
+        let mut rng = rand::thread_rng();
+        let (_, playables, ..) = render(&bsp, &mut rng);
+
+        assert!(
+            playables.contains(&geo::Point::new(10.5, 10.5)),
+            "BL corner should stay sharp near a connection"
+        );
+    }
+
+    #[test]
+    fn test_chamber_carves_vault_with_single_door_and_records_center() {
+        let partition = partition_300x300((Vec::new(), Vec::new()), (Vec::new(), Vec::new()));
+        let bsp = vec![(partition, PartitionRole::Room { variant: RoomVariant::Chamber })];
+        let mut rng = rand::thread_rng();
+        let (_, playables, doors, _, _, _, chamber_centers, _) = render(&bsp, &mut rng);
+
+        assert_eq!(chamber_centers.len(), 1);
+        assert!((chamber_centers[0] - Vec2::new(150.0, 150.0)).length() < f32::EPSILON);
+        assert_eq!(doors.len(), 1, "chamber should have exactly one door");
+        assert!(
+            playables.contains(&geo::Point::new(150.0, 150.0)),
+            "vault interior should be playable"
+        );
+
+        // Exactly one of the four wall-band probes (one per side) should be open: the door side.
+        let probes = [
+            geo::Point::new(124.5, 150.0), // left wall band
+            geo::Point::new(175.5, 150.0), // right wall band
+            geo::Point::new(150.0, 124.5), // bottom wall band
+            geo::Point::new(150.0, 175.5), // top wall band
+        ];
+        let open_count = probes.iter().filter(|p| playables.contains(*p)).count();
+        assert_eq!(open_count, 1, "exactly one wall of the vault should have a door opening");
+    }
+
+    #[test]
+    fn test_rubble_room_stays_open_and_yields_movable_pieces() {
+        let partition = partition_300x300((Vec::new(), Vec::new()), (Vec::new(), Vec::new()));
+        let mut rng = rand::thread_rng();
+
+        let normal_bsp =
+            vec![(partition.clone(), PartitionRole::Room { variant: RoomVariant::Normal })];
+        let (_, normal_playables, ..) = render(&normal_bsp, &mut rng);
+
+        let rubble_bsp = vec![(partition, PartitionRole::Room { variant: RoomVariant::Rubble })];
+        let (_, rubble_playables, _, _, _, _, _, rubble_pieces) = render(&rubble_bsp, &mut rng);
+
+        // Rubble is spawned as movable obstacles, not carved into the terrain, so the room
+        // itself should stay exactly as open as a normal room.
+        assert!(
+            (rubble_playables.unsigned_area() - normal_playables.unsigned_area()).abs() < 1.0,
+            "rubble room's floor should stay fully open"
+        );
+        assert_eq!(rubble_pieces.len(), RUBBLE_COUNT);
+    }
+
+    #[test]
+    fn test_ring_room_has_solid_center_and_playable_walkway() {
+        let partition = partition_300x300((Vec::new(), Vec::new()), (Vec::new(), Vec::new()));
+        let bsp = vec![(partition, PartitionRole::Room { variant: RoomVariant::Ring })];
+        let mut rng = rand::thread_rng();
+        let (_, playables, ..) = render(&bsp, &mut rng);
+
+        assert!(
+            !playables.contains(&geo::Point::new(150.0, 150.0)),
+            "ring room should have a solid island in the middle"
+        );
+        assert!(
+            playables.contains(&geo::Point::new(20.0, 150.0)),
+            "ring room's walkway should be playable"
+        );
+    }
 
     #[test]
     fn partition_space_large_space_has_multiple_partitions_and_connections() {
