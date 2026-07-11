@@ -63,9 +63,16 @@ use crate::{
     visuals::indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
 };
 
-/// Optional resource: when present, dungeon generation uses this seed instead of thread_rng.
+/// The dungeon seed for the current game session. Set fresh (from OS randomness) each time
+/// `GameState::Restart` is entered, unless a `DungeonSeedOverride` resource is present.
 #[derive(Resource)]
 pub struct DungeonSeed(pub u64);
+
+/// Optional resource: forces every restart to (re)use this fixed seed instead of a random one.
+/// Insert this in tests/headless runs that need deterministic dungeons; real gameplay never
+/// inserts it, so every restart gets a fresh time-seeded dungeon.
+#[derive(Resource)]
+pub struct DungeonSeedOverride(pub u64);
 
 #[derive(Resource, Default)]
 pub struct SavedPlayer(pub Option<(Stats, Inventory, StatusEffects)>);
@@ -88,16 +95,13 @@ fn on_enter_restart(
     mut identities: ResMut<ItemIdentities>,
     mut wand_cooldowns: ResMut<WandCooldowns>,
     mut boredom: ResMut<Boredom>,
-    seed: Option<Res<DungeonSeed>>,
+    seed_override: Option<Res<DungeonSeedOverride>>,
 ) {
-    let seed_val = match seed.as_deref() {
+    let seed_val = match seed_override.as_deref() {
         Some(s) => s.0,
-        None => {
-            let s = rand::random::<u64>();
-            commands.insert_resource(DungeonSeed(s));
-            s
-        }
+        None => rand::random::<u64>(),
     };
+    commands.insert_resource(DungeonSeed(seed_val));
     message_log.clear();
     depth.0 = 1;
     monster_letters.clear_monsters();

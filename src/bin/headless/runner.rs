@@ -43,7 +43,7 @@ use vector_arena::{
         DungeonCollider, DungeonState, DungeonVisuals, geometry_to_collider, geometry_to_mesh,
     },
     effects::hit_particles::HitParticlesPlugin,
-    game::{DungeonSeed, GamePlugin},
+    game::{DungeonSeedOverride, GamePlugin},
     nav::{DungeonNavMesh, playable_area_to_nav_mesh},
     player::{MoveTarget, Player},
     ui::{BOTTOM_PANEL_HEIGHT, TOP_PANEL_HEIGHT},
@@ -479,7 +479,7 @@ pub fn run() {
         HitParticlesPlugin,
         SnapPlugin,
     ))
-    .insert_resource(DungeonSeed(42))
+    .insert_resource(DungeonSeedOverride(42))
     .add_systems(Startup, setup_snap_camera);
 
     app.finish();

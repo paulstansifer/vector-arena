@@ -12,7 +12,7 @@ pub fn tick(app: &mut App) {
 /// Passes `seed` to the dungeon generator when `Some`; otherwise uses thread_rng.
 pub fn headless_game_app(seed: Option<u64>) -> App {
     use bevy::{window::ExitCondition, winit::WinitPlugin};
-    use vector_arena::game::{DungeonSeed, GamePlugin};
+    use vector_arena::game::{DungeonSeedOverride, GamePlugin};
 
     let mut app = App::new();
     app.add_plugins((
@@ -29,7 +29,7 @@ pub fn headless_game_app(seed: Option<u64>) -> App {
         GamePlugin { headless: true },
     ));
     if let Some(s) = seed {
-        app.insert_resource(DungeonSeed(s));
+        app.insert_resource(DungeonSeedOverride(s));
     }
     app.finish();
     app
