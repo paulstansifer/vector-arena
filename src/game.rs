@@ -50,7 +50,7 @@ use crate::{
     monster::{self, Stats},
     nav::{self, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
     player::{
-        Player, advance_exploration, check_player_death, directional_move_system,
+        Boredom, Player, advance_exploration, check_player_death, directional_move_system,
         execute_descend_command, execute_stop_command, move_player, register_player_commands,
         rotate_player_to_velocity, set_target_on_click,
     },
@@ -58,7 +58,7 @@ use crate::{
     sprite::SpritePlugin,
     status_effect::{StatusEffects, apply_confusion_to_velocity, tick_status_effects},
     time_scale::manage_time_scale,
-    ui::{Boredom, MessageLog, UiPlugin, enable_ui_input_absorption},
+    ui::{MessageLog, UiPlugin, enable_ui_input_absorption},
     util::safegeo::SafeMultiPolygon,
     visuals::indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
 };

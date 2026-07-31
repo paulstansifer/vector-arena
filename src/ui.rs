@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, egui};
 use pyri_tooltip::prelude::*;
-use rand::Rng;
 
 use geo::Contains;
 
@@ -16,8 +15,7 @@ use crate::{
     item::{
         Inventory, ItemIdentities, ItemKind, WAND_COOLDOWN_SECS, WandCooldowns, item_display_name,
     },
-    monster::Stats,
-    player::Player,
+    player::{BOREDOM_MAX, Boredom, Player, tick_boredom},
     sprite::SpriteEguiTextures,
     status_effect::StatusEffects,
 };
@@ -97,50 +95,6 @@ fn count_mp_vertices(mp: &crate::util::safegeo::SafeMultiPolygon) -> usize {
         .flat_map(|p| std::iter::once(p.exterior()).chain(p.interiors()))
         .map(|ls| ls.coords().count())
         .sum()
-}
-
-const BOREDOM_MAX: f32 = 60.0;
-const BOREDOM_WARN: f32 = 40.0;
-
-#[derive(Resource, Default)]
-pub struct Boredom {
-    pub seconds: f32,
-    warned: bool,
-}
-
-impl Boredom {
-    pub fn reduce(&mut self, secs: f32) { self.seconds = (self.seconds - secs).max(0.0); }
-}
-
-fn tick_boredom(
-    mut boredom: ResMut<Boredom>,
-    time: Res<Time>,
-    mut log: ResMut<MessageLog>,
-    mut player_query: Query<&mut Stats, With<Player>>,
-) {
-    boredom.seconds += time.delta_secs();
-
-    if boredom.seconds < BOREDOM_WARN {
-        boredom.warned = false;
-    }
-
-    if boredom.seconds >= BOREDOM_WARN && !boredom.warned {
-        boredom.warned = true;
-        let suggestion = if rand::thread_rng().gen_bool(0.5) {
-            "try an unknown item"
-        } else {
-            "blow something up"
-        };
-        log.push(format!("This is getting boring. Maybe you should {suggestion}."));
-    }
-
-    if boredom.seconds >= BOREDOM_MAX {
-        boredom.seconds -= 15.0;
-        log.push("You're so bored that it hurts! (-10 HP)");
-        if let Ok(mut stats) = player_query.single_mut() {
-            crate::player::deal_damage_to_player(&mut stats, 10.0);
-        }
-    }
 }
 
 pub fn enable_ui_input_absorption(mut egui_settings: ResMut<EguiGlobalSettings>) {

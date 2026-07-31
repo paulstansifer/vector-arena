@@ -10,6 +10,7 @@ use bevy_landmass::prelude::*;
 use geo::Contains;
 
 use bevy::input::keyboard::Key;
+use rand::Rng;
 
 use crate::{
     GameState, Staircase,
@@ -20,6 +21,50 @@ use crate::{
     status_effect::StatusEffects,
     ui::MessageLog,
 };
+
+pub const BOREDOM_MAX: f32 = 60.0;
+const BOREDOM_WARN: f32 = 40.0;
+
+#[derive(Resource, Default)]
+pub struct Boredom {
+    pub seconds: f32,
+    warned: bool,
+}
+
+impl Boredom {
+    pub fn reduce(&mut self, secs: f32) { self.seconds = (self.seconds - secs).max(0.0); }
+}
+
+pub fn tick_boredom(
+    mut boredom: ResMut<Boredom>,
+    time: Res<Time>,
+    mut log: ResMut<MessageLog>,
+    mut player_query: Query<&mut crate::monster::Stats, With<Player>>,
+) {
+    boredom.seconds += time.delta_secs();
+
+    if boredom.seconds < BOREDOM_WARN {
+        boredom.warned = false;
+    }
+
+    if boredom.seconds >= BOREDOM_WARN && !boredom.warned {
+        boredom.warned = true;
+        let suggestion = if rand::thread_rng().gen_bool(0.5) {
+            "try an unknown item"
+        } else {
+            "blow something up"
+        };
+        log.push(format!("This is getting boring. Maybe you should {suggestion}."));
+    }
+
+    if boredom.seconds >= BOREDOM_MAX {
+        boredom.seconds -= 15.0;
+        log.push("You're so bored that it hurts! (-10 HP)");
+        if let Ok(mut stats) = player_query.single_mut() {
+            deal_damage_to_player(&mut stats, 10.0);
+        }
+    }
+}
 
 pub fn rotate_player_to_velocity(mut query: Query<(&LinearVelocity, &mut Rotation), With<Player>>) {
     for (velocity, mut rotation) in &mut query {

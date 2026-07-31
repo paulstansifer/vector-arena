@@ -25,9 +25,9 @@ use crate::{
         },
     },
     monster::{Monster, Stats},
-    player::{ExplorationGoal, Player},
+    player::{Boredom, ExplorationGoal, Player},
     status_effect::{StatusEffect, StatusEffects},
-    ui::{Boredom, MessageLog, WorldTooltip},
+    ui::{MessageLog, WorldTooltip},
 };
 
 // TODO: use the 'strum' crate to get lowercase colors and ALL CAPS scroll titles.
@@ -620,7 +620,7 @@ pub fn execute_item_command(
     letter_map: Res<crate::command_palette::LetterMap>,
     mut identities: ResMut<ItemIdentities>,
     mut wand_cooldowns: ResMut<WandCooldowns>,
-    mut boredom: ResMut<crate::ui::Boredom>,
+    mut boredom: ResMut<crate::player::Boredom>,
 ) {
     let Some(cmd) = palette.pending_command.take() else { return };
 

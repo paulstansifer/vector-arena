@@ -257,7 +257,7 @@ pub fn explode_sigil(
     fragile_query: Query<(Entity, &ColliderAabb), With<Fragile>>,
     mut message_log: ResMut<MessageLog>,
     mut monster_letters: ResMut<LetterMap>,
-    mut boredom: Option<ResMut<crate::ui::Boredom>>,
+    mut boredom: Option<ResMut<crate::player::Boredom>>,
 ) {
     let triggered: Vec<(Entity, Vec2, [f32; NUM_PTS], [Vec2; NUM_PTS])> = sigil_query
         .iter()
