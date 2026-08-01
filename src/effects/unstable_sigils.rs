@@ -270,8 +270,8 @@ pub fn explode_sigil(
     }
 
     if let Some(ref mut b) = boredom {
-        b.reduce(10.0);
-        message_log.push("The unstable sigil detonates! (Cool! -10 seconds)");
+        b.reduce(5.0);
+        message_log.push("The unstable sigil detonates! (Cool! -5 boredom)");
     } else {
         message_log.push("The unstable sigil detonates!");
     }

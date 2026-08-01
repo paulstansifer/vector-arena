@@ -590,7 +590,7 @@ fn find_and_remove_item(
 /// Identifies an item, reducing boredom if it was previously unknown.
 pub fn identify_item(item: ItemKind, identities: &mut ItemIdentities, boredom: &mut Boredom) {
     if !identities.is_identified(item) {
-        boredom.reduce(30.0);
+        boredom.reduce(15.0);
     }
     identities.identify(item);
 }

@@ -22,13 +22,18 @@ use crate::{
     ui::MessageLog,
 };
 
-pub const BOREDOM_MAX: f32 = 60.0;
-const BOREDOM_WARN: f32 = 40.0;
+pub const BOREDOM_MAX: f32 = 30.0;
+const BOREDOM_WARN: f32 = 20.0;
+const BOREDOM_START: f32 = 10.0;
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct Boredom {
     pub seconds: f32,
     warned: bool,
+}
+
+impl Default for Boredom {
+    fn default() -> Self { Boredom { seconds: BOREDOM_START, warned: false } }
 }
 
 impl Boredom {
@@ -58,7 +63,7 @@ pub fn tick_boredom(
     }
 
     if boredom.seconds >= BOREDOM_MAX {
-        boredom.seconds -= 15.0;
+        boredom.seconds -= 7.5;
         log.push("You're so bored that it hurts! (-10 HP)");
         if let Ok(mut stats) = player_query.single_mut() {
             deal_damage_to_player(&mut stats, 10.0);

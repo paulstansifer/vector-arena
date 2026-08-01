@@ -412,7 +412,7 @@ fn render_hud(
                 ui,
                 boredom.seconds / BOREDOM_MAX,
                 egui::Color32::from_rgb(110, 110, 110),
-                &format!("Boredom: {}s", boredom.seconds as u32),
+                &format!("Boredom: {}", boredom.seconds as u32),
             );
 
             if let Some(effects) = effects {
