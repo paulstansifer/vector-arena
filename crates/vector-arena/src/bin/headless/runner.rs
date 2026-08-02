@@ -6,11 +6,13 @@
 //! Progress is logged to /tmp/va-headless.log.
 //!
 //! Commands:
-//!   wait <N>s          - advance N seconds at 60 fps
-//!   snap <path>        - save a PNG screenshot to <path>
-//!   cmd <key>          - trigger a command-palette key (e.g. "cmd q")
-//!   click left <x> <y> - set the player's move target to world coords (x, y)
-//!   level blank        - replace the dungeon with an open 800×500 room
+//! ```text
+//! wait Ns          - advance N seconds at 60 fps
+//! snap path        - save a PNG screenshot to path
+//! cmd path         - drive the command palette directly (e.g. "cmd g h")
+//! click left x y   - set the player's move target to world coords (x, y)
+//! level blank      - replace the dungeon with an open 800×500 room
+//! ```
 use std::{
     fs::{File, OpenOptions},
     io::{BufWriter, Write},

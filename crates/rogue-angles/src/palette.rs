@@ -35,7 +35,7 @@ pub struct Targetable;
 
 /// Optional one-line description shown next to an entity's label in the
 /// target picker (e.g. "Sleeping goblin 12/20 HP"). Falls back to a generic
-/// "target <letter>" when absent.
+/// "target `<letter>`" when absent.
 #[derive(Component, Default)]
 pub struct TargetDescription(pub String);
 
@@ -184,7 +184,7 @@ impl LocationLabels {
 }
 
 /// Per-letter description override (e.g. "staircase down"); falls back to a
-/// direction word for the eight reserved slots, or "location <letter>".
+/// direction word for the eight reserved slots, or "location `<letter>`".
 #[derive(Resource, Default)]
 pub struct LocationDescriptions(pub HashMap<char, String>);
 
