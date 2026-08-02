@@ -1,7 +1,81 @@
 # Splitting Vector Arena into `rogue-angles` + a demo game
 
-Status: **in progress.** Phases 0–2 done (2 absorbed phase 3 — see below);
-phases 4–8 pending.
+Status: **in progress.** Phases 0–4 done (2 absorbed phase 3 — see below);
+phases 5–8 pending.
+
+## Phase 4 notes (level generation: `RoomKind` + `LevelBuilder` + `LevelPlan`)
+
+`crates/vector-arena/src/dungeon/level_generation.rs` (1758 lines) is gone —
+its framework half moved to `crates/rogue-angles/src/dungeon/level_generation.rs`
+and its eight room variants became stock `RoomKind` implementors under
+`crates/rogue-angles/src/dungeon/rooms/{normal,oval,colonnade,slow_zone,octagon,
+vault,rubble,ring}.rs`. The 6×-duplicated connection-carving block is now one
+method, `LevelBuilder::carve_connection`. `TerrainGeometry`'s 9-field/8-tuple
+mismatch is gone too — `LevelPlan` has named fields plus tagged
+`markers`/`regions` (`HashMap<&'static str, Vec<_>>`) so a custom `RoomKind`
+can introduce new gameplay output (a game-specific vocabulary, e.g. a new
+kind of trap floor) without an engine change. `random_room_variant`'s
+`gen_range(0..6)` + `unreachable!()` became a weighted draw over
+`RoomRegistry`, chosen per-partition in `allocate_roles` and carried on
+`PartitionRole::Room { kind: Arc<dyn RoomKind> }`.
+
+`rooms` is a **sibling** of `level_generation`, not a submodule nested inside
+it — deliberately, so `LevelBuilder`'s four fields stay genuinely private
+(Rust's descendant-module visibility rule would have let a nested `rooms`
+reach into them, defeating the "stock rooms use only the public API" rule).
+Stock rooms only ever call `LevelBuilder`'s `add_*`/`carve_connection`/
+`carve_entry`/`carve_full_wall_opening` methods, never touch its fields; a
+`floor()`/`doors()`/`markers()`/`regions()` read accessor set exists
+alongside the mutators, primarily so each room's own unit tests (ported
+inline into `rooms/octagon.rs` and `rooms/vault.rs`, calling `RoomKind::carve`
+directly on a fresh `LevelBuilder` rather than going through the full BSP
+pipeline) can assert on the result — exactly the ergonomics Style A was
+chosen for.
+
+Two intentional, documented deviations from bit-for-bit behavior (both
+covered by the "exact per-seed reproduction not required" relaxation the
+user confirmed when settling the trait shape):
+
+- **`SlowZoneRoom` (formerly Torpor) now uses the same `carve_connection` as
+  every other room**, including its double-door branch. The original Torpor
+  arm was a near-copy of the shared block that silently dropped the
+  double-door case — normalizing it removes an inconsistency rather than
+  porting a likely-unintentional gap.
+- **`OvalRoom` keeps its `weight() == 0.0`** (never drawn by
+  `RoomRegistry::stock()`), preserving the pre-existing exclusion
+  (`random_room_variant`'s comment cites an unresolved performance issue).
+  It's still fully implemented and registered, so a game can give it nonzero
+  weight once that's investigated — not this phase's problem to fix.
+
+**Deferred, not done:** the plan's `PopulateLevel` triggered-event observer.
+`spawn_game_world` still calls `populate_level::populate(...)` directly with
+plain data pulled from `LevelPlan` (`&terrain_geometry.rooms`,
+`.playable_area`, `.markers["vault_center"]`) rather than
+`commands.trigger(PopulateLevel { plan })` dispatching to a game-registered
+observer. The event-based indirection is about letting a third-party game
+hook population without the engine calling into game code by name — a real
+goal, but a separate concern from proving the `RoomKind` extension point,
+which is this phase's core deliverable and the piece every other phase-4
+design decision was validated against. Left for a follow-up pass rather than
+this phase's scope creeping further.
+
+Verification: `cargo test --workspace` is **139/139 green** — the pre-phase
+138 (117 rogue-angles + 13 vector-arena lib + 8 across
+`fov_performance`/`game_tests`/`integration_tests`/`rope_tests`) plus one new
+test (`rooms::rubble::tests::stays_open_and_yields_movable_pieces`) that
+closes a gap the port would otherwise have left: nothing lost, and the one
+addition is a straight port of the pre-existing rubble-room behavioral spec.
+The five variant-specific tests
+(`test_octagon_bevels_corners_with_no_nearby_connection`,
+`test_octagon_skips_bevel_near_connection`,
+`test_chamber_carves_vault_with_single_door_and_records_center`,
+`test_rubble_room_stays_open_and_yields_movable_pieces`, and
+`test_ring_room_has_solid_center_and_playable_walkway`) now call
+`RoomKind::carve` directly rather than the full `render()` pipeline.
+`cargo run --bin headless -- 'wait 1s; snap ...; cmd g h'` produced a level
+with rooms, corridors, a glass wall, and a monster/items placed correctly,
+and the goto command round-tripped through a freshly generated level (visual
+check, not a pixel diff, per the plan).
 
 ## Phase 2 notes (merged with phase 3, and one scripting-capability fix found along the way)
 

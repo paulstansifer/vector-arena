@@ -8,11 +8,16 @@ use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::{prelude::*, rngs::StdRng};
 use rogue_angles::{
     AGENT_RADIUS, GameLayer,
-    dungeon::{bsp::Partition, terrain::geometry_to_collider},
+    dungeon::{
+        bsp::Partition,
+        level_generation::{LevelPlan, PartitionRole},
+        rooms::NormalRoom,
+        terrain::geometry_to_collider,
+    },
     nav::{apply_nav_velocity, playable_area_to_nav_mesh},
 };
+use std::sync::Arc;
 use vector_arena::{
-    dungeon::level_generation::{PartitionRole, RoomVariant, TerrainGeometry},
     monster::MONSTER_SPEED,
     player::{MoveTarget, PLAYER_SPEED, Player, move_player},
 };
@@ -143,14 +148,14 @@ fn test_player_can_path_within_room_and_to_other_room() {
     };
 
     let allocated_partitions = vec![
-        (bottom_left, PartitionRole::Room { variant: RoomVariant::Normal }),
-        (bottom_right, PartitionRole::Room { variant: RoomVariant::Normal }),
+        (bottom_left, PartitionRole::Room { kind: Arc::new(NormalRoom) }),
+        (bottom_right, PartitionRole::Room { kind: Arc::new(NormalRoom) }),
         (top_left, PartitionRole::Corridor { double_width: false }),
         (top_right, PartitionRole::Corridor { double_width: false }),
     ];
 
     let terrain_geometry =
-        TerrainGeometry::from_partitions_and_roles(1200.0, 800.0, allocated_partitions, &mut rng);
+        LevelPlan::from_partitions_and_roles(1200.0, 800.0, allocated_partitions, &mut rng);
 
     assert_eq!(terrain_geometry.rooms.len(), 2);
 
@@ -172,8 +177,9 @@ fn test_player_can_path_within_room_and_to_other_room() {
     app.finish();
 
     let mut nav_meshes = app.world_mut().resource_mut::<Assets<NavMesh2d>>();
-    let valid_nav_mesh =
-        playable_area_to_nav_mesh(&terrain_geometry.playable_area, &terrain_geometry.torpor_zones);
+    let empty_slow_zones = Vec::new();
+    let slow_zones = terrain_geometry.regions.get("slow").unwrap_or(&empty_slow_zones);
+    let valid_nav_mesh = playable_area_to_nav_mesh(&terrain_geometry.playable_area, slow_zones);
     let nav_mesh_handle = nav_meshes.add(NavMesh2d { nav_mesh: valid_nav_mesh });
 
     let archipelago_id = app

@@ -12,6 +12,7 @@ use rand::SeedableRng;
 
 use rogue_angles::{
     AGENT_RADIUS, GameLayer, LevelEntity, WorldBounds,
+    dungeon::level_generation::{LevelPlan, RoomRegistry},
     dungeon::terrain::{
         DungeonCollider, DungeonState, DungeonVisuals, GlassWallsMarker, PointsOfInterest,
         TerrainMarker, TorporZoneParticles, geometry_to_collider, geometry_to_mesh,
@@ -33,7 +34,6 @@ use rogue_angles::{
 use crate::{
     DungeonDepth, GameState, WORLD_HEIGHT, WORLD_WIDTH,
     command_palette::CommandPalettePlugin,
-    dungeon::level_generation::TerrainGeometry,
     effects::{
         projectile::{
             apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit, apply_knockback_on_hit,
@@ -172,12 +172,17 @@ pub fn spawn_game_world(
     archipelago.set_type_index_cost(1, TORPOR_NAV_COST).expect("torpor nav cost is positive");
     let archipelago_id = commands.spawn((LevelEntity, archipelago)).id();
 
-    let terrain_geometry = TerrainGeometry::new_seeded(WORLD_WIDTH, WORLD_HEIGHT, &mut rng);
+    let registry = RoomRegistry::stock();
+    let terrain_geometry = LevelPlan::new_seeded(WORLD_WIDTH, WORLD_HEIGHT, &registry, &mut rng);
+    let empty_polys: Vec<rogue_angles::util::safegeo::SafePolygon> = Vec::new();
+    let empty_points: Vec<Vec2> = Vec::new();
+    let slow_zones = terrain_geometry.regions.get("slow").unwrap_or(&empty_polys);
+    let vault_centers = terrain_geometry.markers.get("vault_center").unwrap_or(&empty_points);
+    let rubble_pieces = terrain_geometry.regions.get("rubble").unwrap_or(&empty_polys);
 
     let terrain_mesh = geometry_to_mesh(&terrain_geometry.solid_rock);
     let terrain_collider = geometry_to_collider(&terrain_geometry.solid_rock);
-    let valid_nav_mesh =
-        playable_area_to_nav_mesh(&terrain_geometry.playable_area, &terrain_geometry.torpor_zones);
+    let valid_nav_mesh = playable_area_to_nav_mesh(&terrain_geometry.playable_area, slow_zones);
 
     let terrain_mesh_handle = meshes.add(terrain_mesh);
     let nav_mesh_handle = nav_meshes.add(NavMesh2d { nav_mesh: valid_nav_mesh });
@@ -190,7 +195,7 @@ pub fn spawn_game_world(
         solid_rock: terrain_geometry.solid_rock.clone(),
         playable_area: terrain_geometry.playable_area.clone(),
         glass_walls: terrain_geometry.glass_walls.clone(),
-        torpor_zones: terrain_geometry.torpor_zones.clone(),
+        torpor_zones: slow_zones.clone(),
     };
     let dungeon_visuals = DungeonVisuals(terrain_mesh_handle.clone());
     let dungeon_collider = DungeonCollider(terrain_collider.clone());
@@ -238,7 +243,7 @@ pub fn spawn_game_world(
     let torpor_material = materials.add(ColorMaterial::from(Color::Srgba(
         crate::visuals::torpor_particles::TORPOR_ZONE_COLOR,
     )));
-    for zone in &terrain_geometry.torpor_zones {
+    for zone in slow_zones {
         let mesh = geometry_to_mesh(&SafeMultiPolygon::from(zone.clone()));
         // Bounding box of the zone, for seeding ambient particles. For today's
         // rectangular zones this matches the zone exactly.
@@ -288,7 +293,7 @@ pub fn spawn_game_world(
 
     commands.insert_resource(WorldBounds { width: WORLD_WIDTH, height: WORLD_HEIGHT });
     let rubble_material = materials.add(ColorMaterial::from(Color::srgb(0.5, 0.5, 0.5)));
-    for piece in &terrain_geometry.rubble_pieces {
+    for piece in rubble_pieces {
         spawn_rubble_piece(commands, meshes, &rubble_material, piece, None);
     }
     commands.insert_resource(RubbleMaterial(rubble_material));
@@ -307,7 +312,7 @@ pub fn spawn_game_world(
         materials,
         &terrain_geometry.rooms,
         &terrain_geometry.playable_area,
-        &terrain_geometry.chamber_centers,
+        vault_centers,
         archipelago_id,
         depth,
         saved_player,

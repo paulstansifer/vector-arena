@@ -8,7 +8,6 @@
 // engine-side currently needs them — they're this game's own run-state and
 // depth-descent vocabulary.
 pub mod command_palette;
-pub mod dungeon;
 pub mod effects;
 pub mod fov;
 pub mod game;

@@ -6,17 +6,21 @@ use geo::{CoordsIter, MultiPolygon};
 use rand::{SeedableRng, rngs::StdRng};
 use rogue_angles::{
     WorldBounds,
-    dungeon::bsp::Partition,
+    dungeon::{
+        bsp::Partition,
+        level_generation::{LevelPlan, PartitionRole},
+        rooms::{ColonnadeRoom, OvalRoom},
+    },
     fov::{ExplorationState, update_fov_from_pov},
     util::safegeo::SafeMultiPolygon,
 };
-use vector_arena::dungeon::level_generation::{PartitionRole, RoomVariant, TerrainGeometry};
+use std::sync::Arc;
 
 #[test]
 fn test_fov_point_explosion() {
     let mut rng = StdRng::seed_from_u64(1234);
 
-    let terrain_geometry = TerrainGeometry::from_partitions_and_roles(
+    let terrain_geometry = LevelPlan::from_partitions_and_roles(
         800.0,
         310.0,
         vec![
@@ -27,7 +31,7 @@ fn test_fov_point_explosion() {
                     horz_conn: (vec![], vec![200.0]),
                     vert_conn: (vec![], vec![]),
                 },
-                PartitionRole::Room { variant: RoomVariant::Colonnade },
+                PartitionRole::Room { kind: Arc::new(ColonnadeRoom) },
             ),
             (
                 Partition {
@@ -45,7 +49,7 @@ fn test_fov_point_explosion() {
                     horz_conn: (vec![200.0], vec![]),
                     vert_conn: (vec![], vec![]),
                 },
-                PartitionRole::Room { variant: RoomVariant::Oval },
+                PartitionRole::Room { kind: Arc::new(OvalRoom) },
             ),
         ],
         &mut rng,
