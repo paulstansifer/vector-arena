@@ -1,8 +1,9 @@
-// Generic HUD chrome: a scrolling message log, proximity-based world tooltips, and a
-// labeled progress-bar primitive for stat displays. None of this knows what a game's stats,
-// items, or messages actually mean — it's just the reusable shape every HUD in this kind of
-// game ends up needing. The demo's stat/inventory panels (HP/MP bars, item icons, depth,
-// menu) stay entirely game-side; this module only supplies the pieces under them.
+// Generic HUD chrome: a scrolling message log with its top-bar renderer, proximity-based
+// world tooltips, and two drawing primitives — a labeled progress bar and an icon-slot with
+// badge/cooldown/tooltip chrome. None of this knows what a game's stats, items, or messages
+// actually mean — it's just the reusable shape every HUD in this kind of game ends up
+// needing. The demo's bottom stat/inventory bar (HP/MP bars, item iteration, depth, menu)
+// stays entirely game-side; this module only supplies the pieces it's built from.
 use std::collections::HashMap;
 
 use bevy::prelude::*;
@@ -92,6 +93,108 @@ pub fn draw_stat_bar(ui: &mut egui::Ui, width: f32, height: f32, ratio: f32, col
         egui::FontId::default(),
         egui::Color32::WHITE,
     );
+}
+
+/// A collapsible top message bar: the latest pushed message when collapsed, the full
+/// scrolling log when `expanded`. Locks to `collapsed_height` when collapsed so the level
+/// edge below it aligns precisely; grows to fit when expanded. Stateless — returns `true` if
+/// the row was clicked, and the game decides what that means (typically toggling `expanded`
+/// for next frame).
+pub fn render_message_bar(
+    ctx: &egui::Context,
+    log: &MessageLog,
+    expanded: bool,
+    collapsed_height: f32,
+) -> bool {
+    let panel = egui::TopBottomPanel::top("message_bar");
+    let panel = if expanded { panel } else { panel.exact_height(collapsed_height) };
+    panel
+        .show(ctx, |ui| {
+            let row_height = ui.spacing().interact_size.y;
+            let full_width = ui.available_width();
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(full_width, row_height), egui::Sense::click());
+
+            let latest = log.iter().next_back().unwrap_or("—");
+            ui.painter().text(
+                rect.left_center() + egui::vec2(6.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                latest,
+                egui::FontId::default(),
+                ui.visuals().text_color(),
+            );
+
+            if expanded {
+                egui::ScrollArea::vertical().max_height(200.0).stick_to_bottom(true).show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    for msg in log.iter() {
+                        ui.label(msg);
+                    }
+                });
+            }
+
+            response.clicked()
+        })
+        .inner
+}
+
+/// One "icon slot" in a row or grid of item-like things (inventory, ability belt, ...): a
+/// fixed-size square that the caller draws into via `draw_icon`, with an optional bottom-right
+/// text badge, an optional cooldown-remaining pie-slice overlay, and a hover tooltip. The
+/// engine only draws this chrome — it has no idea what's actually in the square.
+pub fn draw_icon_slot(
+    ui: &mut egui::Ui,
+    size: f32,
+    draw_icon: impl FnOnce(egui::Painter, egui::Rect),
+    badge: Option<&str>,
+    cooldown_remaining: Option<f32>,
+    tooltip: Option<&str>,
+) -> egui::Response {
+    let (rect, mut response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    draw_icon(ui.painter_at(rect), rect);
+
+    if let Some(frac) = cooldown_remaining
+        && frac > 0.0
+    {
+        draw_cooldown_arc(ui.painter_at(rect), rect, frac);
+    }
+
+    if let Some(badge) = badge {
+        ui.painter().text(
+            rect.right_bottom() + egui::vec2(-2.0, -2.0),
+            egui::Align2::RIGHT_BOTTOM,
+            badge,
+            egui::FontId::proportional(10.0),
+            egui::Color32::WHITE,
+        );
+    }
+
+    if let Some(tip) = tooltip {
+        response = response.on_hover_text(tip);
+    }
+
+    response
+}
+
+/// Filled pie-slice arc in the bottom-right corner of `rect`, sweeping clockwise from the top
+/// as `fraction` grows from 0 to 1. Used by `draw_icon_slot` for cooldown countdowns.
+fn draw_cooldown_arc(painter: egui::Painter, rect: egui::Rect, fraction: f32) {
+    let r = 5.0_f32;
+    let center = rect.right_bottom() + egui::vec2(-r - 2.0, -r - 2.0);
+    let n = 24usize;
+    let span = std::f32::consts::TAU * fraction.clamp(0.0, 1.0);
+    let start = -std::f32::consts::FRAC_PI_2;
+    let mut points = vec![center];
+    points.extend((0..=n).map(|i| {
+        let a = start + span * (i as f32 / n as f32);
+        egui::pos2(center.x + r * a.cos(), center.y + r * a.sin())
+    }));
+    painter.add(egui::Shape::Path(egui::epaint::PathShape {
+        points,
+        closed: true,
+        fill: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 200),
+        stroke: egui::epaint::PathStroke::NONE,
+    }));
 }
 
 /// Shows a floating tooltip near the cursor for any `WorldTooltip`-carrying entity within

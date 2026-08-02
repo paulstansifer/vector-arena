@@ -6,7 +6,7 @@ use avian2d::{diagnostics::ui::PhysicsDiagnosticsUiSettings, prelude::RigidBody}
 
 use rogue_angles::{
     fov::CurrentFovState,
-    hud::{MessageLog, draw_stat_bar, show_world_entity_tooltip},
+    hud::{MessageLog, draw_icon_slot, draw_stat_bar, render_message_bar, show_world_entity_tooltip},
     palette::CommandPaletteState,
 };
 
@@ -116,17 +116,17 @@ fn ui_system(
         return Ok(());
     };
 
-    let perf_stats = if ui_state.perf_overlay {
-        Some(PerfStats {
+    let clicked = if ui_state.perf_overlay {
+        let perf_stats = PerfStats {
             fov_vertices: current_fov.as_ref().map(|f| count_mp_vertices(&f.0)).unwrap_or(0),
             exp_vertices: 0,
             phys_objects: rigid_body_query.iter().count(),
-        })
+        };
+        render_perf_bar(ctx, &perf_stats)
     } else {
-        None
+        render_message_bar(ctx, &message_log, ui_state.messages_expanded, TOP_PANEL_HEIGHT)
     };
-
-    if render_message_bar(ctx, &message_log, ui_state.messages_expanded, perf_stats.as_ref()) {
+    if clicked {
         ui_state.messages_expanded = !ui_state.messages_expanded;
     }
 
@@ -240,68 +240,38 @@ fn render_game_over(ctx: &egui::Context) -> GameOverActions {
     actions
 }
 
-/// Top bar: latest message with optional expanded log. Returns true if the row was clicked.
-/// When `perf` is Some, the top bar shows performance stats instead of the message log.
-fn render_message_bar(
-    ctx: &egui::Context,
-    log: &MessageLog,
-    expanded: bool,
-    perf: Option<&PerfStats>,
-) -> bool {
-    let panel = egui::TopBottomPanel::top("message_bar");
-    // Lock the panel to an exact height when collapsed so the level edge aligns precisely.
-    // When expanded, let the panel grow naturally to show the full log.
-    let panel = if expanded { panel } else { panel.exact_height(TOP_PANEL_HEIGHT) };
-    // In perf mode suppress the panel's own background so we can paint only the right half.
+/// Debug/perf overlay that borrows the message bar's screen real estate: same panel id and
+/// collapsed height, but shows vertex/physics-object counts on the right half instead of the
+/// message log, with the left half left transparent. Returns true if the row was clicked, so
+/// toggling back to the normal message bar restores whatever expand state the click implied.
+fn render_perf_bar(ctx: &egui::Context, perf: &PerfStats) -> bool {
     let panel_fill = ctx.style().visuals.panel_fill;
-    let panel = if perf.is_some() { panel.frame(egui::Frame::new()) } else { panel };
-    panel
+    egui::TopBottomPanel::top("message_bar")
+        .exact_height(TOP_PANEL_HEIGHT)
+        .frame(egui::Frame::new())
         .show(ctx, |ui| {
             let row_height = ui.spacing().interact_size.y;
             let full_width = ui.available_width();
             let (rect, response) =
                 ui.allocate_exact_size(egui::vec2(full_width, row_height), egui::Sense::click());
 
-            if let Some(p) = perf {
-                // Paint background only on the right half; left half stays transparent.
-                let text_rect = egui::Rect::from_min_size(
-                    egui::pos2(rect.min.x + full_width / 2.0, rect.min.y),
-                    egui::vec2(full_width / 2.0, rect.height()),
-                );
-                ui.painter().rect_filled(text_rect, 0.0, panel_fill);
-                let text = format!(
-                    "fov v:{}  exp v:{}  phys o:{}",
-                    p.fov_vertices, p.exp_vertices, p.phys_objects
-                );
-                ui.painter().text(
-                    text_rect.left_center() + egui::vec2(6.0, 0.0),
-                    egui::Align2::LEFT_CENTER,
-                    &text,
-                    egui::FontId::default(),
-                    ui.visuals().text_color(),
-                );
-            } else {
-                let latest = log.iter().next_back().unwrap_or("—");
-                ui.painter().text(
-                    rect.left_center() + egui::vec2(6.0, 0.0),
-                    egui::Align2::LEFT_CENTER,
-                    latest,
-                    egui::FontId::default(),
-                    ui.visuals().text_color(),
-                );
-
-                if expanded {
-                    egui::ScrollArea::vertical().max_height(200.0).stick_to_bottom(true).show(
-                        ui,
-                        |ui| {
-                            ui.set_min_width(ui.available_width());
-                            for msg in log.iter() {
-                                ui.label(msg);
-                            }
-                        },
-                    );
-                }
-            }
+            // Paint background only on the right half; left half stays transparent.
+            let text_rect = egui::Rect::from_min_size(
+                egui::pos2(rect.min.x + full_width / 2.0, rect.min.y),
+                egui::vec2(full_width / 2.0, rect.height()),
+            );
+            ui.painter().rect_filled(text_rect, 0.0, panel_fill);
+            let text = format!(
+                "fov v:{}  exp v:{}  phys o:{}",
+                perf.fov_vertices, perf.exp_vertices, perf.phys_objects
+            );
+            ui.painter().text(
+                text_rect.left_center() + egui::vec2(6.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                &text,
+                egui::FontId::default(),
+                ui.visuals().text_color(),
+            );
 
             response.clicked()
         })
@@ -487,63 +457,29 @@ fn draw_item_icon(
     identities: &ItemIdentities,
     wand_cooldowns: &WandCooldowns,
 ) {
-    let size = BAR_HEIGHT;
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-    draw_item_icon_at(ui.painter_at(rect), rect, item, sprite_textures.get(item));
-
-    match item {
+    let (badge, cooldown_remaining) = match item {
         ItemKind::Wand(gem) => {
             let ready = wand_cooldowns.ready_count(gem, count);
             if ready >= 2 {
-                ui.painter().text(
-                    rect.right_bottom() + egui::vec2(-2.0, -2.0),
-                    egui::Align2::RIGHT_BOTTOM,
-                    ready.to_string(),
-                    egui::FontId::proportional(10.0),
-                    egui::Color32::WHITE,
-                );
+                (Some(ready.to_string()), None)
             } else if ready == 0 {
-                if let Some(remaining) = wand_cooldowns.shortest_remaining(gem) {
-                    draw_cooldown_arc(ui.painter_at(rect), rect, remaining / WAND_COOLDOWN_SECS);
-                }
-            }
-            // ready == 1: no badge
-        }
-        _ => {
-            if count > 1 {
-                ui.painter().text(
-                    rect.right_bottom() + egui::vec2(-2.0, -2.0),
-                    egui::Align2::RIGHT_BOTTOM,
-                    count.to_string(),
-                    egui::FontId::proportional(10.0),
-                    egui::Color32::WHITE,
-                );
+                (None, wand_cooldowns.shortest_remaining(gem).map(|r| r / WAND_COOLDOWN_SECS))
+            } else {
+                (None, None) // ready == 1: no badge
             }
         }
-    }
+        _ if count > 1 => (Some(count.to_string()), None),
+        _ => (None, None),
+    };
+    let tooltip = item_display_name(item, count, identities);
 
-    if response.hovered() {
-        response.on_hover_text(item_display_name(item, count, identities));
-    }
-}
-
-fn draw_cooldown_arc(painter: egui::Painter, rect: egui::Rect, fraction: f32) {
-    // Filled pie-slice in the bottom-right corner, same position as the count badge.
-    let r = 5.0_f32;
-    let center = rect.right_bottom() + egui::vec2(-r - 2.0, -r - 2.0);
-    let n = 24usize;
-    let span = std::f32::consts::TAU * fraction.clamp(0.0, 1.0);
-    let start = -std::f32::consts::FRAC_PI_2;
-    let mut points = vec![center];
-    points.extend((0..=n).map(|i| {
-        let a = start + span * (i as f32 / n as f32);
-        egui::pos2(center.x + r * a.cos(), center.y + r * a.sin())
-    }));
-    painter.add(egui::Shape::Path(egui::epaint::PathShape {
-        points,
-        closed: true,
-        fill: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 200),
-        stroke: egui::epaint::PathStroke::NONE,
-    }));
+    draw_icon_slot(
+        ui,
+        BAR_HEIGHT,
+        |painter, rect| draw_item_icon_at(painter, rect, item, sprite_textures.get(item)),
+        badge.as_deref(),
+        cooldown_remaining,
+        Some(&tooltip),
+    );
 }
 

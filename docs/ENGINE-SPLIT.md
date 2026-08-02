@@ -1,7 +1,53 @@
 # Splitting Vector Arena into `rogue-angles` + a demo game
 
-Status: **in progress.** Phases 0–7 done (2 absorbed phase 3 — see below);
-phase 8 pending.
+Status: **phases 0–7 done** (2 absorbed phase 3 — see below). Phase 8
+(acceptance-test example game) was explicitly skipped at the user's
+direction. Post-split refinement continues ad hoc as it comes up; see the
+addendum below for the first one.
+
+## Post-phase-7 addendum: more opinionated HUD chrome
+
+Not a numbered phase — a follow-up request to push two more pieces of HUD
+rendering (not just data) into `rogue_angles::hud`, on top of what phase 6
+moved:
+
+- **`render_message_bar`** — the top message bar's actual rendering
+  (collapsed-latest-message / click-to-expand / scrolling full log), not
+  just the `MessageLog` data it reads. `vector-arena` still owns
+  `TOP_PANEL_HEIGHT` and passes it in as a parameter (same pattern as
+  `draw_stat_bar`'s `width`/`height`) rather than the engine hardcoding this
+  game's pixel choice. The debug perf-stats overlay that repurposes the
+  same screen real estate (Ctrl+P) stays entirely game-side as
+  `render_perf_bar`, since "show FOV/physics counts instead of messages" is
+  a debug feature, not HUD chrome.
+- **`draw_icon_slot`** — the reusable shape underneath any item/ability
+  icon row: a fixed-size square the caller draws into via a closure, plus
+  chrome the engine does own generically — a bottom-right text badge, an
+  optional cooldown pie-slice arc (`draw_cooldown_arc`, moved verbatim), and
+  a hover tooltip. The closure (not a direct texture parameter) is
+  deliberate: it keeps the primitive usable by a game that doesn't use the
+  engine's SVG sprite pipeline at all, not just this one. `vector-arena`'s
+  `draw_item_icon` now computes badge text/cooldown fraction/tooltip string
+  from its own `ItemKind`/`WandCooldowns`/`ItemIdentities` and hands them to
+  the engine primitive; `draw_item_icon_at`'s `ItemKind`-shaped fallback
+  art (for when a texture hasn't loaded yet) stays game-side unchanged,
+  passed in as the closure.
+- **`draw_stat_bar`** (labeled progress bar) — already engine-owned since
+  phase 6; the user asked and this confirmed it was already done.
+
+`vector-arena`'s bottom HUD bar as a whole (HP/MP/boredom bars, the
+inventory icon *row* — i.e. iterating `Vec<(ItemKind, u16)>` — depth,
+descend button, hamburger menu) stays entirely game-side, same as before:
+only the chrome primitives moved, not the layout or the data iteration.
+
+Verification: `cargo test --workspace` 139/139 green, no behavior change.
+Visual confirmation is partial — the headless snapshot tool runs
+`GamePlugin { headless: true }`, which skips `UiPlugin`/egui entirely (no
+display server in this environment for a real window), so the egui HUD
+bars themselves couldn't be screenshotted; only the world-render (sprites,
+terrain, doors) was visually re-confirmed. Confidence otherwise rests on
+this being a close-to-mechanical extraction (badge/cooldown/tooltip logic
+moved with unchanged values) plus the full test suite passing.
 
 ## Phase 7 notes (final crate-boundary sweep)
 
