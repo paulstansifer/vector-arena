@@ -126,6 +126,24 @@ Item pickup animations and the physics fixed-timestep are both adjusted to remai
 
 ## Testing
 
+### System dependencies (Linux)
+
+Bevy needs a few system libraries, and `tests/game_tests.rs` builds a real
+render app, so it needs a GPU adapter. On a headless box (CI, containers,
+Claude Code web sessions) install Mesa's `llvmpipe` software rasterizer or the
+test fails with `Unable to find a GPU!`:
+
+```
+apt-get update
+apt-get install -y libwayland-dev libxkbcommon-dev libasound2-dev libudev-dev \
+    libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev \
+    libgl1-mesa-dev mesa-vulkan-drivers libvulkan1
+```
+
+Verify with `vulkaninfo --summary` — a `deviceName` of `llvmpipe` is enough for
+both `cargo test` and the headless snapshot runner. ALSA prints
+`Unknown PCM default` warnings on such machines; they are harmless.
+
 ### Integration tests
 
 ```
