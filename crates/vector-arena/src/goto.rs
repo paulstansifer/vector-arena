@@ -1,52 +1,61 @@
 // Go-to-point-of-interest command: label explored points a-z by distance, navigate to them.
+// The label *storage* (LocationLabels, with hjkl/yubn pinned to directions) is an engine
+// concept; this file only supplies the assignment *policy* (which points go where) and the
+// "g" command itself, since the engine has no idea what "go to" means.
 use bevy::prelude::*;
 use bevy_egui::egui;
 use bevy_landmass::prelude::*;
 
-use rogue_angles::{dungeon::terrain::PointsOfInterest, fov::ExplorationState};
+use rogue_angles::{
+    dungeon::terrain::PointsOfInterest,
+    fov::ExplorationState,
+    palette::{
+        CommandInvocation, CommandPaletteState, CommandPaletteWatchesClicks, EntryOutcome,
+        LocationDescriptions, LocationLabels, PaletteCommand, PaletteRegistry, Target,
+        TargetFilter,
+    },
+};
 
 use crate::{
     Staircase,
-    command_palette::{
-        CommandPaletteState, CommandPaletteWatchesClicks, PaletteCommand, PaletteCommandKind,
-        PaletteRegistry,
-    },
     player::{ExplorationGoal, MoveTarget, Player},
 };
 
 pub const GOTO_KEY: &str = "g";
 
-#[derive(Resource, Default)]
-pub struct GotoState {
-    /// Index 0 = 'a', ..., 25 = 'z'. Indices 7/9/10/11 (h/j/k/l) are reserved for
-    /// cardinal directions (left/down/up/right). None = no label assigned.
-    pub labels: [Option<Vec2>; 26],
-    pub computed: bool,
-}
-
-pub fn register_goto_command(mut registry: ResMut<PaletteRegistry>) {
-    registry.commands.push(PaletteCommand {
+pub fn register_goto_command(world: &mut World) {
+    let handler = world.register_system(execute_goto_command);
+    world.resource_mut::<PaletteRegistry>().commands.push(PaletteCommand {
         key: GOTO_KEY.to_string(),
         description: "Go to monster or location".to_string(),
         icon: None,
-        kind: PaletteCommandKind::LocationTarget { target_verb: "Go to" },
+        outcome: EntryOutcome::PickTarget { verb: "Go to".to_string(), filter: TargetFilter::Any },
+        handler,
     });
+    // "g" is also the default action for typing a monster's letter with the
+    // palette closed — see rogue_angles::palette::DefaultEntityAction.
+    world.resource_mut::<rogue_angles::palette::DefaultEntityAction>().0 = Some(GOTO_KEY.to_string());
 }
 
+/// Keeps `LocationLabels` continuously up to date with the player's current
+/// position and exploration state — the same "always live" model as
+/// `EntityLabels`, rather than a once-per-palette-open snapshot. That matters
+/// beyond the interactive UI: the engine's letter grammar (lowercase =
+/// location) is meant to be usable from a programmatic driver — a headless
+/// scripting harness, or an agent calling `execute_path_string` directly —
+/// which never opens the palette UI at all, so gating this on
+/// `CommandPaletteState`/`CommandPaletteWatchesClicks` would silently make
+/// every location-letter target (e.g. "g h", "z s") unresolvable outside
+/// interactive play.
 pub fn compute_goto_assignments(
-    palette: Res<CommandPaletteState>,
-    watches_clicks: Res<CommandPaletteWatchesClicks>,
     exploration_state: Res<ExplorationState>,
     poi: Res<PointsOfInterest>,
     player_query: Query<&Transform, With<Player>>,
     item_query: Query<&Transform, With<crate::item::Item>>,
     staircase_query: Query<&Transform, With<Staircase>>,
-    mut goto_state: ResMut<GotoState>,
+    mut location_labels: ResMut<LocationLabels>,
+    mut descriptions: ResMut<LocationDescriptions>,
 ) {
-    if !palette.open || !watches_clicks.0 || goto_state.computed {
-        return;
-    }
-
     let player_transform = match player_query.single() {
         Ok(tf) => tf,
         Err(_) => return,
@@ -58,27 +67,31 @@ pub fn compute_goto_assignments(
         !exploration_state.0.contains(&geo::Point::new(p.x, p.y))
     };
 
-    // TODO: this is a bit of a hack!
+    use rogue_angles::palette::{
+        DIR_DOWN, DIR_DOWN_LEFT, DIR_DOWN_RIGHT, DIR_LEFT, DIR_RIGHT, DIR_UP, DIR_UP_LEFT,
+        DIR_UP_RIGHT,
+    };
     let idx = |c: char| c as usize - 'a' as usize;
 
     let cardinals = [
-        (idx('h'), player_pos + Vec2::new(-70.0, 0.0)),
-        (idx('j'), player_pos + Vec2::new(0.0, -70.0)),
-        (idx('k'), player_pos + Vec2::new(0.0, 70.0)),
-        (idx('l'), player_pos + Vec2::new(70.0, 0.0)),
-        (idx('y'), player_pos + Vec2::new(-50.0, 50.0)),
-        (idx('u'), player_pos + Vec2::new(50.0, 50.0)),
-        (idx('b'), player_pos + Vec2::new(-50.0, -50.0)),
-        (idx('n'), player_pos + Vec2::new(50.0, -50.0)),
+        (DIR_LEFT, player_pos + Vec2::new(-70.0, 0.0)),
+        (DIR_DOWN, player_pos + Vec2::new(0.0, -70.0)),
+        (DIR_UP, player_pos + Vec2::new(0.0, 70.0)),
+        (DIR_RIGHT, player_pos + Vec2::new(70.0, 0.0)),
+        (DIR_UP_LEFT, player_pos + Vec2::new(-50.0, 50.0)),
+        (DIR_UP_RIGHT, player_pos + Vec2::new(50.0, 50.0)),
+        (DIR_DOWN_LEFT, player_pos + Vec2::new(-50.0, -50.0)),
+        (DIR_DOWN_RIGHT, player_pos + Vec2::new(50.0, -50.0)),
     ];
     for (idx, pos) in cardinals {
-        goto_state.labels[idx] = is_explored(pos).then_some(pos);
+        location_labels.slots[idx] = is_explored(pos).then_some(pos);
     }
 
     // Reserve 's' for the staircase when it has been explored.
     if let Ok(tf) = staircase_query.single() {
         let pos = tf.translation.truncate();
-        goto_state.labels[idx('s')] = is_explored(pos).then_some(pos);
+        location_labels.slots[idx('s')] = is_explored(pos).then_some(pos);
+        descriptions.0.insert('s', "staircase down".to_string());
     }
 
     // Fill remaining slots with interesting points sorted by distance.
@@ -101,27 +114,18 @@ pub fn compute_goto_assignments(
         if reserved.contains(&i) {
             continue;
         }
-        goto_state.labels[i] = cand_iter.next();
-    }
-
-    goto_state.computed = true;
-}
-
-pub fn reset_goto_on_close(palette: Res<CommandPaletteState>, mut goto_state: ResMut<GotoState>) {
-    if !palette.open && goto_state.computed {
-        goto_state.labels = [None; 26];
-        goto_state.computed = false;
+        location_labels.slots[i] = cand_iter.next();
     }
 }
 
 pub fn render_goto_markers(
     palette: Res<CommandPaletteState>,
     watches_clicks: Res<CommandPaletteWatchesClicks>,
-    goto_state: Res<GotoState>,
+    location_labels: Res<LocationLabels>,
     mut egui_context: bevy_egui::EguiContexts,
     camera_query: Query<(&Camera, &GlobalTransform)>,
 ) {
-    if !palette.open || !watches_clicks.0 || goto_state.labels.iter().all(|l| l.is_none()) {
+    if !palette.open || !watches_clicks.0 || location_labels.slots.iter().all(|l| l.is_none()) {
         return;
     }
 
@@ -138,7 +142,7 @@ pub fn render_goto_markers(
     let painter = ctx
         .layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("goto_markers")));
 
-    for (i, opt_pos) in goto_state.labels.iter().enumerate() {
+    for (i, opt_pos) in location_labels.slots.iter().enumerate() {
         let Some(pos) = opt_pos else { continue };
         let world_pos = pos.extend(0.0);
         let viewport_pos = match camera.world_to_viewport(camera_transform, world_pos) {
@@ -168,19 +172,23 @@ pub fn render_goto_markers(
 }
 
 pub fn execute_goto_command(
-    mut palette: ResMut<CommandPaletteState>,
+    In(invocation): In<CommandInvocation>,
     mut player_query: Query<
         (Entity, &Transform, &mut MoveTarget, &mut AgentTarget2d),
         With<Player>,
     >,
+    all_transforms: Query<&Transform>,
     time: Res<Time>,
     mut commands: Commands,
 ) {
-    if palette.pending_command.as_deref() != Some(GOTO_KEY) {
-        return;
-    }
-    palette.pending_command = None;
-    let Some(destination) = palette.pending_target.take() else { return };
+    let Some(target) = invocation.target else { return };
+    let destination = match target {
+        Target::Point(p) => p,
+        Target::Entity(e) => match all_transforms.get(e) {
+            Ok(tf) => tf.translation.truncate(),
+            Err(_) => return,
+        },
+    };
 
     if let Ok((entity, transform, mut move_target, mut agent_target)) = player_query.single_mut() {
         let current_pos = transform.translation.truncate();
@@ -196,19 +204,11 @@ pub fn execute_goto_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command_palette::CommandPaletteState;
 
     fn make_app(destination: Option<Vec2>) -> (App, Entity) {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-
-        let mut palette_state = CommandPaletteState::default();
-        if let Some(pos) = destination {
-            palette_state.pending_command = Some(GOTO_KEY.to_string());
-            palette_state.pending_target = Some(pos);
-        }
-
-        app.insert_resource(palette_state);
+        app.init_resource::<CommandPaletteState>();
         app.init_resource::<CommandPaletteWatchesClicks>();
 
         let player = app
@@ -221,13 +221,22 @@ mod tests {
             ))
             .id();
 
+        if let Some(pos) = destination {
+            let handler = app.world_mut().register_system(execute_goto_command);
+            app.world_mut()
+                .run_system_with(handler, CommandInvocation {
+                    path: vec![GOTO_KEY.to_string()],
+                    target: Some(Target::Point(pos)),
+                })
+                .unwrap();
+        }
+
         (app, player)
     }
 
     #[test]
     fn execute_goto_navigates_to_destination() {
         let (mut app, player) = make_app(Some(Vec2::new(100.0, 200.0)));
-        app.add_systems(Update, execute_goto_command);
         app.update();
 
         let move_target = app.world().entity(player).get::<MoveTarget>().unwrap();
@@ -238,7 +247,6 @@ mod tests {
     #[test]
     fn execute_goto_no_op_without_pending() {
         let (mut app, player) = make_app(None);
-        app.add_systems(Update, execute_goto_command);
         app.update();
 
         let move_target = app.world().entity(player).get::<MoveTarget>().unwrap();

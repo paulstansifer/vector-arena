@@ -13,10 +13,10 @@ use bevy_egui::egui;
 use rogue_angles::{
     dungeon::terrain::{DungeonState, random_near},
     fov::CurrentFovState,
+    palette::{CommandPaletteState, EntityLabels, TargetDescription, Targetable},
 };
 
 use crate::{
-    command_palette::CommandPaletteState,
     item::ItemKind,
     player::{ExplorationGoal, MoveTarget, Player},
     status_effect::StatusEffects,
@@ -169,14 +169,21 @@ fn tick_state(
 
 pub fn refresh_monster_tooltips(
     mut query: Query<
-        (Entity, &Stats, &MonsterState, &mut crate::ui::WorldTooltip, Option<&StatusEffects>),
+        (
+            Entity,
+            &Stats,
+            &MonsterState,
+            &mut crate::ui::WorldTooltip,
+            &mut TargetDescription,
+            Option<&StatusEffects>,
+        ),
         With<Monster>,
     >,
-    letter_map: Res<crate::command_palette::LetterMap>,
+    labels: Res<EntityLabels>,
 ) {
-    for (entity, stats, state, mut tooltip, effects) in query.iter_mut() {
+    for (entity, stats, state, mut tooltip, mut target_desc, effects) in query.iter_mut() {
         let letter_prefix =
-            letter_map.letter_for_monster(entity).map(|l| format!("[{l}] ")).unwrap_or_default();
+            labels.letter_for(entity).map(|l| format!("[{l}] ")).unwrap_or_default();
         let mut text = format!(
             "{}HP: {}/{} [{}]",
             letter_prefix,
@@ -191,6 +198,8 @@ pub fn refresh_monster_tooltips(
             }
         }
         tooltip.0 = text;
+        // Also shown next to the monster's letter in the palette's target picker.
+        target_desc.0 = format!("{} {}/{} HP", state.label(), stats.hp as i32, stats.max_hp as i32);
     }
 }
 
@@ -319,8 +328,8 @@ fn wander_somewhere(
 
 pub fn render_monster_markers(
     palette: Res<CommandPaletteState>,
-    letter_map: Res<crate::command_palette::LetterMap>,
-    monster_query: Query<(Entity, &Transform), With<Monster>>,
+    labels: Res<EntityLabels>,
+    monster_query: Query<(Entity, &Transform), (With<Monster>, With<Targetable>)>,
     mut egui_context: bevy_egui::EguiContexts,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     current_fov: Option<Res<CurrentFovState>>,
@@ -338,7 +347,7 @@ pub fn render_monster_markers(
     ));
 
     for (entity, transform) in monster_query.iter() {
-        let Some(letter) = letter_map.letter_for_monster(entity) else { continue };
+        let Some(letter) = labels.letter_for(entity) else { continue };
         let pos = transform.translation.truncate();
         if let Some(ref fov) = current_fov
             && !fov.0.contains(&geo::Point::new(pos.x, pos.y))

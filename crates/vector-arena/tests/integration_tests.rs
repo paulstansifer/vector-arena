@@ -26,7 +26,6 @@ use vector_arena::{
 #[test]
 fn missile_hits_monster_at_various_distances() {
     use vector_arena::{
-        command_palette::LetterMap,
         effects::projectile::{
             MISSILE_SPEED, MagicMissile, apply_damage_on_hit, apply_hit_flash_on_hit,
             apply_knockback_on_hit, detect_missile_hits,
@@ -46,7 +45,6 @@ fn missile_hits_monster_at_various_distances() {
         let mut app = physics_app(Vec2::ZERO, false);
         app.init_asset::<ColorMaterial>();
         app.init_resource::<MessageLog>();
-        app.init_resource::<LetterMap>();
         app.add_systems(Update, detect_missile_hits);
         app.add_observer(apply_knockback_on_hit);
         app.add_observer(apply_hit_flash_on_hit);

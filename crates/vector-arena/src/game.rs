@@ -24,6 +24,7 @@ use rogue_angles::{
     },
     fov::{self as fov, MOVABLE_Z, OpaqueVertices, TERRAIN_Z},
     nav::{self as nav, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
+    palette::{self, EntityLabels, LabelPool, LocationDescriptions, LocationLabels},
     time_scale::arbitrate_time_scale,
     util::safegeo::SafeMultiPolygon,
     visuals::indicator::update_hit_flash,
@@ -31,14 +32,14 @@ use rogue_angles::{
 
 use crate::{
     DungeonDepth, GameState, WORLD_HEIGHT, WORLD_WIDTH,
-    command_palette::{CommandPalettePlugin, LetterMap, open_palette_system},
+    command_palette::CommandPalettePlugin,
     dungeon::level_generation::TerrainGeometry,
     effects::{
         projectile::{
             apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit, apply_knockback_on_hit,
-            apply_torpor_to_non_agents, detect_missile_hits, execute_missile_command,
-            init_trail_meshes, monster_fire_missiles, register_missile_command,
-            spawn_missile_trails, tick_knockback_cooldowns, update_missile_trails, update_missiles,
+            apply_torpor_to_non_agents, detect_missile_hits, init_trail_meshes,
+            monster_fire_missiles, register_missile_command, spawn_missile_trails,
+            tick_knockback_cooldowns, update_missile_trails, update_missiles,
         },
         rope,
         scroll::{on_acquirement, on_binding, on_instability, on_magic_mapping, on_summon_monster},
@@ -49,15 +50,13 @@ use crate::{
     fov::update_staircase_fog_copy,
     goto,
     item::{
-        Inventory, ItemIdentities, WandCooldowns, animate_pickup, execute_item_command,
-        on_wand_attraction, pickup_items, refresh_item_tooltips, register_item_commands,
-        tick_wand_cooldowns,
+        Inventory, ItemIdentities, ItemKind, WandCooldowns, animate_pickup, on_wand_attraction,
+        pickup_items, refresh_item_tooltips, register_item_commands, tick_wand_cooldowns,
     },
     monster::{self, Stats},
     player::{
         Boredom, Player, advance_exploration, check_player_death, directional_move_system,
-        execute_descend_command, execute_stop_command, move_player, register_player_commands,
-        rotate_player_to_velocity, set_target_on_click,
+        move_player, register_player_commands, rotate_player_to_velocity, set_target_on_click,
     },
     populate_level,
     sprite::SpritePlugin,
@@ -97,7 +96,7 @@ fn on_enter_restart(
     mut depth: ResMut<DungeonDepth>,
     mut message_log: ResMut<MessageLog>,
     mut next_state: ResMut<NextState<GameState>>,
-    mut monster_letters: ResMut<LetterMap>,
+    mut entity_labels: ResMut<EntityLabels>,
     mut identities: ResMut<ItemIdentities>,
     mut wand_cooldowns: ResMut<WandCooldowns>,
     mut boredom: ResMut<Boredom>,
@@ -110,20 +109,11 @@ fn on_enter_restart(
     commands.insert_resource(DungeonSeed(seed_val));
     message_log.clear();
     depth.0 = 1;
-    monster_letters.clear_monsters();
+    entity_labels.clear();
     wand_cooldowns.clear();
     *boredom = Boredom::default();
     identities.randomize(&mut rand::rngs::StdRng::seed_from_u64(seed_val));
-    spawn_game_world(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        &mut nav_meshes,
-        1,
-        None,
-        &mut monster_letters,
-        seed_val,
-    );
+    spawn_game_world(&mut commands, &mut meshes, &mut materials, &mut nav_meshes, 1, None, seed_val);
     next_state.set(GameState::InLevel);
 }
 
@@ -136,12 +126,12 @@ fn on_enter_descend(
     mut message_log: ResMut<MessageLog>,
     saved_player: Res<SavedPlayer>,
     mut next_state: ResMut<NextState<GameState>>,
-    mut monster_letters: ResMut<LetterMap>,
+    mut entity_labels: ResMut<EntityLabels>,
     seed: Res<DungeonSeed>,
 ) {
     depth.0 += 1;
     message_log.push(format!("You descend to depth {}.", depth.0));
-    monster_letters.clear_monsters();
+    entity_labels.clear();
     spawn_game_world(
         &mut commands,
         &mut meshes,
@@ -152,7 +142,6 @@ fn on_enter_descend(
             .0
             .as_ref()
             .map(|(stats, inv, effects)| (*stats, Inventory(inv.0.clone()), effects.clone())),
-        &mut monster_letters,
         seed.0,
     );
     next_state.set(GameState::InLevel);
@@ -175,7 +164,6 @@ pub fn spawn_game_world(
     nav_meshes: &mut Assets<NavMesh2d>,
     depth: u32,
     saved_player: Option<(Stats, Inventory, StatusEffects)>,
-    monster_letters: &mut LetterMap,
     seed: u64,
 ) {
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed + depth as u64);
@@ -323,7 +311,6 @@ pub fn spawn_game_world(
         archipelago_id,
         depth,
         saved_player,
-        monster_letters,
         &mut rng,
     );
 
@@ -370,20 +357,23 @@ impl Plugin for GamePlugin {
         if self.headless {
             // In headless mode, skip egui-dependent plugins and stub their resources.
             // SvgPlugin + insert_svg_components are kept so SVG sprites (player, items) render.
-            // Only the egui texture-registration systems are dropped.
-            use crate::{
-                command_palette::{
-                    CommandPaletteState, CommandPaletteWatchesClicks, PaletteRegistry,
-                },
-                sprite::{SpriteCache, SpriteEguiTextures, insert_svg_components},
-                ui::MessageLog,
-            };
+            // Only the egui texture-registration and interactive-input systems are dropped —
+            // the headless runner drives the palette directly via
+            // `rogue_angles::palette::execute_path_string`, which only needs the registry and
+            // label resources below, not the keyboard/rendering systems `CommandPalettePlugin`
+            // would otherwise add.
+            use crate::sprite::{SpriteCache, SpriteEguiTextures, insert_svg_components};
             app.add_plugins(bevy_svg::prelude::SvgPlugin)
                 .init_resource::<MessageLog>()
                 .init_resource::<Boredom>()
-                .init_resource::<CommandPaletteState>()
-                .init_resource::<PaletteRegistry>()
-                .init_resource::<CommandPaletteWatchesClicks>()
+                .init_resource::<palette::CommandPaletteState>()
+                .init_resource::<palette::CommandPaletteWatchesClicks>()
+                .init_resource::<palette::CurrentPaletteEntries>()
+                .init_resource::<palette::PaletteRegistry>()
+                .init_resource::<EntityLabels>()
+                .init_resource::<palette::DefaultEntityAction>()
+                .add_systems(Update, palette::assign_entity_labels)
+                .add_systems(Update, palette::release_entity_labels)
                 .init_resource::<SpriteCache>()
                 .init_resource::<SpriteEguiTextures>()
                 .add_systems(Update, insert_svg_components);
@@ -398,7 +388,7 @@ impl Plugin for GamePlugin {
 
         app.init_state::<GameState>()
             .init_resource::<SavedPlayer>()
-            .init_resource::<LetterMap>()
+            .init_resource::<LabelPool<ItemKind>>()
             .init_resource::<ItemIdentities>()
             .init_resource::<WandCooldowns>();
 
@@ -423,7 +413,6 @@ impl Plugin for GamePlugin {
             .add_systems(Update, tick_status_effects)
             .add_systems(Update, update_torpor_multipliers)
             .add_systems(Update, tick_wand_cooldowns)
-            .add_systems(Update, execute_item_command)
             .add_systems(Update, refresh_item_tooltips)
             .add_observer(on_summon_monster)
             .add_observer(on_magic_mapping)
@@ -440,12 +429,12 @@ impl Plugin for GamePlugin {
             )
             .add_systems(
                 Update,
-                directional_move_system.after(nav::apply_nav_velocity).after(open_palette_system),
+                directional_move_system
+                    .after(nav::apply_nav_velocity)
+                    .after(palette::open_palette_on_keypress),
             )
             .add_systems(Update, rotate_player_to_velocity.after(move_player))
             .add_systems(Update, advance_exploration.after(move_player))
-            .add_systems(Update, execute_stop_command.run_if(in_state(GameState::InLevel)))
-            .add_systems(Update, execute_descend_command.run_if(in_state(GameState::InLevel)))
             .add_systems(Update, check_player_death.run_if(in_state(GameState::InLevel)))
             .add_systems(Update, monster::update_monster_ai)
             .add_systems(
@@ -477,7 +466,6 @@ impl Plugin for GamePlugin {
             )
             .add_systems(Update, sync_dungeon_to_entities)
             .add_systems(Update, sync_glass_walls_to_entities)
-            .add_systems(Update, execute_missile_command)
             .add_systems(Update, monster_fire_missiles)
             .add_systems(Update, update_missiles)
             .add_systems(
@@ -509,9 +497,8 @@ impl Plugin for GamePlugin {
             .add_systems(Update, cast_time_scale_votes.after(move_player))
             .add_systems(Update, arbitrate_time_scale.after(cast_time_scale_votes))
             .add_systems(Update, goto::compute_goto_assignments)
-            .add_systems(Update, goto::reset_goto_on_close)
-            .add_systems(Update, goto::execute_goto_command)
-            .init_resource::<goto::GotoState>()
+            .init_resource::<LocationLabels>()
+            .init_resource::<LocationDescriptions>()
             .insert_resource(Gravity::ZERO)
             .insert_resource(SubstepCount(40))
             .init_resource::<DungeonDepth>();

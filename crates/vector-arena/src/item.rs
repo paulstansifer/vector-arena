@@ -13,10 +13,16 @@ use rand::{Rng, seq::SliceRandom};
 
 pub const WAND_COOLDOWN_SECS: f32 = 15.0;
 
-use rogue_angles::{GameLayer, dungeon::terrain::{DungeonState, random_in_playable_area}};
+use rogue_angles::{
+    GameLayer,
+    dungeon::terrain::{DungeonState, random_in_playable_area},
+    palette::{
+        CommandInvocation, EntryOutcome, IconId, LabelPool, PaletteCommand, PaletteEntry,
+        PalettePath, PaletteRegistry, Target, TargetFilter,
+    },
+};
 
 use crate::{
-    command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     effects::{
         projectile::{KNOCKBACK_SPEED, MagicMissile, apply_knockback},
         scroll::{
@@ -493,7 +499,7 @@ pub fn animate_pickup(
     mut inventory_query: Query<&mut Inventory, With<Player>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut log: ResMut<MessageLog>,
-    mut letter_map: ResMut<crate::command_palette::LetterMap>,
+    mut labels: ResMut<LabelPool<ItemKind>>,
     identities: Res<ItemIdentities>,
 ) {
     // Update target each frame so the item tracks the player if they move.
@@ -523,48 +529,164 @@ pub fn animate_pickup(
         if picking_up.progress >= 1.0 {
             log.push(format!("You pick up {}.", item_display_name(item.0, 1, &identities)));
             inventory.0.push(item.0);
-            letter_map.get_or_assign_item(item.0);
+            labels.get_or_assign(item.0);
             commands.entity(entity).despawn();
         }
     }
 }
 
 // ── Command palette integration ──────────────────────────────────────────────
+//
+// Four independent commands (q/r/w/e), each a Submenu (list matching inventory
+// items, stable-lettered via LabelPool<ItemKind>) leading to a Run handler —
+// except "w", whose submenu entries lead to PickTarget instead, since waving a
+// wand needs a target. No more polled mailbox: the engine calls each handler
+// directly with the resolved CommandInvocation.
 
-pub fn register_item_commands(mut registry: ResMut<PaletteRegistry>) {
+/// Stable icon handle for an item, keyed by its position in `ALL_ITEM_KINDS`.
+pub fn icon_id_for_item(item: ItemKind) -> IconId {
+    IconId(ALL_ITEM_KINDS.iter().position(|k| *k == item).unwrap_or(0) as u32)
+}
+
+pub fn item_for_icon_id(id: IconId) -> Option<ItemKind> { ALL_ITEM_KINDS.get(id.0 as usize).copied() }
+
+pub fn register_item_commands(world: &mut World) {
+    let quaff_submenu_id = world.register_system(quaff_submenu);
+    let read_submenu_id = world.register_system(read_submenu);
+    let wave_submenu_id = world.register_system(wave_submenu);
+    let examine_submenu_id = world.register_system(examine_submenu);
+    let quaff_handler = world.register_system(execute_quaff);
+    let read_handler = world.register_system(execute_read);
+    let wave_handler = world.register_system(execute_wave);
+    let examine_handler = world.register_system(execute_examine);
+
+    let mut registry = world.resource_mut::<PaletteRegistry>();
     registry.commands.push(PaletteCommand {
         key: "q".to_string(),
         description: "quaff a potion".to_string(),
         icon: None,
-        kind: PaletteCommandKind::InventoryTarget {
-            item_filter: |i| matches!(i, ItemKind::Potion(_)),
-            requires_target: false,
-        },
+        outcome: EntryOutcome::Submenu(quaff_submenu_id),
+        handler: quaff_handler,
     });
     registry.commands.push(PaletteCommand {
         key: "r".to_string(),
         description: "read a scroll".to_string(),
         icon: None,
-        kind: PaletteCommandKind::InventoryTarget {
-            item_filter: |i| matches!(i, ItemKind::Scroll(_)),
-            requires_target: false,
-        },
+        outcome: EntryOutcome::Submenu(read_submenu_id),
+        handler: read_handler,
     });
     registry.commands.push(PaletteCommand {
         key: "w".to_string(),
         description: "wave a wand".to_string(),
         icon: None,
-        kind: PaletteCommandKind::InventoryTarget {
-            item_filter: |i| matches!(i, ItemKind::Wand(_)),
-            requires_target: true,
-        },
+        outcome: EntryOutcome::Submenu(wave_submenu_id),
+        handler: wave_handler,
     });
     registry.commands.push(PaletteCommand {
         key: "e".to_string(),
         description: "examine inventory".to_string(),
         icon: None,
-        kind: PaletteCommandKind::InventoryTarget { item_filter: |_| true, requires_target: false },
+        outcome: EntryOutcome::Submenu(examine_submenu_id),
+        handler: examine_handler,
     });
+}
+
+/// Builds terminal entries for each unique inventory item matching `filter`,
+/// keyed by its stable `LabelPool` letter. `leaf_outcome` is `Run` for
+/// immediate-use items, or `PickTarget` for ones that need a target next
+/// (wands).
+fn inventory_entries(
+    prefix: &str,
+    inventory: &Inventory,
+    item_filter: impl Fn(ItemKind) -> bool,
+    labels: &LabelPool<ItemKind>,
+    identities: &ItemIdentities,
+    leaf_outcome: EntryOutcome,
+) -> Vec<PaletteEntry> {
+    let mut unique: Vec<(ItemKind, u16)> = Vec::new();
+    for item in &inventory.0 {
+        if item_filter(*item) {
+            if let Some(entry) = unique.iter_mut().find(|(t, _)| t == item) {
+                entry.1 += 1;
+            } else {
+                unique.push((*item, 1));
+            }
+        }
+    }
+    let mut entries: Vec<PaletteEntry> = unique
+        .iter()
+        .filter_map(|(item, count)| {
+            labels.get(*item).map(|letter| PaletteEntry {
+                key: format!("{prefix} {letter}"),
+                description: item_display_name(*item, *count, identities),
+                icon: Some(icon_id_for_item(*item)),
+                outcome: leaf_outcome.clone(),
+            })
+        })
+        .collect();
+    entries.sort_by_key(|e| e.key.clone());
+    entries
+}
+
+fn quaff_submenu(
+    In(path): In<PalettePath>,
+    inventory: Query<&Inventory, With<Player>>,
+    labels: Res<LabelPool<ItemKind>>,
+    identities: Res<ItemIdentities>,
+) -> Vec<PaletteEntry> {
+    let Ok(inventory) = inventory.single() else { return Vec::new() };
+    inventory_entries(
+        &path.join(" "),
+        inventory,
+        |i| matches!(i, ItemKind::Potion(_)),
+        &labels,
+        &identities,
+        EntryOutcome::Run,
+    )
+}
+
+fn read_submenu(
+    In(path): In<PalettePath>,
+    inventory: Query<&Inventory, With<Player>>,
+    labels: Res<LabelPool<ItemKind>>,
+    identities: Res<ItemIdentities>,
+) -> Vec<PaletteEntry> {
+    let Ok(inventory) = inventory.single() else { return Vec::new() };
+    inventory_entries(
+        &path.join(" "),
+        inventory,
+        |i| matches!(i, ItemKind::Scroll(_)),
+        &labels,
+        &identities,
+        EntryOutcome::Run,
+    )
+}
+
+fn examine_submenu(
+    In(path): In<PalettePath>,
+    inventory: Query<&Inventory, With<Player>>,
+    labels: Res<LabelPool<ItemKind>>,
+    identities: Res<ItemIdentities>,
+) -> Vec<PaletteEntry> {
+    let Ok(inventory) = inventory.single() else { return Vec::new() };
+    inventory_entries(&path.join(" "), inventory, |_| true, &labels, &identities, EntryOutcome::Run)
+}
+
+fn wave_submenu(
+    In(path): In<PalettePath>,
+    inventory: Query<&Inventory, With<Player>>,
+    labels: Res<LabelPool<ItemKind>>,
+    identities: Res<ItemIdentities>,
+) -> Vec<PaletteEntry> {
+    let Ok(inventory) = inventory.single() else { return Vec::new() };
+    inventory_entries(
+        &path.join(" "),
+        inventory,
+        |i| matches!(i, ItemKind::Wand(_)),
+        &labels,
+        &identities,
+        EntryOutcome::PickTarget { verb: "Wave at".to_string(), filter: TargetFilter::Any },
+    )
 }
 
 const WAND_MANA_COST: f32 = 5.0;
@@ -590,263 +712,232 @@ pub fn identify_item(item: ItemKind, identities: &mut ItemIdentities, boredom: &
     identities.identify(item);
 }
 
-/// Consumes `CommandPaletteState::pending_command` and applies item effects.
-pub fn execute_item_command(
-    mut palette: ResMut<CommandPaletteState>,
+fn letter_from_path(path: &PalettePath) -> Option<char> {
+    path.get(1).and_then(|s| s.chars().next())
+}
+
+fn execute_quaff(
+    In(invocation): In<CommandInvocation>,
+    mut player_query: Query<(&mut Inventory, &mut Stats, &mut StatusEffects), With<Player>>,
+    labels: Res<LabelPool<ItemKind>>,
+    mut identities: ResMut<ItemIdentities>,
+    mut boredom: ResMut<Boredom>,
+    mut log: ResMut<MessageLog>,
+) {
+    let Some(letter) = letter_from_path(&invocation.path) else { return };
+    let Some(item_kind) = labels.key_for_letter(letter) else { return };
+    let Ok((mut inventory, mut stats, mut player_effects)) = player_query.single_mut() else {
+        return;
+    };
+    let Some(item) =
+        find_and_remove_item(&mut inventory, |i| matches!(i, ItemKind::Potion(_)), item_kind)
+    else {
+        return;
+    };
+    let ItemKind::Potion(color) = item else { return };
+    let gained = 20.0_f32.min(stats.max_hp - stats.hp);
+    stats.hp = (stats.hp + 15.0).min(stats.max_hp);
+    let mut rng = rand::thread_rng();
+    let (kind, duration) = potion_status_effect(identities.potion_effect(color), &mut rng);
+    player_effects.add(kind, duration);
+    identify_item(item, &mut identities, &mut boredom);
+    log.push(format!(
+        "You quaff {}. (+{} HP)",
+        item_display_name(item, 1, &identities),
+        gained as i32,
+    ));
+}
+
+fn execute_read(
+    In(invocation): In<CommandInvocation>,
     mut player_query: Query<
-        (
-            Entity,
-            &mut Inventory,
-            &mut Stats,
-            &mut Position,
-            &mut Transform,
-            &mut LinearVelocity,
-            &mut StatusEffects,
-        ),
+        (Entity, &mut Inventory, &mut Stats, &mut Position, &mut Transform, &mut LinearVelocity),
+        With<Player>,
+    >,
+    labels: Res<LabelPool<ItemKind>>,
+    mut identities: ResMut<ItemIdentities>,
+    mut boredom: ResMut<Boredom>,
+    mut log: ResMut<MessageLog>,
+    dungeon_state: Res<DungeonState>,
+    mut commands: Commands,
+) {
+    let Some(letter) = letter_from_path(&invocation.path) else { return };
+    let Some(item_kind) = labels.key_for_letter(letter) else { return };
+    let Ok((entity, mut inventory, mut stats, mut position, mut transform, mut velocity)) =
+        player_query.single_mut()
+    else {
+        return;
+    };
+    let Some(item) =
+        find_and_remove_item(&mut inventory, |i| matches!(i, ItemKind::Scroll(_)), item_kind)
+    else {
+        return;
+    };
+    let ItemKind::Scroll(name) = item else { return };
+    let effect = identities.scroll_effect(name);
+    identify_item(item, &mut identities, &mut boredom);
+
+    // Every scroll restores 20 MP in addition to its identified effect.
+    let mana_gained = 20.0_f32.min(stats.max_mana - stats.mana);
+    stats.mana = (stats.mana + 20.0).min(stats.max_mana);
+    let player_pos = transform.translation.truncate();
+    log.push(format!(
+        "You read {}. (+{} MP)",
+        item_display_name(item, 1, &identities),
+        mana_gained as i32,
+    ));
+
+    match effect {
+        ScrollEffect::Teleport => {
+            if let Some(dest) =
+                random_in_playable_area(&dungeon_state.playable_area, &mut rand::thread_rng())
+            {
+                position.0 = dest;
+                transform.translation.x = dest.x;
+                transform.translation.y = dest.y;
+                velocity.0 = Vec2::ZERO;
+                commands.entity(entity).remove::<ExplorationGoal>();
+                log.push("You are teleported!");
+            }
+        }
+        ScrollEffect::SummonMonster => {
+            commands.trigger(SummonMonsterEvent { origin: player_pos });
+        }
+        ScrollEffect::MagicMapping => {
+            commands.trigger(MagicMappingEvent);
+        }
+        ScrollEffect::Instability => {
+            commands.trigger(InstabilityEvent { origin: player_pos });
+        }
+        ScrollEffect::Acquirement => {
+            commands.trigger(AcquirementEvent { origin: player_pos });
+        }
+        ScrollEffect::Binding => {
+            commands.trigger(BindingEvent { origin: player_pos });
+        }
+        ScrollEffect::Forgetting => match identities.forget(&mut rand::thread_rng()) {
+            Some((_n, type_word)) => {
+                log.push(format!(
+                    "You're not as sure as you used to be about those {type_word}s."
+                ));
+            }
+            None => {
+                log.push("You don't remember having forgotten anything.");
+            }
+        },
+    }
+}
+
+fn execute_examine(In(_invocation): In<CommandInvocation>) {
+    // Read-only; no effect.
+}
+
+fn execute_wave(
+    In(invocation): In<CommandInvocation>,
+    mut player_query: Query<
+        (Entity, &mut Inventory, &mut Stats, &mut Position, &mut Transform, &mut LinearVelocity),
         (With<Player>, Without<Monster>),
     >,
     mut monster_query: Query<
         (&mut Position, &mut Transform, &mut LinearVelocity, &mut StatusEffects),
         (With<Monster>, Without<Player>),
     >,
-    dungeon_state: Res<DungeonState>,
-    mut log: ResMut<MessageLog>,
-    mut commands: Commands,
-    letter_map: Res<crate::command_palette::LetterMap>,
+    labels: Res<LabelPool<ItemKind>>,
     mut identities: ResMut<ItemIdentities>,
     mut wand_cooldowns: ResMut<WandCooldowns>,
-    mut boredom: ResMut<crate::player::Boredom>,
+    mut boredom: ResMut<Boredom>,
+    mut log: ResMut<MessageLog>,
+    mut commands: Commands,
 ) {
-    let Some(cmd) = palette.pending_command.take() else { return };
+    let Some(letter) = letter_from_path(&invocation.path) else { return };
+    let Some(wand_kind) = labels.key_for_letter(letter) else { return };
+    let ItemKind::Wand(gem) = wand_kind else { return };
+    let Some(target) = invocation.target else { return };
 
-    let Ok((
-        entity,
-        mut inventory,
-        mut stats,
-        mut position,
-        mut transform,
-        mut velocity,
-        mut player_effects,
-    )) = player_query.single_mut()
+    let Ok((entity, inventory, mut stats, mut position, mut transform, mut velocity)) =
+        player_query.single_mut()
     else {
         return;
     };
-
-    let mut wand_step2 = false;
-    let mut put_back = false;
-    let parts: Vec<&str> = cmd.split_whitespace().collect();
-    match parts.as_slice() {
-        ["q", letter_str] => {
-            let Some(ch) = letter_str.chars().next() else { return };
-            let Some(item_kind) = letter_map.item_for_letter(ch) else { return };
-            if let Some(item) = find_and_remove_item(
-                &mut inventory,
-                |i| matches!(i, ItemKind::Potion(_)),
-                item_kind,
-            ) {
-                let ItemKind::Potion(color) = item else { return };
-                let gained = 20.0_f32.min(stats.max_hp - stats.hp);
-                stats.hp = (stats.hp + 15.0).min(stats.max_hp);
-                let mut rng = rand::thread_rng();
-                let (kind, duration) =
-                    potion_status_effect(identities.potion_effect(color), &mut rng);
-                player_effects.add(kind, duration);
-                identify_item(item, &mut identities, &mut boredom);
-                log.push(format!(
-                    "You quaff {}. (+{} HP)",
-                    item_display_name(item, 1, &identities),
-                    gained as i32,
-                ));
-            }
-        }
-        ["r", letter_str] => {
-            let Some(ch) = letter_str.chars().next() else { return };
-            let Some(item_kind) = letter_map.item_for_letter(ch) else { return };
-            let Some(item) = find_and_remove_item(
-                &mut inventory,
-                |i| matches!(i, ItemKind::Scroll(_)),
-                item_kind,
-            ) else {
-                return;
-            };
-            let ItemKind::Scroll(name) = item else { return };
-            let effect = identities.scroll_effect(name);
-            identify_item(item, &mut identities, &mut boredom);
-
-            // Every scroll restores 20 MP in addition to its identified effect.
-            let mana_gained = 20.0_f32.min(stats.max_mana - stats.mana);
-            stats.mana = (stats.mana + 20.0).min(stats.max_mana);
-            let player_pos = transform.translation.truncate();
-            log.push(format!(
-                "You read {}. (+{} MP)",
-                item_display_name(item, 1, &identities),
-                mana_gained as i32,
-            ));
-
-            match effect {
-                ScrollEffect::Teleport => {
-                    if let Some(dest) = random_in_playable_area(
-                        &dungeon_state.playable_area,
-                        &mut rand::thread_rng(),
-                    ) {
-                        position.0 = dest;
-                        transform.translation.x = dest.x;
-                        transform.translation.y = dest.y;
-                        velocity.0 = Vec2::ZERO;
-                        commands.entity(entity).remove::<ExplorationGoal>();
-                        log.push("You are teleported!");
-                    }
-                }
-                ScrollEffect::SummonMonster => {
-                    commands.trigger(SummonMonsterEvent { origin: player_pos });
-                }
-                ScrollEffect::MagicMapping => {
-                    commands.trigger(MagicMappingEvent);
-                }
-                ScrollEffect::Instability => {
-                    commands.trigger(InstabilityEvent { origin: player_pos });
-                }
-                ScrollEffect::Acquirement => {
-                    commands.trigger(AcquirementEvent { origin: player_pos });
-                }
-                ScrollEffect::Binding => {
-                    commands.trigger(BindingEvent { origin: player_pos });
-                }
-                ScrollEffect::Forgetting => match identities.forget(&mut rand::thread_rng()) {
-                    Some((_n, type_word)) => {
-                        log.push(format!(
-                            "You're not as sure as you used to be about those {type_word}s."
-                        ));
-                    }
-                    None => {
-                        log.push("You don't remember having forgotten anything.");
-                    }
-                },
-            }
-        }
-        ["e", _] => {
-            // Examine: read-only; no effect.
-        }
-        ["w", _] if palette.pending_target.is_some() => {
-            // Step 2: world-click target — pending_target set by the click handler.
-            wand_step2 = true;
-        }
-        ["w", letter_str] => {
-            // Step 1: validate the wand and open the targeting sub-palette.
-            let Some(ch) = letter_str.chars().next() else { return };
-            let Some(item_kind) = letter_map.item_for_letter(ch) else { return };
-            if !matches!(item_kind, ItemKind::Wand(_)) {
-                return;
-            }
-            if !inventory.0.contains(&item_kind) {
-                return;
-            }
-            let ItemKind::Wand(gem) = item_kind else { return };
-            let total = inventory.0.iter().filter(|i| **i == item_kind).count() as u16;
-            if wand_cooldowns.ready_count(gem, total) == 0 {
-                log.push("That wand is still recharging...");
-                return;
-            }
-            if stats.mana < WAND_MANA_COST {
-                log.push("You don't have enough mana...");
-                return;
-            }
-            palette.pending_wand = Some(item_kind);
-            palette.open = true;
-            palette.target_los_only = true;
-            palette.input = format!("w {letter_str} ");
-            palette.selected_idx = 0;
-        }
-        ["w", _, _] => {
-            // Step 2: letter target — pending_wand, pending_target, pending_target_entity set.
-            wand_step2 = true;
-        }
-        _ => {
-            put_back = true;
-        }
-    }
-    drop(parts);
-    if put_back {
-        palette.pending_command = Some(cmd);
+    if !inventory.0.contains(&wand_kind) {
         return;
     }
-    if wand_step2 {
-        let Some(target_pos) = palette.pending_target.take() else { return };
-        let target_entity = palette.pending_target_entity.take();
-        // Wand kind: from pending_wand (fallback/legacy path) or from the command string.
-        let wand_kind = palette.pending_wand.take().or_else(|| {
-            cmd.split_whitespace()
-                .nth(1)
-                .and_then(|s| s.chars().next())
-                .and_then(|ch| letter_map.item_for_letter(ch))
-        });
-        let Some(wand_kind) = wand_kind else { return };
-        let ItemKind::Wand(gem) = wand_kind else { return };
-        if !inventory.0.contains(&wand_kind) {
-            return;
+    let total = inventory.0.iter().filter(|i| **i == wand_kind).count() as u16;
+    if wand_cooldowns.ready_count(gem, total) == 0 {
+        log.push("That wand is still recharging...");
+        return;
+    }
+    if stats.mana < WAND_MANA_COST {
+        log.push("You don't have enough mana...");
+        return;
+    }
+
+    let effect = identities.wand_effect(gem);
+    identify_item(wand_kind, &mut identities, &mut boredom);
+    stats.mana -= WAND_MANA_COST;
+    wand_cooldowns.add(gem);
+    log.push(format!(
+        "You wave the {}. (−{} MP)",
+        item_display_name(wand_kind, 1, &identities),
+        WAND_MANA_COST as i32,
+    ));
+
+    let target_entity = if let Target::Entity(e) = target { Some(e) } else { None };
+    let target_pos = match target {
+        Target::Point(p) => p,
+        Target::Entity(e) => monster_query
+            .get(e)
+            .map(|(pos, _, _, _)| pos.0)
+            .unwrap_or_else(|_| transform.translation.truncate()),
+    };
+
+    match effect {
+        WandEffect::Swapping => {
+            let Some(target_entity) = target_entity else {
+                log.push("Nothing to swap with here.");
+                return;
+            };
+            let Ok((mut m_pos, mut m_tf, mut m_vel, _)) = monster_query.get_mut(target_entity)
+            else {
+                return;
+            };
+            let player_pos = position.0;
+            let monster_pos = m_pos.0;
+            position.0 = monster_pos;
+            transform.translation.x = monster_pos.x;
+            transform.translation.y = monster_pos.y;
+            velocity.0 = Vec2::ZERO;
+            m_pos.0 = player_pos;
+            m_tf.translation.x = player_pos.x;
+            m_tf.translation.y = player_pos.y;
+            m_vel.0 = Vec2::ZERO;
+            commands.entity(entity).remove::<ExplorationGoal>();
+            log.push("You swap places!");
         }
-        let total = inventory.0.iter().filter(|i| **i == wand_kind).count() as u16;
-        if wand_cooldowns.ready_count(gem, total) == 0 {
-            log.push("That wand is still recharging...");
-            return;
+        WandEffect::Confusion => {
+            let Some(target_entity) = target_entity else {
+                log.push("Nothing to confuse here.");
+                return;
+            };
+            let Ok((_, _, _, mut m_effects)) = monster_query.get_mut(target_entity) else {
+                return;
+            };
+            let mut rng = rand::thread_rng();
+            let a = rng.gen_range(0.0..std::f32::consts::TAU);
+            m_effects.add(
+                StatusEffect::Confused { wander_dir: Vec2::new(a.cos(), a.sin()) },
+                rng.gen_range(6.0..10.0),
+            );
+            log.push("The monster looks confused!");
         }
-        let effect = identities.wand_effect(gem);
-        identify_item(wand_kind, &mut identities, &mut boredom);
-        stats.mana -= WAND_MANA_COST;
-        wand_cooldowns.add(gem);
-        log.push(format!(
-            "You wave the {}. (−{} MP)",
-            item_display_name(wand_kind, 1, &identities),
-            WAND_MANA_COST as i32,
-        ));
-        match effect {
-            WandEffect::Swapping => {
-                let Some(target_entity) = target_entity else {
-                    log.push("Nothing to swap with here.");
-                    return;
-                };
-                let Ok((mut m_pos, mut m_tf, mut m_vel, _)) = monster_query.get_mut(target_entity)
-                else {
-                    return;
-                };
-                let player_pos = position.0;
-                let monster_pos = m_pos.0;
-                position.0 = monster_pos;
-                transform.translation.x = monster_pos.x;
-                transform.translation.y = monster_pos.y;
-                velocity.0 = Vec2::ZERO;
-                m_pos.0 = player_pos;
-                m_tf.translation.x = player_pos.x;
-                m_tf.translation.y = player_pos.y;
-                m_vel.0 = Vec2::ZERO;
-                commands.entity(entity).remove::<ExplorationGoal>();
-                log.push("You swap places!");
-            }
-            WandEffect::Confusion => {
-                let Some(target_entity) = target_entity else {
-                    log.push("Nothing to confuse here.");
-                    return;
-                };
-                let Ok((_, _, _, mut m_effects)) = monster_query.get_mut(target_entity) else {
-                    return;
-                };
-                let mut rng = rand::thread_rng();
-                let a = rng.gen_range(0.0..std::f32::consts::TAU);
-                m_effects.add(
-                    StatusEffect::Confused { wander_dir: Vec2::new(a.cos(), a.sin()) },
-                    rng.gen_range(6.0..10.0),
-                );
-                log.push("The monster looks confused!");
-            }
-            WandEffect::Crumbling => {
-                commands.trigger(rogue_angles::effects::crumble_terrain::CrumbleTerrainRequest {
-                    target: target_pos,
-                });
-            }
-            WandEffect::Attraction => {
-                let player_pos = transform.translation.truncate();
-                commands.trigger(WandAttractionEvent { target: target_pos, player_pos });
-            }
+        WandEffect::Crumbling => {
+            commands.trigger(rogue_angles::effects::crumble_terrain::CrumbleTerrainRequest {
+                target: target_pos,
+            });
+        }
+        WandEffect::Attraction => {
+            let player_pos = transform.translation.truncate();
+            commands.trigger(WandAttractionEvent { target: target_pos, player_pos });
         }
     }
 }
@@ -993,5 +1084,92 @@ mod tests {
         ids.randomize(&mut rng);
         ids.identify(ItemKind::Potion(PotionColor::Red)); // only one known appearance
         assert!(ids.forget(&mut rng).is_none());
+    }
+
+    // ── Command palette: inventory listing ──────────────────────────────────
+
+    /// Inventory: Red×2, Readme×2, Blue×1, Agents×1 (with stable letters:
+    /// Red='a', Readme='b', Blue='c', Agents='d').
+    fn test_inventory() -> Inventory {
+        Inventory(vec![
+            ItemKind::Potion(PotionColor::Red),
+            ItemKind::Potion(PotionColor::Red),
+            ItemKind::Scroll(ScrollName::Readme),
+            ItemKind::Potion(PotionColor::Blue),
+            ItemKind::Scroll(ScrollName::Readme),
+            ItemKind::Scroll(ScrollName::Agents),
+        ])
+    }
+
+    fn test_label_pool() -> LabelPool<ItemKind> {
+        let mut pool = LabelPool::default();
+        pool.get_or_assign(ItemKind::Potion(PotionColor::Red));
+        pool.get_or_assign(ItemKind::Scroll(ScrollName::Readme));
+        pool.get_or_assign(ItemKind::Potion(PotionColor::Blue));
+        pool.get_or_assign(ItemKind::Scroll(ScrollName::Agents));
+        pool
+    }
+
+    fn keys(entries: &[PaletteEntry]) -> Vec<&str> { entries.iter().map(|e| e.key.as_str()).collect() }
+
+    #[test]
+    fn quaff_uses_stable_letters() {
+        let inv = test_inventory();
+        let pool = test_label_pool();
+        let identities = ItemIdentities::default();
+        let entries = inventory_entries(
+            "q",
+            &inv,
+            |i| matches!(i, ItemKind::Potion(_)),
+            &pool,
+            &identities,
+            EntryOutcome::Run,
+        );
+        assert_eq!(keys(&entries), ["q a", "q c"]);
+        assert_eq!(entries[0].description, "2 Red potions");
+        assert_eq!(entries[1].description, "a Blue potion");
+    }
+
+    #[test]
+    fn read_uses_stable_letters() {
+        let inv = test_inventory();
+        let pool = test_label_pool();
+        let identities = ItemIdentities::default();
+        let entries = inventory_entries(
+            "r",
+            &inv,
+            |i| matches!(i, ItemKind::Scroll(_)),
+            &pool,
+            &identities,
+            EntryOutcome::Run,
+        );
+        assert_eq!(keys(&entries), ["r b", "r d"]);
+        assert_eq!(entries[0].description, "2 scrolls titled 'Readme'");
+        assert_eq!(entries[1].description, "a scroll titled 'Agents'");
+    }
+
+    #[test]
+    fn wave_entries_lead_to_pick_target_not_run() {
+        let mut pool: LabelPool<ItemKind> = LabelPool::default();
+        pool.get_or_assign(ItemKind::Wand(WandGem::Ruby));
+        let inv = Inventory(vec![ItemKind::Wand(WandGem::Ruby)]);
+        let identities = ItemIdentities::default();
+        let entries = inventory_entries(
+            "w",
+            &inv,
+            |i| matches!(i, ItemKind::Wand(_)),
+            &pool,
+            &identities,
+            EntryOutcome::PickTarget { verb: "Wave at".to_string(), filter: TargetFilter::Any },
+        );
+        assert_eq!(keys(&entries), ["w a"]);
+        assert!(matches!(entries[0].outcome, EntryOutcome::PickTarget { .. }));
+    }
+
+    #[test]
+    fn icon_id_roundtrips_through_all_item_kinds() {
+        for &kind in ALL_ITEM_KINDS {
+            assert_eq!(item_for_icon_id(icon_id_for_item(kind)), Some(kind));
+        }
     }
 }

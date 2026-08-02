@@ -1,6 +1,52 @@
 # Splitting Vector Arena into `rogue-angles` + a demo game
 
-Status: **in progress.** Phases 0–1 done; phases 2–8 pending.
+Status: **in progress.** Phases 0–2 done (2 absorbed phase 3 — see below);
+phases 4–8 pending.
+
+## Phase 2 notes (merged with phase 3, and one scripting-capability fix found along the way)
+
+**Phases 2 and 3 were done together, not separately as originally planned.**
+The reason surfaced during implementation, not before: `EntryOutcome::PickTarget`
+— the palette's built-in target picker — is structurally meaningless without
+engine-owned labels to enumerate. Building the palette tree in phase 2 against
+the still-game-side `LetterMap`/`GotoState`, then rebuilding it against engine
+labels in phase 3, would have been the same work twice. So phase 2 shipped the
+full `rogue_angles::palette` module: `EntryOutcome` (`Submenu`/`PickTarget`/`Run`),
+`PaletteCommand`/`PaletteEntry`/`CommandInvocation`/`Target`, `EntityLabels`
+(uppercase/digits, auto-assigned via a `Targetable` marker + `Added`/
+`RemovedComponents`, no more manual `release_monster` calls), `LabelPool<K>`
+(generic lowercase pool — the demo instantiates `LabelPool<ItemKind>`, the
+engine never sees `ItemKind`), and `LocationLabels`/`LocationDescriptions`
+(the waypoint storage, `DIR_LEFT`/`DIR_RIGHT`/… constants for the eight pinned
+direction slots). Execution is no longer a polled `pending_command` mailbox —
+the engine resolves a path and calls the owning command's
+`SystemId<In<CommandInvocation>>` handler directly, so `item.rs:774`'s old
+"put the command back if it isn't mine" workaround is gone along with the
+string-parsing it existed to route around.
+
+The demo's eight commands map onto the tree as: `q`/`r`/`e` are
+`Submenu(list matching inventory) → Run`; `w` is
+`Submenu(list wands) → PickTarget → Run` (waving a wand needs a target, so its
+submenu entries lead to `PickTarget` instead of `Run` directly); `g`/`z` are
+`PickTarget` at the root; `d`/`.` are `Run` at the root. Rendering (egui) stays
+entirely in the game — `rogue_angles::palette` has no UI-framework dependency —
+via `IconId`, an opaque handle the demo maps back to `ItemKind` through
+`ALL_ITEM_KINDS`'s index.
+
+**A real capability gap, found by testing the headless `cmd` path rather than
+assumed away:** `goto.rs`'s `compute_goto_assignments` originally only ran
+while `CommandPaletteState.open && CommandPaletteWatchesClicks.0` — i.e. only
+during interactive palette use. Driving the palette programmatically (the
+headless runner's `cmd` script command, now `execute_path_string`, added as a
+direct `path → resolve → run` entry point alongside the keyboard/click UI)
+never opens that UI, so `LocationLabels` would silently stay empty and every
+lowercase-letter target (`"g h"`, `"z s"`, …) would fail to resolve outside
+interactive play — uppercase/digit entity targets worked fine since
+`EntityLabels` was already always-live. Fixed by making location-label
+assignment run unconditionally every frame, same model as `EntityLabels`,
+rather than a once-per-palette-session snapshot. Confirmed via the headless
+runner: `cmd g h` resolves and moves the player; `cmd g s` correctly fails
+before the staircase is explored, matching pre-existing game rules, not a bug.
 
 ## Phase 1 notes (what actually moved, and three couplings resolved on the way)
 
@@ -317,21 +363,29 @@ Each phase compiles and keeps `cargo test` green.
 0. **Workspace scaffold.** Virtual root, empty `rogue-angles`, `vector-arena`
    moved under `crates/`, Trunk/CI/asset paths fixed. **Done.**
 1. **Move the clean leaves.** `safegeo`, `bsp`, `terrain`, `nav`, `fov` plus
-   auto-explore, `time_scale`, `indicator`, message log, headless harness. Break
-   up the `lib.rs` globals block. Near-zero inbound coupling; mostly mechanical.
-2. **Palette rework.** `EntryOutcome` tree, `SystemId` handlers, `IconId`. The
-   biggest API-design step; do it while both halves are still one crate so the
-   refactor is compiler-guided.
-3. **Labels and goto** to the engine; `LabelPool<K>` generic.
+   auto-explore, `time_scale`, `indicator`. Also landed here (pulled forward
+   because the "clean" leaves turned out not to be): the `MovementModifiers`
+   inversion (nav/fov no longer read the game's `StatusEffects` directly) and
+   the `TimeScaleVotes` generalization. Message log and the headless snapshot
+   harness were deliberately deferred, not moved — see the phase-1 notes
+   above. **Done.**
+2. **Palette rework, merged with phase 3 (labels + goto).** `EntryOutcome`
+   tree, `SystemId` handlers, `IconId`, `EntityLabels`, `LabelPool<K>`,
+   `LocationLabels`/`LocationDescriptions`. See the phase-2 notes above for
+   why the merge happened and the scripting-capability fix that came out of
+   testing it. **Done.**
+3. *(Absorbed into phase 2.)*
 4. **Level generation.** `RoomKind` / `LevelBuilder` / `LevelPlan`; convert the
    eight variants in place into stock implementors; `PopulateLevel` observer.
-5. **Frameworks.** Status effects generic over `K`; `IdentityTable<A, E>`;
-   `MovementModifiers` inversion.
+5. **Frameworks.** Status effects generic over `K`; `IdentityTable<A, E>`.
+   (`MovementModifiers` itself already landed in phase 1.)
 6. **Presentation split.** `IconId` registry over the SVG pipeline; engine HUD
    chrome separated from the demo's stat and inventory panels; the
-   `ui.rs ↔ command_palette.rs` cycle untangled.
-7. **Draw the crate boundary.** Everything unmoved is game code; make
-   `rogue-angles` a real dependency and let the compiler find the leaks.
+   `ui.rs ↔ command_palette.rs` cycle untangled; the headless snapshot/tick
+   harness extraction deferred from phase 1 belongs here too.
+7. **Draw the crate boundary.** Everything unmoved is game code; the
+   `rogue-angles` path dependency has been live since phase 1 — this is the
+   final sweep for any remaining leaks.
 8. **Acceptance test: a second game.** A ~500-line example under
    `crates/rogue-angles/examples/` with deliberately different mechanics — melee
    combat instead of projectiles, no inventory at all, one custom `RoomKind`.

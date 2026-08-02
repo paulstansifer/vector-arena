@@ -11,6 +11,7 @@ use rogue_angles::{
     dungeon::terrain::{TorporMultiplier, random_in_playable_area},
     fov,
     movement::{MovementModifiers, Viewer},
+    palette::{TargetDescription, Targetable},
     util::safegeo::SafeMultiPolygon,
 };
 
@@ -35,7 +36,6 @@ pub fn populate(
     archipelago_id: Entity,
     depth: u32,
     saved_player: Option<(Stats, Inventory, StatusEffects)>,
-    monster_letters: &mut crate::command_palette::LetterMap,
     rng: &mut impl Rng,
 ) {
     let random_pos =
@@ -89,31 +89,13 @@ pub fn populate(
     for _ in 0..monster_count {
         let position = random_pos(rng);
         let drop = if rng.gen_bool(0.6) { Some(random_item_kind(rng)) } else { None };
-        spawn_monster(
-            commands,
-            materials,
-            monster_mesh.clone(),
-            archipelago_id,
-            position,
-            monster_letters,
-            drop,
-            rng,
-        );
+        spawn_monster(commands, materials, monster_mesh.clone(), archipelago_id, position, drop, rng);
     }
 
     // Chamber-room vaults always hold a monster and a treasure, regardless of the random rolls
     // used for the rest of the level.
     for &chamber_pos in chamber_centers {
-        spawn_monster(
-            commands,
-            materials,
-            monster_mesh.clone(),
-            archipelago_id,
-            chamber_pos,
-            monster_letters,
-            None,
-            rng,
-        );
+        spawn_monster(commands, materials, monster_mesh.clone(), archipelago_id, chamber_pos, None, rng);
 
         let kind = random_item_kind(rng);
         let (svg_path, param) = sprite_spec(kind);
@@ -161,7 +143,6 @@ pub fn spawn_monster(
     monster_mesh: Handle<Mesh>,
     archipelago_id: Entity,
     position: Vec2,
-    monster_letters: &mut crate::command_palette::LetterMap,
     drop: Option<ItemKind>,
     rng: &mut impl Rng,
 ) -> Entity {
@@ -170,6 +151,8 @@ pub fn spawn_monster(
             LevelEntity,
             (
                 Monster,
+                Targetable,
+                TargetDescription::default(),
                 MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
                 Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
                 StatusEffects::default(),
@@ -197,7 +180,6 @@ pub fn spawn_monster(
             AgentTarget2d::None,
         ))
         .id();
-    monster_letters.assign_monster(monster);
     if let Some(kind) = drop {
         commands.entity(monster).insert(MonsterDrop(kind));
     }

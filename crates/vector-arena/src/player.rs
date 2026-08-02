@@ -16,14 +16,10 @@ use rogue_angles::{
     dungeon::terrain::{DungeonState, TorporMultiplier},
     fov::{ExplorationState, find_exploration_waypoint},
     nav::{STEERING_GAIN, STOP_THRESHOLD, snap_to_navmesh},
+    palette::{CommandInvocation, CommandPaletteState, EntryOutcome, PaletteCommand, PaletteRegistry},
 };
 
-use crate::{
-    GameState, Staircase,
-    command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
-    status_effect::StatusEffects,
-    ui::MessageLog,
-};
+use crate::{GameState, Staircase, status_effect::StatusEffects, ui::MessageLog};
 
 pub const BOREDOM_MAX: f32 = 60.0;
 const BOREDOM_WARN: f32 = 40.0;
@@ -274,33 +270,34 @@ pub fn move_player(
 
 const DESCEND_RANGE: f32 = 40.0;
 
-pub fn register_player_commands(mut registry: ResMut<PaletteRegistry>) {
+pub fn register_player_commands(world: &mut World) {
+    let stop_handler = world.register_system(execute_stop_command);
+    let descend_handler = world.register_system(execute_descend_command);
+    let mut registry = world.resource_mut::<PaletteRegistry>();
     registry.commands.push(PaletteCommand {
         key: "d".to_string(),
         description: "Descend the staircase".to_string(),
         icon: None,
-        kind: PaletteCommandKind::Instant,
+        outcome: EntryOutcome::Run,
+        handler: descend_handler,
     });
     registry.commands.push(PaletteCommand {
         key: ".".to_string(),
         description: "Stop moving".to_string(),
         icon: None,
-        kind: PaletteCommandKind::Instant,
+        outcome: EntryOutcome::Run,
+        handler: stop_handler,
     });
 }
 
 pub fn execute_stop_command(
-    mut palette: ResMut<CommandPaletteState>,
+    In(_invocation): In<CommandInvocation>,
     mut player_query: Query<
         (Entity, &mut MoveTarget, &mut AgentTarget2d, &mut LinearVelocity),
         With<Player>,
     >,
     mut commands: Commands,
 ) {
-    if palette.pending_command.as_deref() != Some(".") {
-        return;
-    }
-    palette.pending_command = None;
     let Ok((entity, mut move_target, mut agent_target, mut velocity)) = player_query.single_mut()
     else {
         return;
@@ -312,16 +309,12 @@ pub fn execute_stop_command(
 }
 
 pub fn execute_descend_command(
-    mut palette: ResMut<CommandPaletteState>,
+    In(_invocation): In<CommandInvocation>,
     player_query: Query<&Transform, With<Player>>,
     staircase_query: Query<&Transform, With<Staircase>>,
     mut next_state: ResMut<NextState<GameState>>,
     mut message_log: ResMut<MessageLog>,
 ) {
-    if palette.pending_command.as_deref() != Some("d") {
-        return;
-    }
-    palette.pending_command = None;
     let Ok(player_tf) = player_query.single() else { return };
     let player_pos = player_tf.translation.truncate();
     if staircase_query

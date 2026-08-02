@@ -30,7 +30,6 @@ use rogue_angles::{
 };
 
 use crate::{
-    command_palette::LetterMap,
     item::{Item, item_name},
     monster::{Monster, MonsterDrop, Stats},
     player::Player,
@@ -259,7 +258,6 @@ pub fn explode_sigil(
     rubble_material: Option<Res<RubbleMaterial>>,
     fragile_query: Query<(Entity, &ColliderAabb), With<Fragile>>,
     mut message_log: ResMut<MessageLog>,
-    mut monster_letters: ResMut<LetterMap>,
     mut boredom: Option<ResMut<crate::player::Boredom>>,
 ) {
     let triggered: Vec<(Entity, Vec2, [f32; NUM_PTS], [Vec2; NUM_PTS])> = sigil_query
@@ -378,7 +376,6 @@ pub fn explode_sigil(
                                 .with_scale(Vec3::splat(0.4)),
                         ));
                     }
-                    monster_letters.release_monster(entity);
                     commands.entity(entity).despawn();
                 }
             }

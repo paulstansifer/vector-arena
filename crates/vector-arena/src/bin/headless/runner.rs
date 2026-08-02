@@ -45,7 +45,6 @@ use rogue_angles::{
 };
 use vector_arena::{
     WORLD_HEIGHT, WORLD_WIDTH,
-    command_palette::CommandPaletteState,
     effects::hit_particles::HitParticlesPlugin,
     game::{DungeonSeedOverride, GamePlugin},
     player::{MoveTarget, Player},
@@ -331,9 +330,13 @@ fn cmd_wait(app: &mut App, log: &mut Log, arg: &str) {
 
 fn cmd_cmd(app: &mut App, log: &mut Log, key: &str) {
     let key = key.trim().to_string();
-    app.world_mut().resource_mut::<CommandPaletteState>().pending_command = Some(key.clone());
+    let ran = rogue_angles::palette::execute_path_string(app.world_mut(), &key);
     tick(app);
-    log.write(&format!("cmd: '{key}'"));
+    if ran {
+        log.write(&format!("cmd: '{key}'"));
+    } else {
+        log.write(&format!("cmd: '{key}' did not resolve to a runnable command"));
+    }
 }
 
 fn cmd_click_left(app: &mut App, log: &mut Log, args: &str) {

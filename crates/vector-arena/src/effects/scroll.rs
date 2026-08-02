@@ -16,7 +16,6 @@ use rogue_angles::{
 
 use crate::{
     GameState,
-    command_palette::LetterMap,
     effects::{
         rope::{RopeVisuals, spawn_rope},
         unstable_sigils::spawn_unstable_sigil,
@@ -64,7 +63,6 @@ pub fn on_summon_monster(
     mut materials: ResMut<Assets<ColorMaterial>>,
     archipelago: Single<Entity, With<Archipelago2d>>,
     dungeon_state: Res<DungeonState>,
-    mut monster_letters: ResMut<LetterMap>,
     mut log: ResMut<MessageLog>,
 ) {
     let origin = trigger.event().origin;
@@ -74,16 +72,7 @@ pub fn on_summon_monster(
         return;
     };
     let mesh = meshes.add(Circle::new(AGENT_RADIUS));
-    spawn_monster(
-        &mut commands,
-        &mut materials,
-        mesh,
-        *archipelago,
-        pos,
-        &mut monster_letters,
-        None,
-        &mut rng,
-    );
+    spawn_monster(&mut commands, &mut materials, mesh, *archipelago, pos, None, &mut rng);
     log.push("A monster appears!");
 }
 

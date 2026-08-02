@@ -9,12 +9,17 @@ use rand::Rng;
 use std::collections::HashSet;
 
 use rogue_angles::{
-    AGENT_RADIUS, GameLayer, LevelEntity, dungeon::terrain::TorporMultiplier,
-    effects::crumble_terrain::Rubble, fov, visuals::indicator::HitFlash,
+    AGENT_RADIUS, GameLayer, LevelEntity,
+    dungeon::terrain::TorporMultiplier,
+    effects::crumble_terrain::Rubble,
+    fov,
+    palette::{
+        CommandInvocation, EntryOutcome, PaletteCommand, PaletteRegistry, Target, TargetFilter,
+    },
+    visuals::indicator::HitFlash,
 };
 
 use crate::{
-    command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     item::{Item, item_name},
     monster::{
         AlertedByMissile, Monster, MonsterDrop, MonsterShootFreeze, Stats, WANDER_ARRIVE_DIST,
@@ -177,28 +182,34 @@ fn spawn_missile(
     ));
 }
 
-pub fn register_missile_command(mut registry: ResMut<PaletteRegistry>) {
-    registry.commands.push(PaletteCommand {
+pub fn register_missile_command(world: &mut World) {
+    let handler = world.register_system(execute_missile_command);
+    world.resource_mut::<PaletteRegistry>().commands.push(PaletteCommand {
         key: MISSILE_KEY.to_string(),
         description: "Zap magic missile".to_string(),
         icon: None,
-        kind: PaletteCommandKind::LocationTarget { target_verb: "Zap at" },
+        outcome: EntryOutcome::PickTarget { verb: "Zap at".to_string(), filter: TargetFilter::Any },
+        handler,
     });
 }
 
-/// Fires a player missile toward the resolved target stored in palette.pending_target.
+/// Fires a player missile toward the resolved target.
 pub fn execute_missile_command(
-    mut palette: ResMut<CommandPaletteState>,
+    In(invocation): In<CommandInvocation>,
     mut player_query: Query<(&Transform, &mut Stats, Option<&StatusEffects>), With<Player>>,
+    all_transforms: Query<&Transform>,
     mut commands: Commands,
     missile_assets: Res<MissileAssets>,
     mut message_log: ResMut<MessageLog>,
 ) {
-    if palette.pending_command.as_deref() != Some(MISSILE_KEY) {
-        return;
-    }
-    palette.pending_command = None;
-    let Some(target_pos) = palette.pending_target.take() else { return };
+    let Some(target) = invocation.target else { return };
+    let target_pos = match target {
+        Target::Point(p) => p,
+        Target::Entity(e) => match all_transforms.get(e) {
+            Ok(tf) => tf.translation.truncate(),
+            Err(_) => return,
+        },
+    };
     let Ok((player_tf, mut stats, player_effects)) = player_query.single_mut() else { return };
     if stats.mana < MISSILE_MANA_COST {
         message_log.push("You don't have enough mana to zap a magic missile.");
@@ -477,7 +488,6 @@ pub fn apply_damage_on_hit(
         (Without<MagicMissile>, With<RigidBody>),
     >,
     mut message_log: ResMut<MessageLog>,
-    mut monster_letters: ResMut<crate::command_palette::LetterMap>,
 ) {
     let event = trigger.event();
     let Ok((mut stats_opt, is_player, is_monster, transform, drop_opt)) =
@@ -522,7 +532,6 @@ pub fn apply_damage_on_hit(
                     Transform::from_translation(pos).with_scale(Vec3::splat(0.4)),
                 ));
             }
-            monster_letters.release_monster(event.hit_entity);
             commands.entity(event.hit_entity).despawn();
         }
     } else if is_player {

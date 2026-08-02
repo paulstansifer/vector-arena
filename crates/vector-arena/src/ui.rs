@@ -8,11 +8,10 @@ use geo::Contains;
 
 use avian2d::{diagnostics::ui::PhysicsDiagnosticsUiSettings, prelude::RigidBody};
 
-use rogue_angles::fov::CurrentFovState;
+use rogue_angles::{fov::CurrentFovState, palette::CommandPaletteState};
 
 use crate::{
     DungeonDepth, GameState,
-    command_palette::CommandPaletteState,
     item::{
         Inventory, ItemIdentities, ItemKind, WAND_COOLDOWN_SECS, WandCooldowns, item_display_name,
     },
@@ -112,6 +111,11 @@ impl Plugin for UiPlugin {
             .init_resource::<Boredom>()
             .add_systems(EguiPrimaryContextPass, ui_system)
             .add_systems(EguiPrimaryContextPass, crate::command_palette::palette_system)
+            .add_systems(
+                EguiPrimaryContextPass,
+                crate::command_palette::handle_world_click_for_palette
+                    .after(crate::command_palette::palette_system),
+            )
             .add_systems(EguiPrimaryContextPass, crate::goto::render_goto_markers)
             .add_systems(EguiPrimaryContextPass, crate::monster::render_monster_markers)
             .add_systems(Update, crate::monster::refresh_monster_tooltips)

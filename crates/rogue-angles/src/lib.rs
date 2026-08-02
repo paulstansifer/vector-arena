@@ -3,14 +3,15 @@
 //! The world is polygons and physics rather than a grid: BSP-generated dungeon
 //! geometry, raycast field-of-view, navmesh steering, and destructible terrain.
 //! On top of that sits the interaction model this engine is opinionated about —
-//! a keystroke command palette addressed by letter-and-number abbreviations
-//! (that piece arrives in a later phase; see `docs/ENGINE-SPLIT.md` at the
-//! repository root for the full plan).
+//! a keystroke command palette (`palette`) addressed by letter-and-number
+//! abbreviations. See `docs/ENGINE-SPLIT.md` at the repository root for the
+//! full plan.
 pub mod dungeon;
 pub mod effects;
 pub mod fov;
 pub mod movement;
 pub mod nav;
+pub mod palette;
 pub mod time_scale;
 pub mod util;
 pub mod visuals;
