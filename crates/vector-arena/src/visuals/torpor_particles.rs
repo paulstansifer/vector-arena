@@ -18,7 +18,7 @@ use bevy::{
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 
-use rogue_angles::{LevelEntity, dungeon::terrain::TorporZoneParticles};
+use rogue_angles::{LevelEntity, dungeon::terrain::SlowZoneMarker};
 
 /// The fill color of torpor zones (matches the zone mesh material in `game.rs`).
 /// Particle colors are derived from this so they read as "part of" the zone.
@@ -66,7 +66,7 @@ fn setup_particle_texture(mut images: ResMut<Assets<Image>>, mut commands: Comma
 fn spawn_particles_for_new_zones(
     mut commands: Commands,
     texture: Res<TorporParticleTexture>,
-    zones: Query<&TorporZoneParticles, Added<TorporZoneParticles>>,
+    zones: Query<&SlowZoneMarker, Added<SlowZoneMarker>>,
 ) {
     let quad = particle_quad_size();
     let z = rogue_angles::fov::TERRAIN_Z + 0.2;

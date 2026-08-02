@@ -1,7 +1,64 @@
 # Splitting Vector Arena into `rogue-angles` + a demo game
 
-Status: **in progress.** Phases 0–6 done (2 absorbed phase 3 — see below);
-phases 7–8 pending.
+Status: **in progress.** Phases 0–7 done (2 absorbed phase 3 — see below);
+phase 8 pending.
+
+## Phase 7 notes (final crate-boundary sweep)
+
+The `rogue-angles` path dependency has been live since phase 1, so this
+phase was an audit rather than a move: grep the engine for leaked game
+vocabulary, check for stray `pub use`s, and correct the stale docs.
+
+**Found and fixed: `Torpor*` naming baked into three engine identifiers.**
+`TorporMultiplier`, `TorporZoneParticles`, `TORPOR_FACTOR`, and
+`TORPOR_NAV_COST` (plus `DungeonState.torpor_zones` and a few function/param
+names) lived in `rogue_angles::dungeon::terrain`/`nav` since phase 1, before
+phase 4 established the `"slow"`-region-tag convention (`SlowZoneRoom`) for
+exactly this concept. The engine has no idea what "torpor" means — that's
+this game's status-effect flavor — so these are now `SlowZoneMultiplier`,
+`SlowZoneMarker`, `SLOW_ZONE_FACTOR`, `SLOW_ZONE_NAV_COST`,
+`DungeonState.slow_zones`, `slow_zone_factor_at`,
+`update_slow_zone_multipliers`. `vector-arena` keeps its own "Torpor"
+branding where it's genuinely the game's own vocabulary — the status effect
+itself, `visuals::torpor_particles::TorporParticlesPlugin`, and
+`effects::projectile::apply_torpor_to_non_agents` — those are fine exactly
+as named; only the *engine's* copies needed the rename.
+
+**Found and deliberately not fixed: `GameLayer::Missile`/`GameLayer::Rope`.**
+`GameLayer` (`rogue_angles::GameLayer`, `avian2d::PhysicsLayer`) has carried
+these two game-specific variants since phase 1's "narrow engine-owned
+globals" move — `rope.rs` never moved to the engine, and "missile" is
+squarely this game's vocabulary, yet both are baked into an engine-owned
+enum. This is a real wart: avian2d's `PhysicsLayer` derive requires one
+fixed enum for the whole collision-layer bitmask, so a downstream game can't
+add its own layer variants alongside the engine's. Fixing it properly means
+either shrinking `GameLayer` to just `Wall`/`Dynamic` and finding another way
+for engine collision code to reference game-added layers, or making the
+engine's own collision setup generic over a game-supplied layer type —
+a real design change, not a rename, and arguably better informed by whether
+phase 8's melee-combat example game actually needs additional layers than
+by speculating now. Left as a known, documented limitation.
+
+**Docs corrected** (`DEVELOPING.md` / its `AGENTS.md` symlink): was
+almost entirely pre-split — claimed `rogue-angles` was "currently a
+placeholder," listed `scrolls.rs` as a top-level file (it's
+`effects/scroll.rs`, and was even before the split), said `bevy_egui` was
+"imported, not yet wired up" (it's the entire HUD/palette rendering stack),
+and pointed new-effect registration at `main.rs` (most effects wire into
+`GamePlugin::build` in `game.rs`; `main.rs` only hosts the couple of
+optional visual-only plugins). Rewritten as two sections — an engine guide
+(module table, the four extension mechanisms with pointers to their real
+implementations) and a demo-game guide (corrected module table, architecture
+overview, "adding new things") — plus a corrected headless-runner command
+table (`cmd <path>` calls `execute_path_string` directly; the old doc's
+example, `cmd q` "to quit to menu," was simply wrong — `q` is quaff).
+`TODO.md`'s two "add more rooms" items (octagonal; walled-off vault) are
+checked off, since phase 4 shipped both as stock `RoomKind`s.
+
+Verification: `cargo test --workspace` 139/139 green (test counts unchanged
+from phase 6 — this phase was renames and docs, no behavior change). A
+headless smoke test after the rename confirms slow zones, doors, and item
+rendering are pixel-identical to before (same seed).
 
 ## Phase 6 notes (presentation split)
 

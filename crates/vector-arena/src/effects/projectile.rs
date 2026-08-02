@@ -10,7 +10,7 @@ use std::collections::HashSet;
 
 use rogue_angles::{
     AGENT_RADIUS, GameLayer, LevelEntity,
-    dungeon::terrain::TorporMultiplier,
+    dungeon::terrain::SlowZoneMultiplier,
     effects::crumble_terrain::Rubble,
     fov,
     hud::{MessageLog, WorldTooltip},
@@ -163,7 +163,7 @@ fn spawn_missile(
     commands.spawn((
         LevelEntity,
         MagicMissile::new(fired_by_player, spawn_pos, direction * MISSILE_SPEED, damage_multiplier),
-        TorporMultiplier(1.0),
+        SlowZoneMultiplier(1.0),
         Mesh2d(missile_assets.mesh.clone()),
         MeshMaterial2d(material),
         Transform::from_translation(spawn_pos.extend(fov::MOVABLE_Z + 1.0)),
@@ -291,7 +291,7 @@ pub fn update_missiles(
 
 // TODO: this doesn't belong here (except that missiles are currently the main thing affected)
 pub fn apply_torpor_to_non_agents(
-    mut query: Query<(&TorporMultiplier, &mut LinearVelocity), Without<bevy_landmass::Agent2d>>,
+    mut query: Query<(&SlowZoneMultiplier, &mut LinearVelocity), Without<bevy_landmass::Agent2d>>,
 ) {
     for (torpor, mut vel) in query.iter_mut() {
         let dir = vel.0.normalize_or_zero();

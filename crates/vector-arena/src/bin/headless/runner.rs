@@ -440,7 +440,7 @@ fn cmd_level_blank(app: &mut App, log: &mut Log) {
         solid_rock,
         playable_area,
         glass_walls: SafeMultiPolygon::empty(),
-        torpor_zones: vec![],
+        slow_zones: vec![],
     });
     world.insert_resource(DungeonVisuals(terrain_mesh_handle));
     world.insert_resource(DungeonCollider(terrain_collider));

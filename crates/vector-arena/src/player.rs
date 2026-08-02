@@ -13,7 +13,7 @@ use bevy::input::keyboard::Key;
 use rand::Rng;
 
 use rogue_angles::{
-    dungeon::terrain::{DungeonState, TorporMultiplier},
+    dungeon::terrain::{DungeonState, SlowZoneMultiplier},
     fov::{ExplorationState, find_exploration_waypoint},
     hud::MessageLog,
     nav::{STEERING_GAIN, STOP_THRESHOLD, snap_to_navmesh},
@@ -339,7 +339,7 @@ pub fn directional_move_system(
             &mut MoveTarget,
             &mut AgentTarget2d,
             Option<&StatusEffects>,
-            Option<&TorporMultiplier>,
+            Option<&SlowZoneMultiplier>,
         ),
         With<Player>,
     >,

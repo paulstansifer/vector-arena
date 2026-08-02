@@ -8,7 +8,7 @@ use geo::Rect;
 use rand::prelude::*;
 use rogue_angles::{
     AGENT_RADIUS, GameLayer, LevelEntity,
-    dungeon::terrain::{TorporMultiplier, random_in_playable_area},
+    dungeon::terrain::{SlowZoneMultiplier, random_in_playable_area},
     fov,
     hud::WorldTooltip,
     movement::{MovementModifiers, Viewer},
@@ -60,7 +60,7 @@ pub fn populate(
             initial_inventory,
             initial_stats,
             initial_effects,
-            TorporMultiplier(1.0),
+            SlowZoneMultiplier(1.0),
         ),
         SvgSprite { svg_path: "sprites/wizard.svg".into(), param: None },
         Transform::from_translation(player_position.extend(fov::MOVABLE_Z))
@@ -157,7 +157,7 @@ pub fn spawn_monster(
                 MonsterState::Sleeping { timer: rng.gen_range(3.0..5.0) },
                 Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
                 StatusEffects::default(),
-                TorporMultiplier(1.0),
+                SlowZoneMultiplier(1.0),
                 MovementModifiers::default(),
             ),
             WorldTooltip::default(),

@@ -10,8 +10,8 @@
   * Add a "vortex" dungeon feature (and a scroll that creates one).
     * Tried this. Meh? Stashed it.
   * Add more rooms:
-    * Octagonal rooms
-    * Rooms with a walled off (with a door) portion in the middle, always containing a monster and an item.
+    * ~~Octagonal rooms~~ done (`OctagonRoom`)
+    * ~~Rooms with a walled off (with a door) portion in the middle, always containing a monster and an item.~~ done (`VaultRoom`)
     * Maze of corridors, with an item at a dead end
   * Monsters should attack more
   * Different kinds of monsters!
@@ -22,5 +22,6 @@
 
   # Larger projects
   * Break this into a library + game definition — see [docs/ENGINE-SPLIT.md](docs/ENGINE-SPLIT.md).
-    Phase 0 (workspace scaffold) is done; the engine crate is `crates/rogue-angles`.
+    Phases 0–7 are done; the engine crate is `crates/rogue-angles`. Remaining: phase 8,
+    an acceptance-test example game with different mechanics (melee combat, no inventory).
   * Using `rough_vello` to create a hand-drawn look might be cute

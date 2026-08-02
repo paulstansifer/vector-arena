@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use rand::{Rng, RngCore};
 
 use rogue_angles::{
-    AGENT_RADIUS, GameLayer, dungeon::terrain::TorporMultiplier, movement::MovementModifiers,
+    AGENT_RADIUS, GameLayer, dungeon::terrain::SlowZoneMultiplier, movement::MovementModifiers,
     status_effects::StatusKind,
 };
 
@@ -127,13 +127,13 @@ pub fn displacing_strength(effects: &StatusEffects) -> f32 {
 }
 
 /// Writes the engine's narrow `MovementModifiers` component from this game's `StatusEffects`
-/// (speed/vision multipliers) and `TorporMultiplier` (a terrain effect, folded into speed here
-/// since it's a second, unrelated modifier source the engine has no generic way to combine),
-/// so `nav::apply_nav_velocity` and `fov::update_fov` never need to know this game's
+/// (speed/vision multipliers) and `SlowZoneMultiplier` (a terrain effect, folded into speed
+/// here since it's a second, unrelated modifier source the engine has no generic way to
+/// combine), so `nav::apply_nav_velocity` and `fov::update_fov` never need to know this game's
 /// status-effect types. Every agent that needs steering or FOV (player and monsters alike)
 /// gets `MovementModifiers` at spawn time; see `populate_level.rs`.
 pub fn sync_movement_modifiers(
-    mut query: Query<(&StatusEffects, Option<&TorporMultiplier>, &mut MovementModifiers)>,
+    mut query: Query<(&StatusEffects, Option<&SlowZoneMultiplier>, &mut MovementModifiers)>,
 ) {
     for (effects, torpor, mut modifiers) in &mut query {
         modifiers.speed_multiplier =

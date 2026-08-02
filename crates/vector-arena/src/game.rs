@@ -15,9 +15,9 @@ use rogue_angles::{
     dungeon::level_generation::{LevelPlan, RoomRegistry},
     dungeon::terrain::{
         DungeonCollider, DungeonState, DungeonVisuals, GlassWallsMarker, PointsOfInterest,
-        TerrainMarker, TorporZoneParticles, geometry_to_collider, geometry_to_mesh,
+        TerrainMarker, SlowZoneMarker, geometry_to_collider, geometry_to_mesh,
         glass_wall_border, sync_dungeon_to_entities, sync_glass_walls_to_entities,
-        update_torpor_multipliers,
+        update_slow_zone_multipliers,
     },
     effects::crumble_terrain::{
         Fragile, RubbleMaterial, handle_right_click_excavation, on_crumble_terrain_request,
@@ -25,7 +25,7 @@ use rogue_angles::{
     },
     fov::{self as fov, MOVABLE_Z, OpaqueVertices, TERRAIN_Z},
     hud::{MessageLog, enable_ui_input_absorption},
-    nav::{self as nav, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
+    nav::{self as nav, DungeonNavMesh, NavMeshIslandMarker, SLOW_ZONE_NAV_COST, playable_area_to_nav_mesh},
     palette::{self, EntityLabels, LabelPool, LocationDescriptions, LocationLabels},
     status_effects::{StatusEffectsAppExt, tick_status_effects},
     time_scale::arbitrate_time_scale,
@@ -169,7 +169,7 @@ pub fn spawn_game_world(
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed + depth as u64);
 
     let mut archipelago = Archipelago2d::new(ArchipelagoOptions::from_agent_radius(AGENT_RADIUS));
-    archipelago.set_type_index_cost(1, TORPOR_NAV_COST).expect("torpor nav cost is positive");
+    archipelago.set_type_index_cost(1, SLOW_ZONE_NAV_COST).expect("slow zone nav cost is positive");
     let archipelago_id = commands.spawn((LevelEntity, archipelago)).id();
 
     let registry = RoomRegistry::stock();
@@ -195,7 +195,7 @@ pub fn spawn_game_world(
         solid_rock: terrain_geometry.solid_rock.clone(),
         playable_area: terrain_geometry.playable_area.clone(),
         glass_walls: terrain_geometry.glass_walls.clone(),
-        torpor_zones: slow_zones.clone(),
+        slow_zones: slow_zones.clone(),
     };
     let dungeon_visuals = DungeonVisuals(terrain_mesh_handle.clone());
     let dungeon_collider = DungeonCollider(terrain_collider.clone());
@@ -256,7 +256,7 @@ pub fn spawn_game_world(
             Mesh2d(meshes.add(mesh)),
             MeshMaterial2d(torpor_material.clone()),
             Transform::from_translation(Vec3::new(0.0, 0.0, TERRAIN_Z + 0.1)),
-            TorporZoneParticles { center, half_size },
+            SlowZoneMarker { center, half_size },
         ));
     }
 
@@ -410,7 +410,7 @@ impl Plugin for GamePlugin {
             )
             .add_systems(OnExit(GameState::InLevel), save_player_on_exit)
             .add_status_effects::<StatusEffect>()
-            .add_systems(Update, update_torpor_multipliers)
+            .add_systems(Update, update_slow_zone_multipliers)
             .add_systems(Update, tick_wand_cooldowns)
             .add_systems(Update, refresh_item_tooltips)
             .add_observer(on_summon_monster)
@@ -421,7 +421,7 @@ impl Plugin for GamePlugin {
             .add_observer(on_crumble_terrain_request)
             .add_observer(on_wand_attraction)
             .add_systems(Update, set_target_on_click.run_if(in_state(GameState::InLevel)))
-            .add_systems(Update, move_player.after(update_torpor_multipliers))
+            .add_systems(Update, move_player.after(update_slow_zone_multipliers))
             .add_systems(
                 Update,
                 nav::apply_nav_velocity.after(move_player).after(sync_movement_modifiers),
@@ -451,7 +451,7 @@ impl Plugin for GamePlugin {
                 Update,
                 sync_movement_modifiers
                     .after(tick_status_effects::<StatusEffect>)
-                    .after(update_torpor_multipliers),
+                    .after(update_slow_zone_multipliers),
             )
             .add_systems(Update, fov::update_fov.after(sync_movement_modifiers))
             .add_systems(Update, update_staircase_fog_copy.after(fov::update_fov))
@@ -471,7 +471,7 @@ impl Plugin for GamePlugin {
             .add_systems(Update, update_missiles)
             .add_systems(
                 Update,
-                apply_torpor_to_non_agents.after(update_torpor_multipliers).after(update_missiles),
+                apply_torpor_to_non_agents.after(update_slow_zone_multipliers).after(update_missiles),
             )
             .add_systems(Update, spawn_missile_trails)
             .add_systems(Update, update_missile_trails)

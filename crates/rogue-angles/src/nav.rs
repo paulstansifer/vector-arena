@@ -4,7 +4,7 @@
 // Also applies landmass-computed desired velocity to Avian2D LinearVelocity
 // for all agents each frame, and syncs the DungeonNavMesh resource to the island entity.
 use crate::{
-    dungeon::terrain::{TORPOR_FACTOR, TorporMultiplier},
+    dungeon::terrain::{SLOW_ZONE_FACTOR, SlowZoneMultiplier},
     movement::MovementModifiers,
     util::safegeo::{SafeMultiPolygon, SafePolygon},
 };
@@ -38,11 +38,11 @@ pub struct DungeonNavMesh(pub Handle<NavMesh2d>);
 
 /// Convert the playable area into a landmass NavigationMesh2d.
 /// Erodes by AGENT_RADIUS, triangulates, and deduplicates vertices for pathfinding.
-/// Torpor zones are triangulated as a separate pass (type index 1) so that zone
+/// Slow zones are triangulated as a separate pass (type index 1) so that zone
 /// boundaries align exactly with triangle edges — no triangle straddles the boundary.
 pub fn playable_area_to_nav_mesh(
     playable_area: &SafeMultiPolygon,
-    torpor_zones: &[SafePolygon],
+    slow_zones: &[SafePolygon],
 ) -> Arc<ValidNavigationMesh2d> {
     // bevy_landmass::nav_mesh::bevy_mesh_to_landmass_nav_mesh might simplify this somewhat, but it doesn't seem respect agent radius, so I guess we still need to handle that ourselves.
     use geo::{
@@ -95,21 +95,21 @@ pub fn playable_area_to_nav_mesh(
         }
     };
 
-    if torpor_zones.is_empty() {
+    if slow_zones.is_empty() {
         add_region(&eroded, 0);
     } else {
-        // Expand the torpor zones by AGENT_RADIUS so the high-cost navmesh region
+        // Expand the slow zones by AGENT_RADIUS so the high-cost navmesh region
         // starts slightly before the visual boundary. This prevents agents from getting
         // hitched on zone edges/corners due to the imprecision of physical movement.
         let expand_style = BufferStyle::new(crate::AGENT_RADIUS)
             .line_cap(LineCap::Square)
             .line_join(LineJoin::Bevel);
-        let torpor_mp = SafeMultiPolygon::from_polygons(torpor_zones.iter().cloned())
+        let slow_mp = SafeMultiPolygon::from_polygons(slow_zones.iter().cloned())
             .buffer_with_style(expand_style);
         // Two-pass triangulation keeps zone boundaries as exact triangle edges,
-        // so no triangle straddles the torpor/non-torpor boundary.
-        add_region(&eroded.difference(&torpor_mp), 0);
-        add_region(&eroded.intersection(&torpor_mp), 1);
+        // so no triangle straddles the slow/non-slow boundary.
+        add_region(&eroded.difference(&slow_mp), 0);
+        add_region(&eroded.intersection(&slow_mp), 1);
     }
 
     let nav_mesh = NavigationMesh2d { vertices, polygons, polygon_type_indices, height_mesh: None };
@@ -117,9 +117,9 @@ pub fn playable_area_to_nav_mesh(
     Arc::new(nav_mesh.validate().expect("playable area nav mesh should be valid"))
 }
 
-/// The travel-cost multiplier for navmesh polygon type 1 (torpor zones).
-/// Inverse of TORPOR_FACTOR: traversing the zone costs this much more per unit distance.
-pub const TORPOR_NAV_COST: f32 = 1.0 / TORPOR_FACTOR;
+/// The travel-cost multiplier for navmesh polygon type 1 (slow zones).
+/// Inverse of SLOW_ZONE_FACTOR: traversing the zone costs this much more per unit distance.
+pub const SLOW_ZONE_NAV_COST: f32 = 1.0 / SLOW_ZONE_FACTOR;
 
 /// Sync the DungeonNavMesh resource to the island entity when it changes.
 pub fn sync_island_nav_mesh(
@@ -135,7 +135,7 @@ pub fn sync_island_nav_mesh(
 
 /// Apply landmass's desired velocity as actual movement for all agents (player and monsters).
 /// Uses the direction from AgentDesiredVelocity2d with the speed from AgentSettings.desired_speed,
-/// then scales by MovementModifiers and TorporMultiplier. Applies a cornering slowdown and stops
+/// then scales by MovementModifiers and SlowZoneMultiplier. Applies a cornering slowdown and stops
 /// the agent when it arrives at a Point target. When off-navmesh with an active target, steers
 /// toward the nearest navmesh point so pathfinding can resume.
 pub fn apply_nav_velocity(
@@ -145,17 +145,17 @@ pub fn apply_nav_velocity(
         &AgentDesiredVelocity2d,
         &AgentSettings,
         &AgentTarget2d,
-        Option<&TorporMultiplier>,
+        Option<&SlowZoneMultiplier>,
         Option<&MovementModifiers>,
     )>,
     archipelago_query: Query<&Archipelago2d>,
 ) {
-    for (mut forces, transform, desired_velocity, settings, agent_target, torpor, modifiers) in
+    for (mut forces, transform, desired_velocity, settings, agent_target, slow_zone, modifiers) in
         agents.iter_mut()
     {
         let pos = transform.translation.truncate();
         let speed_mult = modifiers.map(|m| m.speed_multiplier).unwrap_or(1.0)
-            * torpor.map(|t| t.get()).unwrap_or(1.0);
+            * slow_zone.map(|t| t.get()).unwrap_or(1.0);
 
         // Stop when close enough to a Point target.
         if let AgentTarget2d::Point(target) = *agent_target

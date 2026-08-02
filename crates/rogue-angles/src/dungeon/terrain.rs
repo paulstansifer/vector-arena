@@ -69,22 +69,23 @@ pub fn geometry_to_collider(geometry: &SafeMultiPolygon) -> Collider {
 #[derive(Component)]
 pub struct TerrainMarker;
 
-/// Marks a torpor-zone visual entity, carrying the bounding box of the zone so
-/// the (render-only) particle effect can seed particles across it. Spawned
-/// unconditionally; consumed by `effects::torpor_particles` when that plugin is
-/// registered (the rendering binaries), so GPU-less tests can ignore it.
+/// Marks a slow-zone visual entity, carrying the bounding box of the zone so a
+/// (render-only) effect can be seeded across it — e.g. this game's ambient
+/// particle drift. Spawned unconditionally; consumed only by whichever
+/// rendering binary wants to draw something there, so GPU-less tests can
+/// ignore it.
 #[derive(Component)]
-pub struct TorporZoneParticles {
+pub struct SlowZoneMarker {
     pub center: Vec2,
     pub half_size: Vec2,
 }
 
-pub const TORPOR_FACTOR: f32 = 0.25;
+pub const SLOW_ZONE_FACTOR: f32 = 0.25;
 
 #[derive(Component, Default)]
-pub struct TorporMultiplier(pub f32);
+pub struct SlowZoneMultiplier(pub f32);
 
-impl TorporMultiplier {
+impl SlowZoneMultiplier {
     pub fn get(&self) -> f32 { self.0 }
 }
 
@@ -93,20 +94,20 @@ pub struct DungeonState {
     pub solid_rock: SafeMultiPolygon,
     pub playable_area: SafeMultiPolygon,
     pub glass_walls: SafeMultiPolygon,
-    pub torpor_zones: Vec<SafePolygon>,
+    pub slow_zones: Vec<SafePolygon>,
 }
 
-pub fn torpor_factor_at(pos: Vec2, dungeon_state: &DungeonState) -> f32 {
+pub fn slow_zone_factor_at(pos: Vec2, dungeon_state: &DungeonState) -> f32 {
     let p = geo::Point::new(pos.x, pos.y);
-    if dungeon_state.torpor_zones.iter().any(|z| z.contains(&p)) { TORPOR_FACTOR } else { 1.0 }
+    if dungeon_state.slow_zones.iter().any(|z| z.contains(&p)) { SLOW_ZONE_FACTOR } else { 1.0 }
 }
 
-pub fn update_torpor_multipliers(
+pub fn update_slow_zone_multipliers(
     dungeon_state: Res<DungeonState>,
-    mut query: Query<(&Transform, &mut TorporMultiplier)>,
+    mut query: Query<(&Transform, &mut SlowZoneMultiplier)>,
 ) {
     for (transform, mut mult) in query.iter_mut() {
-        mult.0 = torpor_factor_at(transform.translation.truncate(), &dungeon_state);
+        mult.0 = slow_zone_factor_at(transform.translation.truncate(), &dungeon_state);
     }
 }
 
