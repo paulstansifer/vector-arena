@@ -1,18 +1,22 @@
 // Spawns the inhabitants and interactables of a dungeon level: player, monsters,
 // items, and the down staircase. Called after structural elements (terrain,
 // navmesh, FOV) have been put in place by `spawn_game_world`.
-use crate::util::safegeo::SafeMultiPolygon;
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
 use geo::Rect;
 use rand::prelude::*;
+use rogue_angles::{
+    AGENT_RADIUS, GameLayer, LevelEntity,
+    dungeon::terrain::{TorporMultiplier, random_in_playable_area},
+    fov,
+    movement::{MovementModifiers, Viewer},
+    util::safegeo::SafeMultiPolygon,
+};
 
 use crate::{
-    AGENT_RADIUS, GameLayer, LevelEntity, Staircase, StaircaseFogCopy,
-    dungeon::terrain::{TorporMultiplier, random_in_playable_area},
+    Staircase, StaircaseFogCopy,
     effects::{projectile::MonsterShootTimer, unstable_sigils::spawn_unstable_sigil},
-    fov,
     item::{Inventory, Item, ItemKind, item_name, random_item_kind},
     monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterDrop, MonsterState, Stats},
     player::{MoveTarget, PLAYER_SPEED, Player},
@@ -48,7 +52,15 @@ pub fn populate(
 
     commands.spawn((
         LevelEntity,
-        (Player, initial_inventory, initial_stats, initial_effects, TorporMultiplier(1.0)),
+        (
+            Player,
+            Viewer,
+            MovementModifiers::default(),
+            initial_inventory,
+            initial_stats,
+            initial_effects,
+            TorporMultiplier(1.0),
+        ),
         SvgSprite { svg_path: "sprites/wizard.svg".into(), param: None },
         Transform::from_translation(player_position.extend(fov::MOVABLE_Z))
             .with_scale(Vec3::splat(0.4)),
@@ -162,6 +174,7 @@ pub fn spawn_monster(
                 Stats { hp: MONSTER_MAX_HP, max_hp: MONSTER_MAX_HP, ..default() },
                 StatusEffects::default(),
                 TorporMultiplier(1.0),
+                MovementModifiers::default(),
             ),
             WorldTooltip::default(),
             MonsterShootTimer::new(),

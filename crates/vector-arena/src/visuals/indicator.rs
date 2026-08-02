@@ -1,50 +1,13 @@
-// Visual-only short-term effects: HitFlash (color flash on missile hit) and
-// StateIndicator (character label on AI state change).
+// StateIndicator: an egui-drawn character label shown briefly on AI state change.
+// egui-based, so it stays in the game crate until the presentation split moves
+// UI rendering to the engine behind its own abstraction. HitFlash — the other
+// half of the original indicator.rs — has no UI dependency and lives in
+// `rogue_angles::visuals::indicator`.
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
-use crate::fov::CurrentFovState;
+use rogue_angles::fov::CurrentFovState;
 use geo::Contains;
-
-// ── HitFlash ────────────────────────────────────────────────────────────────
-
-#[derive(Component)]
-pub struct HitFlash {
-    pub timer: f32,
-    pub duration: f32,
-    pub base_color: Color,
-}
-
-pub fn update_hit_flash(
-    mut commands: Commands,
-    time: Res<Time<Real>>,
-    mut query: Query<(Entity, &mut HitFlash, &MeshMaterial2d<ColorMaterial>)>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
-    for (entity, mut flash, mat_handle) in query.iter_mut() {
-        flash.timer -= time.delta_secs();
-        if flash.timer <= 0.0 {
-            if let Some(mat) = materials.get_mut(&mat_handle.0) {
-                mat.color = flash.base_color;
-            }
-            commands.entity(entity).remove::<HitFlash>();
-        } else {
-            let t = flash.timer / flash.duration;
-            let base = flash.base_color.to_srgba();
-            let color = Color::srgba(
-                base.red + t * (1.0 - base.red),
-                base.green + t * (1.0 - base.green),
-                base.blue + t * (1.0 - base.blue),
-                base.alpha,
-            );
-            if let Some(mat) = materials.get_mut(&mat_handle.0) {
-                mat.color = color;
-            }
-        }
-    }
-}
-
-// ── StateIndicator ──────────────────────────────────────────────────────────
 
 #[derive(Component)]
 pub struct StateIndicator {

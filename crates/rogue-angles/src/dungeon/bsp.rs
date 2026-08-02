@@ -4,9 +4,14 @@
 // coordinate avoids landing on existing connections; double connections (two
 // corridors between adjacent partitions) kick in probabilistically once a
 // partition is wide enough.
-use crate::dungeon::level_generation::{CORRIDOR_WIDTH, PADDING};
 use rand::prelude::*;
 use std::ops::Range;
+
+// Also used by `dungeon::level_generation` (which stays in the game crate until
+// it moves to the engine in a later phase) — that module imports these back
+// from here rather than duplicating them.
+pub const PADDING: f32 = 10.0;
+pub const CORRIDOR_WIDTH: f32 = 35.0;
 
 const DOUBLE_CONNECTION_UNCERTAIN: Range<f32> = 500.0..750.0;
 const MIN_PARTITION_SIZE: Range<f32> = 200.0..550.0;

@@ -5,7 +5,9 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::{AGENT_RADIUS, GameLayer};
+use rogue_angles::{
+    AGENT_RADIUS, GameLayer, dungeon::terrain::TorporMultiplier, movement::MovementModifiers,
+};
 
 const RAMP_DOWN_SECS: f32 = 0.5;
 
@@ -179,6 +181,23 @@ pub fn tick_status_effects(time: Res<Time>, mut query: Query<&mut StatusEffects>
             }
             true
         });
+    }
+}
+
+/// Writes the engine's narrow `MovementModifiers` component from this game's
+/// `StatusEffects` (speed_multiplier) and `TorporMultiplier` (also folded into
+/// speed) each frame, so `nav::apply_nav_velocity` and `fov::update_fov` never
+/// need to know this game's status-effect types. Vision is unaffected by
+/// torpor, only by the Blind status effect. Every agent that needs steering or
+/// FOV (player and monsters alike) gets `MovementModifiers` at spawn time; see
+/// `populate_level.rs`.
+pub fn sync_movement_modifiers(
+    mut query: Query<(&StatusEffects, Option<&TorporMultiplier>, &mut MovementModifiers)>,
+) {
+    for (effects, torpor, mut modifiers) in &mut query {
+        modifiers.speed_multiplier =
+            effects.speed_multiplier() * torpor.map(|t| t.get()).unwrap_or(1.0);
+        modifiers.vision_multiplier = 1.0 - effects.blind_strength();
     }
 }
 

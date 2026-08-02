@@ -8,12 +8,13 @@ use bevy::prelude::*;
 use rand::Rng;
 use std::collections::HashSet;
 
+use rogue_angles::{
+    AGENT_RADIUS, GameLayer, LevelEntity, dungeon::terrain::TorporMultiplier,
+    effects::crumble_terrain::Rubble, fov, visuals::indicator::HitFlash,
+};
+
 use crate::{
-    AGENT_RADIUS, GameLayer, LevelEntity,
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
-    dungeon::terrain::TorporMultiplier,
-    effects::crumble_terrain::Rubble,
-    fov,
     item::{Item, item_name},
     monster::{
         AlertedByMissile, Monster, MonsterDrop, MonsterShootFreeze, Stats, WANDER_ARRIVE_DIST,
@@ -22,7 +23,6 @@ use crate::{
     sprite::{SvgSprite, sprite_spec},
     status_effect::StatusEffects,
     ui::{MessageLog, WorldTooltip},
-    visuals::indicator::HitFlash,
 };
 
 pub const MISSILE_KEY: &str = "z";

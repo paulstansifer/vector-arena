@@ -18,7 +18,7 @@ use bevy::{
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 
-use crate::{LevelEntity, dungeon::terrain::TorporZoneParticles};
+use rogue_angles::{LevelEntity, dungeon::terrain::TorporZoneParticles};
 
 /// The fill color of torpor zones (matches the zone mesh material in `game.rs`).
 /// Particle colors are derived from this so they read as "part of" the zone.
@@ -69,7 +69,7 @@ fn spawn_particles_for_new_zones(
     zones: Query<&TorporZoneParticles, Added<TorporZoneParticles>>,
 ) {
     let quad = particle_quad_size();
-    let z = crate::fov::TERRAIN_Z + 0.2;
+    let z = rogue_angles::fov::TERRAIN_Z + 0.2;
 
     for zone in &zones {
         let area = (2.0 * zone.half_size.x) * (2.0 * zone.half_size.y);

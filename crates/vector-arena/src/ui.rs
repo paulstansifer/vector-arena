@@ -8,10 +8,11 @@ use geo::Contains;
 
 use avian2d::{diagnostics::ui::PhysicsDiagnosticsUiSettings, prelude::RigidBody};
 
+use rogue_angles::fov::CurrentFovState;
+
 use crate::{
     DungeonDepth, GameState,
     command_palette::CommandPaletteState,
-    fov::CurrentFovState,
     item::{
         Inventory, ItemIdentities, ItemKind, WAND_COOLDOWN_SECS, WandCooldowns, item_display_name,
     },
@@ -90,7 +91,7 @@ struct PerfStats {
     phys_objects: usize,
 }
 
-fn count_mp_vertices(mp: &crate::util::safegeo::SafeMultiPolygon) -> usize {
+fn count_mp_vertices(mp: &rogue_angles::util::safegeo::SafeMultiPolygon) -> usize {
     mp.iter()
         .flat_map(|p| std::iter::once(p.exterior()).chain(p.interiors()))
         .map(|ls| ls.coords().count())

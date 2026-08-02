@@ -5448,7 +5448,10 @@ dependencies = [
 name = "rogue-angles"
 version = "0.1.0"
 dependencies = [
+ "avian2d",
  "bevy",
+ "bevy_landmass",
+ "bevy_mesh",
  "geo 0.32.0",
  "rand 0.8.6",
 ]
@@ -6476,6 +6479,7 @@ dependencies = [
  "pyri_tooltip",
  "rand 0.8.6",
  "resvg",
+ "rogue-angles",
 ]
 
 [[package]]

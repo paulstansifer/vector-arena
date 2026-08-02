@@ -8,7 +8,7 @@
 //   – pushes everything in radius 100 radially outward
 use std::f32::consts::TAU;
 
-use crate::util::safegeo::SafeMultiPolygon;
+use rogue_angles::util::safegeo::SafeMultiPolygon;
 use avian2d::prelude::*;
 use bevy::{
     asset::RenderAssetUsages,
@@ -19,17 +19,20 @@ use bevy_landmass::prelude::NavMesh2d;
 use geo::{Coord, Intersects, Rect};
 use rand::Rng;
 
-use crate::{
+use rogue_angles::{
     GameLayer, LevelEntity,
-    command_palette::LetterMap,
     dungeon::terrain::{DungeonCollider, DungeonState, DungeonVisuals},
     effects::crumble_terrain::{
         Fragile, RubbleMaterial, create_circle_polygon, subtract_polygon_from_terrain,
     },
     fov,
+    nav::DungeonNavMesh,
+};
+
+use crate::{
+    command_palette::LetterMap,
     item::{Item, item_name},
     monster::{Monster, MonsterDrop, Stats},
-    nav::DungeonNavMesh,
     player::Player,
     sprite::{SvgSprite, sprite_spec},
     ui::{MessageLog, WorldTooltip},

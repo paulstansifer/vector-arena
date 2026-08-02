@@ -5,10 +5,8 @@ use test_lib::{loc, physics_app, tick};
 use avian2d::prelude::*;
 use bevy::{ecs::system::SystemState, prelude::*};
 use bevy_verlet::prelude::*;
-use vector_arena::{
-    GameLayer,
-    effects::rope::{RopeEndAnchor, RopePoint, SEGMENT_TARGET_LEN, spawn_rope},
-};
+use rogue_angles::GameLayer;
+use vector_arena::effects::rope::{RopeEndAnchor, RopePoint, SEGMENT_TARGET_LEN, spawn_rope};
 
 // Rope is 10 segments × SEGMENT_TARGET_LEN = 100 units long.
 const N: usize = 10;

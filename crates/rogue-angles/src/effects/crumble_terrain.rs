@@ -9,7 +9,6 @@ use crate::{
     dungeon::terrain::{
         DungeonCollider, DungeonState, DungeonVisuals, geometry_to_collider, geometry_to_mesh,
     },
-    item::WandCrumblingEvent,
     nav::{DungeonNavMesh, playable_area_to_nav_mesh},
     util::safegeo::{SafeMultiPolygon, SafePolygon},
 };
@@ -33,6 +32,14 @@ const RUBBLE_MAX_RADIUS: f32 = 18.0;
 const RUBBLE_MIN_DIMENSION: f32 = 7.0;
 /// Inward buffer (world units) applied to each rubble piece — gives a gap and rounds corners.
 const RUBBLE_SHRINK: f32 = 4.0;
+
+/// Fired by game code to crumble an irregular patch of terrain around `target`
+/// (~160-unit radius) — e.g. a wand-of-crumbling effect. The engine only knows
+/// "crumble terrain here"; what in-game item or spell caused it is up to the game.
+#[derive(Event)]
+pub struct CrumbleTerrainRequest {
+    pub target: Vec2,
+}
 
 #[derive(Component)]
 pub struct Rubble;
@@ -331,8 +338,8 @@ mod tests {
 }
 
 /// Crumbles an irregular circle of terrain around `target` (radius ~25 units).
-pub fn on_wand_crumbling(
-    trigger: On<WandCrumblingEvent>,
+pub fn on_crumble_terrain_request(
+    trigger: On<CrumbleTerrainRequest>,
     mut commands: Commands,
     dungeon_state: Option<ResMut<DungeonState>>,
     dungeon_visuals: Option<ResMut<DungeonVisuals>>,

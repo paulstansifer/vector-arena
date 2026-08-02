@@ -8,15 +8,19 @@ use bevy_landmass::prelude::*;
 use geo::{Intersects, Line as GeoLine};
 use rand::seq::SliceRandom;
 
-use crate::{
-    AGENT_RADIUS, GameLayer, GameState,
-    command_palette::LetterMap,
+use rogue_angles::{
+    AGENT_RADIUS, GameLayer,
     dungeon::terrain::{self, DungeonState, random_near},
+    fov::{self, ExplorationState, NeverExploredMeshMarker, WALL_FOV_DEPTH},
+};
+
+use crate::{
+    GameState,
+    command_palette::LetterMap,
     effects::{
         rope::{RopeVisuals, spawn_rope},
         unstable_sigils::spawn_unstable_sigil,
     },
-    fov::{self, ExplorationState, NeverExploredMeshMarker, WALL_FOV_DEPTH},
     item::{Item, item_name, random_item_kind},
     monster::Monster,
     populate_level::spawn_monster,

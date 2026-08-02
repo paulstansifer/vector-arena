@@ -5,14 +5,14 @@ use bevy::{input::keyboard::Key, prelude::*};
 use bevy_egui::{egui, egui::PointerButton};
 use bevy_landmass::prelude::AgentTarget2d;
 
+use rogue_angles::{fov::CurrentFovState, util::safegeo::SafeMultiPolygon};
+
 use crate::{
-    fov::CurrentFovState,
     goto::GotoState,
     item::{Inventory, ItemIdentities, ItemKind, item_display_name},
     monster::{Monster, MonsterState, Stats},
     player::{ExplorationGoal, MoveTarget, Player},
     sprite::SpriteEguiTextures,
-    util::safegeo::SafeMultiPolygon,
 };
 
 pub enum PaletteCommandKind {

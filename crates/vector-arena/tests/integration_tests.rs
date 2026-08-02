@@ -6,15 +6,14 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_landmass::{NavMeshHandle, prelude::*};
 use rand::{prelude::*, rngs::StdRng};
-use vector_arena::{
+use rogue_angles::{
     AGENT_RADIUS, GameLayer,
-    dungeon::{
-        bsp::Partition,
-        level_generation::{PartitionRole, RoomVariant, TerrainGeometry},
-        terrain::geometry_to_collider,
-    },
-    monster::MONSTER_SPEED,
+    dungeon::{bsp::Partition, terrain::geometry_to_collider},
     nav::{apply_nav_velocity, playable_area_to_nav_mesh},
+};
+use vector_arena::{
+    dungeon::level_generation::{PartitionRole, RoomVariant, TerrainGeometry},
+    monster::MONSTER_SPEED,
     player::{MoveTarget, PLAYER_SPEED, Player, move_player},
 };
 
@@ -352,9 +351,9 @@ fn body_final_y(polyline: bool, driven: bool) -> f32 {
     app.world_mut().spawn((
         RigidBody::Static,
         wall_collider,
-        CollisionLayers::new(vector_arena::GameLayer::Wall, [
-            vector_arena::GameLayer::Wall,
-            vector_arena::GameLayer::Dynamic,
+        CollisionLayers::new(rogue_angles::GameLayer::Wall, [
+            rogue_angles::GameLayer::Wall,
+            rogue_angles::GameLayer::Dynamic,
         ]),
         Transform::from_xyz(0.0, ROCK_Y, 0.0),
     ));
@@ -364,9 +363,9 @@ fn body_final_y(polyline: bool, driven: bool) -> f32 {
         .spawn((
             RigidBody::Dynamic,
             Collider::circle(AGENT_RADIUS as f32),
-            CollisionLayers::new(vector_arena::GameLayer::Dynamic, [
-                vector_arena::GameLayer::Wall,
-                vector_arena::GameLayer::Dynamic,
+            CollisionLayers::new(rogue_angles::GameLayer::Dynamic, [
+                rogue_angles::GameLayer::Wall,
+                rogue_angles::GameLayer::Dynamic,
             ]),
             LockedAxes::ROTATION_LOCKED,
             LinearDamping(0.0),
@@ -440,7 +439,7 @@ fn monster_stopped_by_wall() {
 #[test]
 fn body_stops_at_dungeon_terrain_wall() {
     use geo::{BooleanOps, MultiPolygon, Rect};
-    use vector_arena::util::safegeo::SafeMultiPolygon;
+    use rogue_angles::util::safegeo::SafeMultiPolygon;
 
     // Build solid_rock exactly as level_generation does: full bounds minus playable area.
     let earth = Rect::new((-100.0_f32, -100.0_f32), (100.0_f32, 100.0_f32)).to_polygon();

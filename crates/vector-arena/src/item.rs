@@ -13,10 +13,10 @@ use rand::{Rng, seq::SliceRandom};
 
 pub const WAND_COOLDOWN_SECS: f32 = 15.0;
 
+use rogue_angles::{GameLayer, dungeon::terrain::{DungeonState, random_in_playable_area}};
+
 use crate::{
-    GameLayer,
     command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
-    dungeon::terrain::{DungeonState, random_in_playable_area},
     effects::{
         projectile::{KNOCKBACK_SPEED, MagicMissile, apply_knockback},
         scroll::{
@@ -144,11 +144,6 @@ impl WandEffect {
             WandEffect::Attraction => "Attraction",
         }
     }
-}
-
-#[derive(Event)]
-pub struct WandCrumblingEvent {
-    pub target: Vec2,
 }
 
 #[derive(Event)]
@@ -844,7 +839,9 @@ pub fn execute_item_command(
                 log.push("The monster looks confused!");
             }
             WandEffect::Crumbling => {
-                commands.trigger(WandCrumblingEvent { target: target_pos });
+                commands.trigger(rogue_angles::effects::crumble_terrain::CrumbleTerrainRequest {
+                    target: target_pos,
+                });
             }
             WandEffect::Attraction => {
                 let player_pos = transform.translation.truncate();

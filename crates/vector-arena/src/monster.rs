@@ -2,7 +2,7 @@
 // `MonsterState` drives behavior each frame: sleeping monsters ignore the player,
 // wandering ones path to a random nearby location at half speed, seeking ones chase
 // the player, tired ones rest briefly, and distracted ones path to a fixed point.
-use crate::util::safegeo::SafeMultiPolygon;
+use rogue_angles::util::safegeo::SafeMultiPolygon;
 use avian2d::prelude::LinearVelocity;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
@@ -10,10 +10,13 @@ use geo::{Contains, Intersects};
 
 use bevy_egui::egui;
 
-use crate::{
-    command_palette::CommandPaletteState,
+use rogue_angles::{
     dungeon::terrain::{DungeonState, random_near},
     fov::CurrentFovState,
+};
+
+use crate::{
+    command_palette::CommandPaletteState,
     item::ItemKind,
     player::{ExplorationGoal, MoveTarget, Player},
     status_effect::StatusEffects,

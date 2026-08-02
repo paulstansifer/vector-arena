@@ -9,7 +9,9 @@
 use bevy::prelude::*;
 use bevy_enoki::prelude::*;
 
-use crate::{LevelEntity, effects::projectile::MissileDamageDealt};
+use rogue_angles::LevelEntity;
+
+use crate::effects::projectile::MissileDamageDealt;
 
 /// Real seconds for a burst to fully fade out.
 const LIFETIME: f32 = 1.45;
@@ -64,7 +66,9 @@ fn spawn_hit_burst(
         ParticleSpawner::<ColorParticle2dMaterial>::default(),
         ParticleEffectHandle(effect),
         OneShot::Despawn,
-        Transform::from_translation(event.position.truncate().extend(crate::fov::MOVABLE_Z + 2.0)),
+        Transform::from_translation(
+            event.position.truncate().extend(rogue_angles::fov::MOVABLE_Z + 2.0),
+        ),
     ));
 }
 

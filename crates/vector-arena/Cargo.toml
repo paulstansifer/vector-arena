@@ -9,6 +9,7 @@ name = "game"
 path = "src/main.rs"
 
 [dependencies]
+rogue-angles = { path = "../rogue-angles" }
 # Renderer backend is selected per-target below: native uses `default_platform`
 # (which includes the WebGL2/`webgl2` backend), while wasm uses `webgl2`.
 bevy = { version = "0.18.1", default-features = false, features = [

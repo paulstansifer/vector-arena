@@ -3,8 +3,8 @@
 // Rooms are padded inward (min 60 units after padding).  Corridors generate
 // L-shaped or straight hallways with beveled corners at junctions.  Doors are
 // placed at corridor/room boundaries with a hinge point for revolute joints.
-use crate::{
-    dungeon::bsp::{Partition, partition_space},
+use rogue_angles::{
+    dungeon::bsp::{CORRIDOR_WIDTH, PADDING, Partition, partition_space},
     util::safegeo::{SafeMultiPolygon, SafePolygon},
 };
 use avian2d::prelude::Collider;
@@ -15,9 +15,6 @@ use std::collections::HashSet;
 
 /// Space around the edge of the map
 pub const MARGIN: f32 = 10.0;
-/// Minimum thickness around a room
-pub const PADDING: f32 = 10.0;
-pub const CORRIDOR_WIDTH: f32 = 35.0;
 const MIN_ROOM_SIZE: f32 = 100.0 - PADDING * 2.0;
 const DOOR_PROB: f32 = 0.25 * 0.0;
 const DOUBLE_DOOR_PROB: f32 = 0.75 * 0.0;

@@ -3,14 +3,14 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use bevy_landmass::prelude::*;
 
+use rogue_angles::{dungeon::terrain::PointsOfInterest, fov::ExplorationState};
+
 use crate::{
     Staircase,
     command_palette::{
         CommandPaletteState, CommandPaletteWatchesClicks, PaletteCommand, PaletteCommandKind,
         PaletteRegistry,
     },
-    dungeon::terrain::PointsOfInterest,
-    fov::ExplorationState,
     player::{ExplorationGoal, MoveTarget, Player},
 };
 

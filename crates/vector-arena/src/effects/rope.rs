@@ -11,7 +11,7 @@ use avian2d::prelude::*;
 use bevy::{input::keyboard::Key, platform::collections::HashMap, prelude::*};
 use bevy_verlet::prelude::*;
 
-use crate::{GameLayer, LevelEntity, fov::MOVABLE_Z};
+use rogue_angles::{GameLayer, LevelEntity, fov::MOVABLE_Z};
 
 pub const SEGMENT_TARGET_LEN: f32 = 10.0;
 // How far from any collider surface a click can be and still anchor.

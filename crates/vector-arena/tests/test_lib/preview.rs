@@ -3,7 +3,7 @@ use std::{
     path::PathBuf,
     sync::{Mutex, mpsc},
 };
-use vector_arena::{dungeon::terrain, util::safegeo::SafeMultiPolygon};
+use rogue_angles::{dungeon::terrain, util::safegeo::SafeMultiPolygon};
 
 // ── Public frame types ───────────────────────────────────────────────────
 

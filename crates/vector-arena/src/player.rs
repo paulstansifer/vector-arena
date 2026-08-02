@@ -12,12 +12,15 @@ use geo::Contains;
 use bevy::input::keyboard::Key;
 use rand::Rng;
 
-use crate::{
-    GameState, Staircase,
-    command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
+use rogue_angles::{
     dungeon::terrain::{DungeonState, TorporMultiplier},
     fov::{ExplorationState, find_exploration_waypoint},
     nav::{STEERING_GAIN, STOP_THRESHOLD, snap_to_navmesh},
+};
+
+use crate::{
+    GameState, Staircase,
+    command_palette::{CommandPaletteState, PaletteCommand, PaletteCommandKind, PaletteRegistry},
     status_effect::StatusEffects,
     ui::MessageLog,
 };

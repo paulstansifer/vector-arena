@@ -5,7 +5,7 @@
 // for all agents each frame, and syncs the DungeonNavMesh resource to the island entity.
 use crate::{
     dungeon::terrain::{TORPOR_FACTOR, TorporMultiplier},
-    status_effect::StatusEffects,
+    movement::MovementModifiers,
     util::safegeo::{SafeMultiPolygon, SafePolygon},
 };
 use avian2d::prelude::*;
@@ -135,9 +135,9 @@ pub fn sync_island_nav_mesh(
 
 /// Apply landmass's desired velocity as actual movement for all agents (player and monsters).
 /// Uses the direction from AgentDesiredVelocity2d with the speed from AgentSettings.desired_speed,
-/// then scales by StatusEffects and TorporMultiplier. Applies a cornering slowdown and stops the
-/// agent when it arrives at a Point target. When off-navmesh with an active target, steers toward
-/// the nearest navmesh point so pathfinding can resume.
+/// then scales by MovementModifiers and TorporMultiplier. Applies a cornering slowdown and stops
+/// the agent when it arrives at a Point target. When off-navmesh with an active target, steers
+/// toward the nearest navmesh point so pathfinding can resume.
 pub fn apply_nav_velocity(
     mut agents: Query<(
         Forces,
@@ -146,15 +146,15 @@ pub fn apply_nav_velocity(
         &AgentSettings,
         &AgentTarget2d,
         Option<&TorporMultiplier>,
-        Option<&StatusEffects>,
+        Option<&MovementModifiers>,
     )>,
     archipelago_query: Query<&Archipelago2d>,
 ) {
-    for (mut forces, transform, desired_velocity, settings, agent_target, torpor, effects) in
+    for (mut forces, transform, desired_velocity, settings, agent_target, torpor, modifiers) in
         agents.iter_mut()
     {
         let pos = transform.translation.truncate();
-        let speed_mult = effects.map(|e| e.speed_multiplier()).unwrap_or(1.0)
+        let speed_mult = modifiers.map(|m| m.speed_multiplier).unwrap_or(1.0)
             * torpor.map(|t| t.get()).unwrap_or(1.0);
 
         // Stop when close enough to a Point target.

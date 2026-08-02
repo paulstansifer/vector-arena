@@ -36,18 +36,20 @@ use bevy::{
     winit::WinitPlugin,
 };
 
-use vector_arena::{
-    WORLD_HEIGHT, WORLD_WIDTH,
-    command_palette::CommandPaletteState,
+use rogue_angles::{
     dungeon::terrain::{
         DungeonCollider, DungeonState, DungeonVisuals, geometry_to_collider, geometry_to_mesh,
     },
+    nav::{DungeonNavMesh, playable_area_to_nav_mesh},
+    util::safegeo::SafeMultiPolygon,
+};
+use vector_arena::{
+    WORLD_HEIGHT, WORLD_WIDTH,
+    command_palette::CommandPaletteState,
     effects::hit_particles::HitParticlesPlugin,
     game::{DungeonSeedOverride, GamePlugin},
-    nav::{DungeonNavMesh, playable_area_to_nav_mesh},
     player::{MoveTarget, Player},
     ui::{BOTTOM_PANEL_HEIGHT, TOP_PANEL_HEIGHT},
-    util::safegeo::SafeMultiPolygon,
     visuals::torpor_particles::TorporParticlesPlugin,
 };
 

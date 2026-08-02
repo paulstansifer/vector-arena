@@ -10,24 +10,30 @@ use bevy_landmass::{NavMeshHandle, prelude::*};
 use geo::BoundingRect;
 use rand::SeedableRng;
 
-use crate::{
-    AGENT_RADIUS, DungeonDepth, GameLayer, GameState, LevelEntity, WORLD_HEIGHT, WORLD_WIDTH,
-    WorldBounds,
-    command_palette::{CommandPalettePlugin, LetterMap, open_palette_system},
-    dungeon::{
-        level_generation::TerrainGeometry,
-        terrain::{
-            DungeonCollider, DungeonState, DungeonVisuals, GlassWallsMarker, PointsOfInterest,
-            TerrainMarker, TorporZoneParticles, geometry_to_collider, geometry_to_mesh,
-            glass_wall_border, sync_dungeon_to_entities, sync_glass_walls_to_entities,
-            update_torpor_multipliers,
-        },
+use rogue_angles::{
+    AGENT_RADIUS, GameLayer, LevelEntity, WorldBounds,
+    dungeon::terrain::{
+        DungeonCollider, DungeonState, DungeonVisuals, GlassWallsMarker, PointsOfInterest,
+        TerrainMarker, TorporZoneParticles, geometry_to_collider, geometry_to_mesh,
+        glass_wall_border, sync_dungeon_to_entities, sync_glass_walls_to_entities,
+        update_torpor_multipliers,
     },
+    effects::crumble_terrain::{
+        Fragile, RubbleMaterial, handle_right_click_excavation, on_crumble_terrain_request,
+        spawn_rubble_piece,
+    },
+    fov::{self as fov, MOVABLE_Z, OpaqueVertices, TERRAIN_Z},
+    nav::{self as nav, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
+    time_scale::arbitrate_time_scale,
+    util::safegeo::SafeMultiPolygon,
+    visuals::indicator::update_hit_flash,
+};
+
+use crate::{
+    DungeonDepth, GameState, WORLD_HEIGHT, WORLD_WIDTH,
+    command_palette::{CommandPalettePlugin, LetterMap, open_palette_system},
+    dungeon::level_generation::TerrainGeometry,
     effects::{
-        crumble_terrain::{
-            Fragile, RubbleMaterial, handle_right_click_excavation, on_wand_crumbling,
-            spawn_rubble_piece,
-        },
         projectile::{
             apply_damage_on_hit, apply_dodge, apply_hit_flash_on_hit, apply_knockback_on_hit,
             apply_torpor_to_non_agents, detect_missile_hits, execute_missile_command,
@@ -40,7 +46,7 @@ use crate::{
             animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions,
         },
     },
-    fov::{self, MOVABLE_Z, OpaqueVertices, TERRAIN_Z},
+    fov::update_staircase_fog_copy,
     goto,
     item::{
         Inventory, ItemIdentities, WandCooldowns, animate_pickup, execute_item_command,
@@ -48,7 +54,6 @@ use crate::{
         tick_wand_cooldowns,
     },
     monster::{self, Stats},
-    nav::{self, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
     player::{
         Boredom, Player, advance_exploration, check_player_death, directional_move_system,
         execute_descend_command, execute_stop_command, move_player, register_player_commands,
@@ -56,11 +61,12 @@ use crate::{
     },
     populate_level,
     sprite::SpritePlugin,
-    status_effect::{StatusEffects, apply_confusion_to_velocity, tick_status_effects},
-    time_scale::manage_time_scale,
+    status_effect::{
+        StatusEffects, apply_confusion_to_velocity, sync_movement_modifiers, tick_status_effects,
+    },
+    time_scale::cast_time_scale_votes,
     ui::{MessageLog, UiPlugin, enable_ui_input_absorption},
-    util::safegeo::SafeMultiPolygon,
-    visuals::indicator::{render_state_indicators, tick_state_indicators, update_hit_flash},
+    visuals::indicator::{render_state_indicators, tick_state_indicators},
 };
 
 /// The dungeon seed for the current game session. Set fresh (from OS randomness) each time
@@ -424,11 +430,14 @@ impl Plugin for GamePlugin {
             .add_observer(on_instability)
             .add_observer(on_acquirement)
             .add_observer(on_binding)
-            .add_observer(on_wand_crumbling)
+            .add_observer(on_crumble_terrain_request)
             .add_observer(on_wand_attraction)
             .add_systems(Update, set_target_on_click.run_if(in_state(GameState::InLevel)))
             .add_systems(Update, move_player.after(update_torpor_multipliers))
-            .add_systems(Update, nav::apply_nav_velocity.after(move_player))
+            .add_systems(
+                Update,
+                nav::apply_nav_velocity.after(move_player).after(sync_movement_modifiers),
+            )
             .add_systems(
                 Update,
                 directional_move_system.after(nav::apply_nav_velocity).after(open_palette_system),
@@ -450,8 +459,12 @@ impl Plugin for GamePlugin {
                     .after(directional_move_system),
             )
             .add_systems(Update, nav::sync_island_nav_mesh)
-            .add_systems(Update, fov::update_fov)
-            .add_systems(Update, fov::update_staircase_fog_copy.after(fov::update_fov))
+            .add_systems(
+                Update,
+                sync_movement_modifiers.after(tick_status_effects).after(update_torpor_multipliers),
+            )
+            .add_systems(Update, fov::update_fov.after(sync_movement_modifiers))
+            .add_systems(Update, update_staircase_fog_copy.after(fov::update_fov))
             .add_systems(
                 Update,
                 if self.headless {
@@ -492,7 +505,9 @@ impl Plugin for GamePlugin {
             .add_systems(Update, tick_sigil_explosions)
             .add_systems(Update, pickup_items)
             .add_systems(Update, animate_pickup)
-            .add_systems(Update, manage_time_scale.after(move_player))
+            .init_resource::<rogue_angles::time_scale::TimeScaleVotes>()
+            .add_systems(Update, cast_time_scale_votes.after(move_player))
+            .add_systems(Update, arbitrate_time_scale.after(cast_time_scale_votes))
             .add_systems(Update, goto::compute_goto_assignments)
             .add_systems(Update, goto::reset_goto_on_close)
             .add_systems(Update, goto::execute_goto_command)

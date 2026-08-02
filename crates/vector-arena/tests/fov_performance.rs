@@ -4,15 +4,13 @@ mod preview;
 use bevy::prelude::*;
 use geo::{CoordsIter, MultiPolygon};
 use rand::{SeedableRng, rngs::StdRng};
-use vector_arena::{
+use rogue_angles::{
     WorldBounds,
-    dungeon::{
-        bsp::Partition,
-        level_generation::{PartitionRole, RoomVariant, TerrainGeometry},
-    },
+    dungeon::bsp::Partition,
     fov::{ExplorationState, update_fov_from_pov},
     util::safegeo::SafeMultiPolygon,
 };
+use vector_arena::dungeon::level_generation::{PartitionRole, RoomVariant, TerrainGeometry};
 
 #[test]
 fn test_fov_point_explosion() {

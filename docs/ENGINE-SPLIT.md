@@ -1,6 +1,57 @@
 # Splitting Vector Arena into `rogue-angles` + a demo game
 
-Status: **in progress.** Phase 0 done; phases 1–8 pending.
+Status: **in progress.** Phases 0–1 done; phases 2–8 pending.
+
+## Phase 1 notes (what actually moved, and three couplings resolved on the way)
+
+`safegeo`, `bsp` (plus `PADDING`/`CORRIDOR_WIDTH`, which `level_generation.rs`
+now imports back from `rogue_angles::dungeon::bsp` until it moves itself in
+phase 4), `terrain`, `fov` (minus the game-specific staircase fog-of-war copy,
+which stayed behind as `crates/vector-arena/src/fov.rs`), the non-egui half of
+`indicator.rs` (`HitFlash`; the egui-drawn `StateIndicator` stayed in the
+game), `nav`, `crumble_terrain`, and `time_scale` are now in `rogue-angles`.
+`AGENT_RADIUS`, `WorldBounds`, `LevelEntity`, and `GameLayer` moved out of
+`lib.rs`'s globals block; `GameState`, `Staircase`, `DungeonDepth`, and the
+`WORLD_WIDTH`/`WORLD_HEIGHT` constants stayed, since nothing engine-side
+actually needed them yet — moving them would have been unforced scope creep.
+
+Three modules that looked like clean leaves weren't quite, once their
+`use crate::` lists were checked against the actual game types they touched:
+
+- **`nav.rs`** read `StatusEffects::speed_multiplier()` directly. Fixed with a
+  new narrow `rogue_angles::movement::MovementModifiers` component
+  (`speed_multiplier`, `vision_multiplier`) that the game's
+  `status_effect::sync_movement_modifiers` system writes each frame from its
+  own `StatusEffects` + `TorporMultiplier`; `nav::apply_nav_velocity` and
+  `fov::update_fov` (which had the same problem via `blind_strength()`) read
+  it instead. `fov::update_fov` also swapped its `With<Player>` query for a
+  new `rogue_angles::movement::Viewer` marker.
+- **`crumble_terrain.rs`** had an observer listening for the game's own
+  `item::WandCrumblingEvent` directly. Replaced with an engine-owned
+  `CrumbleTerrainRequest { target: Vec2 }` event; the game's wand-crumbling
+  code triggers that instead, and the now-redundant `WandCrumblingEvent`
+  wrapper was deleted.
+- **`time_scale.rs`** hardcoded its whole policy by importing
+  `MagicMissile`/`Player`/`MoveTarget`. Replaced with the `TimeScaleVotes`
+  resource sketched below (engine takes the minimum of named votes, defaulting
+  to 0.0/paused when no votes are present — the game must opt into "keep
+  flowing," not the other way around); the game's `time_scale.rs` now just
+  casts the same three votes it always computed (idle/moving/missile-in-flight)
+  and separately tunes the physics fixed-timestep for fast projectiles, which
+  stayed game-side since it's about this game's specific projectile speed, not
+  a generic engine concept.
+
+The headless snapshot runner's script parser and command dispatch (`cmd`,
+`click left`, `level blank`) turned out to be a driver for *this* game
+(`CommandPaletteState`, `GamePlugin`, `Player`), not generic infrastructure —
+deferred rather than force-extracted now; likely pairs naturally with the
+phase 6 presentation split.
+
+Verification: `cargo test --workspace` — 138/138 passing (86 engine + 44 game
+lib + 8 across the integration suites; the 86/44 split against the original
+130 is an exact sanity check that nothing was lost or duplicated in the move).
+Headless snapshot before/after visually identical; move/descend commands
+exercise the `Viewer`/`MovementModifiers` path end-to-end without error.
 
 Source paths below are relative to `crates/vector-arena/` unless stated
 otherwise, and refer to the pre-split layout where the code still lives.
