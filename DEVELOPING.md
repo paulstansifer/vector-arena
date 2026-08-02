@@ -2,7 +2,23 @@
 
 A traditional dungeom-crawl roguelike ... except that the world is 2D vector objects with physics instead of a grid. It is  built with [Bevy](https://bevyengine.org/) (0.18.1) and [Avian2D](https://github.com/Jondolf/avian) physics. BSP-generated dungeons, raycasted FOV, physics-based combat, and destructible terrain.
 
+## Workspace
+
+This repo is a Cargo workspace:
+
+| Crate | Path | Role |
+| ----- | ---- | ---- |
+| `vector-arena` | `crates/vector-arena` | The game — bins `game` and `headless`. Bare `cargo run`/`cargo test` target this. |
+| `rogue-angles` | `crates/rogue-angles` | The engine. Currently a placeholder; code moves in phase by phase. |
+| `bevy_verlet`  | `crates/bevy_verlet`  | Vendored third-party fork, excluded from the workspace. |
+
+The engine/game split is planned in [docs/ENGINE-SPLIT.md](docs/ENGINE-SPLIT.md).
+Build profiles live in the root `Cargo.toml`, since Cargo ignores `[profile.*]`
+in non-root members.
+
 ## Directory Structure
+
+Paths below are relative to `crates/vector-arena/`.
 
 ```
   *  main.rs                  # Binary entry point: window setup, camera, clear color

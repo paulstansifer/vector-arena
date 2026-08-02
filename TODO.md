@@ -21,5 +21,6 @@
     * Maybe consider effects that apply to an LOS monster, falling back to you if there isn't one? That would incentivize trying things out near monsters...
 
   # Larger projects
-  * Think about how to break this into a library + game definition
+  * Break this into a library + game definition — see [docs/ENGINE-SPLIT.md](docs/ENGINE-SPLIT.md).
+    Phase 0 (workspace scaffold) is done; the engine crate is `crates/rogue-angles`.
   * Using `rough_vello` to create a hand-drawn look might be cute

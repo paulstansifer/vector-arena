@@ -1,0 +1,10 @@
+[package]
+name = "rogue-angles"
+version = "0.1.0"
+edition = "2024"
+description = "An engine for 2D geometric free-movement roguelikes"
+
+[dependencies]
+bevy = { version = "0.18.1", default-features = false, features = ["2d"] }
+geo = "0.32"
+rand = "0.8"

@@ -5445,6 +5445,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rogue-angles"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "geo 0.32.0",
+ "rand 0.8.6",
+]
+
+[[package]]
 name = "ron"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
