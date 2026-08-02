@@ -26,7 +26,7 @@ use crate::{
     },
     player::Player,
     sprite::{SvgSprite, sprite_spec},
-    status_effect::StatusEffects,
+    status_effect::{StatusEffects, confusion_strength, displacing_strength, missile_multiplier},
     ui::{MessageLog, WorldTooltip},
 };
 
@@ -134,7 +134,7 @@ fn confuse_direction(
     effects: Option<&StatusEffects>,
     rng: &mut impl rand::Rng,
 ) -> Vec2 {
-    let strength = effects.map(|e| e.confusion_strength()).unwrap_or(0.0);
+    let strength = effects.map(confusion_strength).unwrap_or(0.0);
     if strength <= 0.0 || rng.gen_range(0.0_f32..1.0) >= strength {
         return direction;
     }
@@ -223,7 +223,7 @@ pub fn execute_missile_command(
     stats.mana -= MISSILE_MANA_COST;
     let mut rng = rand::thread_rng();
     let direction = confuse_direction(base_dir, player_effects, &mut rng);
-    let damage_multiplier = player_effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
+    let damage_multiplier = player_effects.map(missile_multiplier).unwrap_or(1.0);
     spawn_missile(&mut commands, &missile_assets, player_pos, direction, true, damage_multiplier);
 }
 
@@ -262,7 +262,7 @@ pub fn monster_fire_missiles(
 
         let base_dir = (player_pos - monster_pos).normalize_or_zero();
         let direction = confuse_direction(base_dir, effects, &mut rng);
-        let damage_multiplier = effects.map(|e| e.missile_multiplier()).unwrap_or(1.0);
+        let damage_multiplier = effects.map(missile_multiplier).unwrap_or(1.0);
         spawn_missile(
             &mut commands,
             &missile_assets,
@@ -397,8 +397,7 @@ pub fn detect_missile_hits(
                 if cooldown_query.get(hit).is_ok_and(|c| c.0 > 0.0) {
                     continue;
                 }
-                let disp_strength =
-                    status_query.get(hit).map(|e| e.displacing_strength()).unwrap_or(0.0);
+                let disp_strength = status_query.get(hit).map(displacing_strength).unwrap_or(0.0);
                 if disp_strength > 0.0 && rng.gen_range(0.0_f32..1.0) < disp_strength {
                     // Displaced away from missile: apply perpendicular knockback, no damage.
                     let perp = Vec2::new(-seg_dir.y, seg_dir.x);

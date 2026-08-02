@@ -19,7 +19,7 @@ use rogue_angles::{
 use crate::{
     item::ItemKind,
     player::{ExplorationGoal, MoveTarget, Player},
-    status_effect::StatusEffects,
+    status_effect::{StatusEffects, blind_strength},
     visuals::indicator::StateIndicator,
 };
 
@@ -256,7 +256,7 @@ pub fn update_monster_ai(
             commands.entity(entity).remove::<AlertedByMissile>();
         }
 
-        let blind_strength = effects.map(|e| e.blind_strength()).unwrap_or(0.0);
+        let blind_strength = effects.map(blind_strength).unwrap_or(0.0);
 
         // Blind monsters have a reduced seek range (scaled toward 0).
         let effective_seek_range = MONSTER_SEEK_RANGE * (1.0 - blind_strength);

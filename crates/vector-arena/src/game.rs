@@ -26,6 +26,7 @@ use rogue_angles::{
     fov::{self as fov, MOVABLE_Z, OpaqueVertices, TERRAIN_Z},
     nav::{self as nav, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
     palette::{self, EntityLabels, LabelPool, LocationDescriptions, LocationLabels},
+    status_effects::{StatusEffectsAppExt, tick_status_effects},
     time_scale::arbitrate_time_scale,
     util::safegeo::SafeMultiPolygon,
     visuals::indicator::update_hit_flash,
@@ -60,9 +61,7 @@ use crate::{
     },
     populate_level,
     sprite::SpritePlugin,
-    status_effect::{
-        StatusEffects, apply_confusion_to_velocity, sync_movement_modifiers, tick_status_effects,
-    },
+    status_effect::{StatusEffect, StatusEffects, apply_confusion_to_velocity, sync_movement_modifiers},
     time_scale::cast_time_scale_votes,
     ui::{MessageLog, UiPlugin, enable_ui_input_absorption},
     visuals::indicator::{render_state_indicators, tick_state_indicators},
@@ -415,7 +414,7 @@ impl Plugin for GamePlugin {
                 (despawn_level_entities, on_enter_descend).chain(),
             )
             .add_systems(OnExit(GameState::InLevel), save_player_on_exit)
-            .add_systems(Update, tick_status_effects)
+            .add_status_effects::<StatusEffect>()
             .add_systems(Update, update_torpor_multipliers)
             .add_systems(Update, tick_wand_cooldowns)
             .add_systems(Update, refresh_item_tooltips)
@@ -455,7 +454,9 @@ impl Plugin for GamePlugin {
             .add_systems(Update, nav::sync_island_nav_mesh)
             .add_systems(
                 Update,
-                sync_movement_modifiers.after(tick_status_effects).after(update_torpor_multipliers),
+                sync_movement_modifiers
+                    .after(tick_status_effects::<StatusEffect>)
+                    .after(update_torpor_multipliers),
             )
             .add_systems(Update, fov::update_fov.after(sync_movement_modifiers))
             .add_systems(Update, update_staircase_fog_copy.after(fov::update_fov))

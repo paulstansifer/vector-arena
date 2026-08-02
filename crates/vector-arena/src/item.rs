@@ -2,8 +2,6 @@
 // When the player walks within PICKUP_RADIUS, a `PickingUp` component is added
 // to the item entity.  The 0.25s ease-in animation runs on `Real` time so it
 // plays at normal speed even during bullet-time.
-use std::collections::{HashMap, HashSet};
-
 use avian2d::prelude::{
     Collider, LinearVelocity, Position, RigidBody, SpatialQuery, SpatialQueryFilter,
 };
@@ -16,6 +14,7 @@ pub const WAND_COOLDOWN_SECS: f32 = 15.0;
 use rogue_angles::{
     GameLayer,
     dungeon::terrain::{DungeonState, random_in_playable_area},
+    identity::IdentityTable,
     palette::{
         CommandInvocation, EntryOutcome, IconId, LabelPool, PaletteCommand, PaletteEntry,
         PalettePath, PaletteRegistry, Target, TargetFilter,
@@ -321,111 +320,74 @@ impl ScrollEffect {
 }
 
 /// Per-game roguelike identification state: which appearance maps to which effect (randomized
-/// at the start of every new game) and which item kinds the player has identified by using them.
+/// at the start of every new game) and which item kinds the player has identified by using
+/// them. Three separate engine `IdentityTable`s — one per identifiable category — rather than
+/// one table keyed by the umbrella `ItemKind`, since the engine's table doesn't know `ItemKind`
+/// exists; `is_identified`/`identify`/`forget` below are this game's `ItemKind`-keyed API on
+/// top of that.
 #[derive(Resource, Default)]
 pub struct ItemIdentities {
-    potion: HashMap<PotionColor, PotionEffect>,
-    scroll: HashMap<ScrollName, ScrollEffect>,
-    wand: HashMap<WandGem, WandEffect>,
-    identified: HashSet<ItemKind>,
+    potion: IdentityTable<PotionColor, PotionEffect>,
+    scroll: IdentityTable<ScrollName, ScrollEffect>,
+    wand: IdentityTable<WandGem, WandEffect>,
 }
 
 impl ItemIdentities {
     /// Reshuffle the appearance→effect pairings and forget all identifications. Call once per
     /// new game (not on descent).
     pub fn randomize(&mut self, rng: &mut impl Rng) {
-        self.identified.clear();
-
-        let mut potion_effects = ALL_POTION_EFFECTS.to_vec();
-        potion_effects.shuffle(rng);
-        self.potion = ALL_POTION_COLORS.iter().copied().zip(potion_effects).collect();
-
-        let mut scroll_effects = ALL_SCROLL_EFFECTS.to_vec();
-        scroll_effects.shuffle(rng);
-        self.scroll = ALL_SCROLL_NAMES.iter().copied().zip(scroll_effects).collect();
-
-        let mut wand_effects = ALL_WAND_EFFECTS.to_vec();
-        wand_effects.shuffle(rng);
-        self.wand = ALL_WAND_GEMS.iter().copied().zip(wand_effects).collect();
+        self.potion.randomize(&ALL_POTION_COLORS, &ALL_POTION_EFFECTS, rng);
+        self.scroll.randomize(&ALL_SCROLL_NAMES, &ALL_SCROLL_EFFECTS, rng);
+        self.wand.randomize(&ALL_WAND_GEMS, &ALL_WAND_EFFECTS, rng);
     }
 
     pub fn potion_effect(&self, color: PotionColor) -> PotionEffect {
-        self.potion.get(&color).copied().unwrap_or(PotionEffect::Confusion)
+        self.potion.effect_of(color).unwrap_or(PotionEffect::Confusion)
     }
 
     pub fn scroll_effect(&self, name: ScrollName) -> ScrollEffect {
-        self.scroll.get(&name).copied().unwrap_or(ScrollEffect::Teleport)
+        self.scroll.effect_of(name).unwrap_or(ScrollEffect::Teleport)
     }
 
     pub fn wand_effect(&self, gem: WandGem) -> WandEffect {
-        self.wand.get(&gem).copied().unwrap_or(WandEffect::Swapping)
+        self.wand.effect_of(gem).unwrap_or(WandEffect::Swapping)
     }
 
-    pub fn is_identified(&self, item: ItemKind) -> bool { self.identified.contains(&item) }
+    pub fn is_identified(&self, item: ItemKind) -> bool {
+        match item {
+            ItemKind::Potion(c) => self.potion.is_identified(c),
+            ItemKind::Scroll(n) => self.scroll.is_identified(n),
+            ItemKind::Wand(g) => self.wand.is_identified(g),
+        }
+    }
 
-    pub fn identify(&mut self, item: ItemKind) { self.identified.insert(item); }
+    pub fn identify(&mut self, item: ItemKind) {
+        match item {
+            ItemKind::Potion(c) => self.potion.identify(c),
+            ItemKind::Scroll(n) => self.scroll.identify(n),
+            ItemKind::Wand(g) => self.wand.identify(g),
+        }
+    }
 
     /// Implements a Scroll of Forgetting: pick an item type (potions or scrolls) that has at least
-    /// two identified appearances, choose up to three of them, forget their identifications, and
-    /// permute (derange) the chosen appearances' hidden effects among one another. Returns the
-    /// number of forgotten appearances and the type word for the message, or `None` if neither
-    /// type had enough known appearances to scramble.
+    /// two identified appearances and scramble up to three of them (see
+    /// `IdentityTable::forget_some`). Returns the number of forgotten appearances and the type
+    /// word for the message, or `None` if neither type had enough known appearances to scramble.
     pub fn forget(&mut self, rng: &mut impl Rng) -> Option<(usize, &'static str)> {
-        let known_potions: Vec<PotionColor> = ALL_POTION_COLORS
-            .iter()
-            .copied()
-            .filter(|c| self.identified.contains(&ItemKind::Potion(*c)))
-            .collect();
-        let known_scrolls: Vec<ScrollName> = ALL_SCROLL_NAMES
-            .iter()
-            .copied()
-            .filter(|n| self.identified.contains(&ItemKind::Scroll(*n)))
-            .collect();
-
         // Each type is a candidate only if it has at least two known appearances to permute.
         let mut candidates: Vec<bool> = Vec::new(); // true = potions, false = scrolls
-        if known_potions.len() >= 2 {
+        if self.potion.known_count() >= 2 {
             candidates.push(true);
         }
-        if known_scrolls.len() >= 2 {
+        if self.scroll.known_count() >= 2 {
             candidates.push(false);
         }
         let &do_potions = candidates.choose(rng)?;
 
         if do_potions {
-            let chosen: Vec<PotionColor> = known_potions.choose_multiple(rng, 3).copied().collect();
-            let effects: Vec<PotionEffect> = chosen.iter().map(|c| self.potion[c]).collect();
-            let perm = derange_indices(chosen.len(), rng);
-            for (i, &c) in chosen.iter().enumerate() {
-                self.potion.insert(c, effects[perm[i]]);
-                self.identified.remove(&ItemKind::Potion(c));
-            }
-            Some((chosen.len(), "potion"))
+            self.potion.forget_some(3, rng).map(|n| (n, "potion"))
         } else {
-            let chosen: Vec<ScrollName> = known_scrolls.choose_multiple(rng, 3).copied().collect();
-            let effects: Vec<ScrollEffect> = chosen.iter().map(|n| self.scroll[n]).collect();
-            let perm = derange_indices(chosen.len(), rng);
-            for (i, &n) in chosen.iter().enumerate() {
-                self.scroll.insert(n, effects[perm[i]]);
-                self.identified.remove(&ItemKind::Scroll(n));
-            }
-            Some((chosen.len(), "scroll"))
-        }
-    }
-}
-
-/// Produces a derangement of `0..n`: a permutation where no index maps to itself (for n >= 2), so
-/// every chosen appearance ends up with a *different* effect than it started with. The effects only
-/// move among the chosen appearances, keeping the global appearance→effect bijection intact.
-fn derange_indices(n: usize, rng: &mut impl Rng) -> Vec<usize> {
-    let mut perm: Vec<usize> = (0..n).collect();
-    if n < 2 {
-        return perm;
-    }
-    loop {
-        perm.shuffle(rng);
-        if perm.iter().enumerate().all(|(i, &j)| i != j) {
-            return perm;
+            self.scroll.forget_some(3, rng).map(|n| (n, "scroll"))
         }
     }
 }
@@ -1034,6 +996,8 @@ pub fn refresh_item_tooltips(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use rand::{SeedableRng, rngs::StdRng};
 
     use super::*;

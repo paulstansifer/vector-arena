@@ -1,17 +1,20 @@
-// Status effects for players and monsters.
-// Each effect has a total duration and tracks remaining time. Effective strength
-// is 1.0 until the last 0.5 seconds, then ramps linearly down to 0.
+// This game's status-effect vocabulary, built on the engine's generic
+// `rogue_angles::status_effects` framework. The engine owns timing/ramping and the tick
+// system (registered via `add_status_effects::<StatusEffect>()` in `game.rs`); this file only
+// supplies the concrete effect kinds and the aggregates that are this game's business, not the
+// engine's (missile damage, confusion wander direction, blindness, displacement).
 use avian2d::prelude::*;
 use bevy::prelude::*;
-use rand::Rng;
+use rand::{Rng, RngCore};
 
 use rogue_angles::{
     AGENT_RADIUS, GameLayer, dungeon::terrain::TorporMultiplier, movement::MovementModifiers,
+    status_effects::StatusKind,
 };
 
-const RAMP_DOWN_SECS: f32 = 0.5;
+pub type StatusEffects = rogue_angles::status_effects::StatusEffects<StatusEffect>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum StatusEffect {
     /// Blends movement direction toward a slowly-turning random walk direction.
     Confused { wander_dir: Vec2 },
@@ -52,152 +55,90 @@ impl StatusEffect {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ActiveStatusEffect {
-    pub kind: StatusEffect,
-    pub base_strength: f32,
-    pub remaining: f32,
+impl StatusKind for StatusEffect {
+    fn speed_factor(&self) -> Option<f32> {
+        if let StatusEffect::SpeedMod(p) = self { Some(*p) } else { None }
+    }
+
+    /// Blindness isn't a per-kind "full vision at 0.0" multiplier target the way SpeedMod
+    /// pushes toward a target speed — it just linearly zeroes vision as its own strength ramps
+    /// up. Both are the same blend (`1 + (factor - 1) * strength`) with `factor = 0.0`.
+    fn vision_factor(&self) -> Option<f32> {
+        if let StatusEffect::Blind = self { Some(0.0) } else { None }
+    }
+
+    fn base_strength(&self) -> f32 {
+        if matches!(self, StatusEffect::Confused { .. }) { 0.5 } else { 1.0 }
+    }
+
+    fn tick(&mut self, dt: f32, rng: &mut dyn RngCore) {
+        if let StatusEffect::Confused { wander_dir } = self {
+            let angle = Rng::gen_range(rng, -std::f32::consts::PI..std::f32::consts::PI) * dt * 8.0;
+            let (sin, cos) = angle.sin_cos();
+            *wander_dir = Vec2::new(
+                wander_dir.x * cos - wander_dir.y * sin,
+                wander_dir.x * sin + wander_dir.y * cos,
+            )
+            .normalize_or_zero();
+            if *wander_dir == Vec2::ZERO {
+                let a = Rng::gen_range(rng, 0.0..std::f32::consts::TAU);
+                *wander_dir = Vec2::new(a.cos(), a.sin());
+            }
+        }
+    }
 }
 
-impl ActiveStatusEffect {
-    pub fn new(kind: StatusEffect, duration: f32) -> Self {
-        let base_strength = if matches!(kind, StatusEffect::Confused { .. }) { 0.5 } else { 1.0 };
-        Self { kind, base_strength, remaining: duration }
-    }
-
-    /// Strength in [0, 1]. Ramps from 1 → 0 over the last RAMP_DOWN_SECS.
-    pub fn effective_strength(&self) -> f32 {
-        (self.remaining / RAMP_DOWN_SECS).clamp(0.0, 1.0) * self.base_strength
-    }
-}
-
-#[derive(Component, Default, Clone)]
-pub struct StatusEffects(pub Vec<ActiveStatusEffect>);
-
-impl StatusEffects {
-    pub fn add(&mut self, kind: StatusEffect, duration: f32) {
-        // TODO: add to/cancel existing matching status effects
-        self.0.push(ActiveStatusEffect::new(kind, duration));
-    }
-
-    /// Returns `(strength, wander_dir)` for the strongest active Confused effect, if any.
-    pub fn confused_strength_and_dir(&self) -> Option<(f32, Vec2)> {
-        self.0
-            .iter()
-            .filter_map(|e| {
-                if let StatusEffect::Confused { wander_dir } = e.kind {
-                    let s = e.effective_strength();
-                    if s > 0.0 { Some((s, wander_dir)) } else { None }
-                } else {
-                    None
-                }
-            })
-            .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
-    }
-
-    pub fn blind_strength(&self) -> f32 {
-        self.0
-            .iter()
-            .filter(|e| matches!(e.kind, StatusEffect::Blind))
-            .map(|e| e.effective_strength())
-            .fold(0.0_f32, f32::max)
-    }
-
-    /// Combined speed multiplier (multiplicative). 1.0 if none active.
-    pub fn speed_multiplier(&self) -> f32 {
-        self.0.iter().fold(1.0_f32, |acc, e| {
-            if let StatusEffect::SpeedMod(param) = e.kind {
+/// Returns `(strength, wander_dir)` for the strongest active Confused effect, if any. Needs
+/// direct access to `StatusEffect::Confused`'s payload, so it can't be a generic
+/// `StatusEffects<K>` method the way `strength_of`/`multiplier_of` are.
+pub fn confused_strength_and_dir(effects: &StatusEffects) -> Option<(f32, Vec2)> {
+    effects
+        .0
+        .iter()
+        .filter_map(|e| {
+            if let StatusEffect::Confused { wander_dir } = e.kind {
                 let s = e.effective_strength();
-                acc * (1.0 + (param - 1.0) * s)
+                if s > 0.0 { Some((s, wander_dir)) } else { None }
             } else {
-                acc
+                None
             }
         })
-    }
-
-    /// Combined missile damage multiplier. 1.0 if none active.
-    pub fn missile_multiplier(&self) -> f32 {
-        self.0.iter().fold(1.0_f32, |acc, e| {
-            if let StatusEffect::MissileMod(param) = e.kind {
-                let s = e.effective_strength();
-                acc * (1.0 + (param - 1.0) * s)
-            } else {
-                acc
-            }
-        })
-    }
-
-    /// Returns the effective strength of the strongest active Confused effect, if any.
-    /// (No movement cap — used for missile mis-aim.)
-    pub fn confusion_strength(&self) -> f32 {
-        self.0
-            .iter()
-            .filter_map(|e| {
-                if matches!(e.kind, StatusEffect::Confused { .. }) {
-                    let s = e.effective_strength();
-                    if s > 0.0 { Some(s) } else { None }
-                } else {
-                    None
-                }
-            })
-            .fold(0.0_f32, f32::max)
-    }
-
-    pub fn displacing_strength(&self) -> f32 {
-        self.0
-            .iter()
-            .filter(|e| matches!(e.kind, StatusEffect::Displacing))
-            .map(|e| e.effective_strength())
-            .fold(0.0_f32, f32::max)
-    }
-
-    pub fn is_empty(&self) -> bool { self.0.is_empty() }
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
 }
 
-/// Ticks durations down, advances confused wander directions, and removes expired effects.
-pub fn tick_status_effects(time: Res<Time>, mut query: Query<&mut StatusEffects>) {
-    let dt = time.delta_secs();
-    let mut rng = rand::thread_rng();
-
-    for mut effects in query.iter_mut() {
-        effects.0.retain_mut(|e| {
-            e.remaining -= dt;
-            if e.remaining <= 0.0 {
-                return false;
-            }
-            // Random walk: rotate wander_dir by up to ±π rad/s
-            if let StatusEffect::Confused { ref mut wander_dir } = e.kind {
-                let angle = rng.gen_range(-std::f32::consts::PI..std::f32::consts::PI) * dt * 8.0;
-                let (sin, cos) = angle.sin_cos();
-                *wander_dir = Vec2::new(
-                    wander_dir.x * cos - wander_dir.y * sin,
-                    wander_dir.x * sin + wander_dir.y * cos,
-                )
-                .normalize_or_zero();
-                if *wander_dir == Vec2::ZERO {
-                    let a = rng.gen_range(0.0..std::f32::consts::TAU);
-                    *wander_dir = Vec2::new(a.cos(), a.sin());
-                }
-            }
-            true
-        });
-    }
+pub fn blind_strength(effects: &StatusEffects) -> f32 {
+    effects.strength_of(|k| matches!(k, StatusEffect::Blind))
 }
 
-/// Writes the engine's narrow `MovementModifiers` component from this game's
-/// `StatusEffects` (speed_multiplier) and `TorporMultiplier` (also folded into
-/// speed) each frame, so `nav::apply_nav_velocity` and `fov::update_fov` never
-/// need to know this game's status-effect types. Vision is unaffected by
-/// torpor, only by the Blind status effect. Every agent that needs steering or
-/// FOV (player and monsters alike) gets `MovementModifiers` at spawn time; see
-/// `populate_level.rs`.
+/// Combined missile damage multiplier. 1.0 if none active. Game-only: the engine doesn't know
+/// what a missile is.
+pub fn missile_multiplier(effects: &StatusEffects) -> f32 {
+    effects.multiplier_of(|k| if let StatusEffect::MissileMod(p) = k { Some(*p) } else { None })
+}
+
+/// Effective strength of the strongest active Confused effect, if any (no movement cap — used
+/// for missile mis-aim).
+pub fn confusion_strength(effects: &StatusEffects) -> f32 {
+    effects.strength_of(|k| matches!(k, StatusEffect::Confused { .. }))
+}
+
+pub fn displacing_strength(effects: &StatusEffects) -> f32 {
+    effects.strength_of(|k| matches!(k, StatusEffect::Displacing))
+}
+
+/// Writes the engine's narrow `MovementModifiers` component from this game's `StatusEffects`
+/// (speed/vision multipliers) and `TorporMultiplier` (a terrain effect, folded into speed here
+/// since it's a second, unrelated modifier source the engine has no generic way to combine),
+/// so `nav::apply_nav_velocity` and `fov::update_fov` never need to know this game's
+/// status-effect types. Every agent that needs steering or FOV (player and monsters alike)
+/// gets `MovementModifiers` at spawn time; see `populate_level.rs`.
 pub fn sync_movement_modifiers(
     mut query: Query<(&StatusEffects, Option<&TorporMultiplier>, &mut MovementModifiers)>,
 ) {
     for (effects, torpor, mut modifiers) in &mut query {
         modifiers.speed_multiplier =
             effects.speed_multiplier() * torpor.map(|t| t.get()).unwrap_or(1.0);
-        modifiers.vision_multiplier = 1.0 - effects.blind_strength();
+        modifiers.vision_multiplier = effects.vision_multiplier();
     }
 }
 
@@ -209,7 +150,7 @@ pub fn apply_confusion_to_velocity(
     spatial_query: SpatialQuery,
 ) {
     for (transform, mut vel, effects) in query.iter_mut() {
-        let Some((strength, wander_dir)) = effects.confused_strength_and_dir() else { continue };
+        let Some((strength, wander_dir)) = confused_strength_and_dir(effects) else { continue };
         let speed = vel.0.length();
         if speed < 0.01 {
             continue;

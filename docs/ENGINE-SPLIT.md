@@ -1,7 +1,64 @@
 # Splitting Vector Arena into `rogue-angles` + a demo game
 
-Status: **in progress.** Phases 0–4 done (2 absorbed phase 3 — see below);
-phases 5–8 pending.
+Status: **in progress.** Phases 0–5 done (2 absorbed phase 3 — see below);
+phases 6–8 pending.
+
+## Phase 5 notes (status-effect and item-identification frameworks)
+
+Two independent genericizations, landed together since both are small and
+touch disjoint files.
+
+**Status effects** (`rogue_angles::status_effects`): the engine now owns
+`StatusEffects<K>`/`ActiveStatusEffect<K>` (a timed collection that ramps
+strength down over `RAMP_DOWN_SECS` before expiring) and the generic
+`tick_status_effects::<K>` system, registered per-game via
+`app.add_status_effects::<K>()`. A game's `K` only needs to implement
+`StatusKind`, telling the engine which of its variants affect movement speed
+or vision (`speed_factor`/`vision_factor`, both optional) and supplying a
+`tick` hook for anything that needs per-frame mutation (this game's Confused
+wander-direction random walk). Everything else about a game's effects —
+missile damage multipliers, blindness, displacement — the engine has no
+opinion on; `StatusEffects<K>` exposes generic `strength_of`/`multiplier_of`
+helpers so the game builds its own aggregates without the engine knowing
+what they mean. `vector-arena`'s `status_effect.rs` is now ~40 lines shorter
+and contains only the `StatusEffect` enum, its `StatusKind` impl, and the
+free functions (`blind_strength`, `missile_multiplier`, `confusion_strength`,
+`displacing_strength`, `confused_strength_and_dir`) that read those generic
+helpers back out — free functions rather than inherent methods on
+`StatusEffects<StatusEffect>` because Rust's orphan rules don't allow a
+downstream crate to add inherent impls to a foreign generic type, even at a
+concrete instantiation. `sync_movement_modifiers` (composing the status
+effect aggregate with the separate, terrain-owned `TorporMultiplier` into
+`MovementModifiers`) stays a game-side system, unchanged in shape — the
+engine's generic system only ticks durations, not the eventual composition
+with a second, game-specific modifier source.
+
+**Item identification** (`rogue_angles::identity`): `IdentityTable<A, E>` is
+a per-run shuffled `A → E` bijection plus which `A`s are identified, with
+`randomize`/`effect_of`/`is_identified`/`identify`/`forget_some` (the last
+absorbing `derange_indices`, also moved to the engine). `vector-arena`'s
+`ItemIdentities` now holds three `IdentityTable`s (potion, scroll, wand)
+instead of three raw `HashMap`s plus one `ItemKind`-keyed identified set;
+its public API (`is_identified`/`identify`/`forget`, all keyed by the game's
+umbrella `ItemKind`) is unchanged, so every call site outside `item.rs`
+needed no changes at all. `Inventory` stays entirely game-side, as planned.
+
+One deviation, in the same spirit as phase 4's: `forget_some` samples its
+scrambled subset from an internal `HashSet`, whereas the original sampled
+from a fixed-order `Vec` built by filtering `ALL_POTION_COLORS`/
+`ALL_SCROLL_NAMES` in their declared order. The *set* of eligible
+appearances and the probability distribution over which get chosen are
+identical; only the RNG call sequence for a given seed can differ. No test
+or gameplay behavior depends on that exact sequence (the existing
+`forget_scrambles_three_known_potions` test asserts properties — exactly
+three scrambled, each with a genuinely different effect, bijection intact —
+not specific outcomes for a specific seed), so this wasn't worth the extra
+complexity of threading a stable order through the engine's table.
+
+Verification: `cargo test --workspace` 139/139 green throughout, zero
+warnings. Headless smoke test (`wait 2s; snap ...; cmd g h`) confirms the
+game still starts, generates a level, and resolves a goto command with the
+new status-effect and identity plumbing wired in.
 
 ## Phase 4 notes (level generation: `RoomKind` + `LevelBuilder` + `LevelPlan`)
 
