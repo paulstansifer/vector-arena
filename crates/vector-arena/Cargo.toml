@@ -25,9 +25,6 @@ bevy_landmass = "0.11.1"
 bevy_egui = "0.39.1"
 pyri_tooltip = "0.6.0"
 bevy_verlet = { path = "../bevy_verlet", default-features = false }
-bevy_svg = "0.18.0" # default-features includes both 2d and 3d; 2d-only build has a cfg bug in the crate
-egui_extras = { version = "0.33", features = ["svg_text"] } # svg_text enables resvg/text+system-fonts for scroll letter rendering
-resvg = { version = "0.45.1", default-features = false } # for usvg::Options passed to egui_extras
 bevy_enoki = "0.6.0"
 
 # Build profiles live in the workspace root manifest — Cargo ignores

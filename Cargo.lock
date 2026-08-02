@@ -5450,10 +5450,14 @@ version = "0.1.0"
 dependencies = [
  "avian2d",
  "bevy",
+ "bevy_egui",
  "bevy_landmass",
  "bevy_mesh",
+ "bevy_svg",
+ "egui_extras",
  "geo 0.32.0",
  "rand 0.8.6",
+ "resvg",
 ]
 
 [[package]]
@@ -6470,15 +6474,12 @@ dependencies = [
  "bevy_enoki",
  "bevy_landmass",
  "bevy_mesh",
- "bevy_svg",
  "bevy_verlet",
- "egui_extras",
  "geo 0.32.0",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
  "pyri_tooltip",
  "rand 0.8.6",
- "resvg",
  "rogue-angles",
 ]
 

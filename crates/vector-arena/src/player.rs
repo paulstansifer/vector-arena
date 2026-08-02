@@ -15,11 +15,12 @@ use rand::Rng;
 use rogue_angles::{
     dungeon::terrain::{DungeonState, TorporMultiplier},
     fov::{ExplorationState, find_exploration_waypoint},
+    hud::MessageLog,
     nav::{STEERING_GAIN, STOP_THRESHOLD, snap_to_navmesh},
     palette::{CommandInvocation, CommandPaletteState, EntryOutcome, PaletteCommand, PaletteRegistry},
 };
 
-use crate::{GameState, Staircase, status_effect::StatusEffects, ui::MessageLog};
+use crate::{GameState, Staircase, status_effect::StatusEffects};
 
 pub const BOREDOM_MAX: f32 = 60.0;
 const BOREDOM_WARN: f32 = 40.0;

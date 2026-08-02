@@ -10,8 +10,10 @@ use rogue_angles::{
     AGENT_RADIUS, GameLayer, LevelEntity,
     dungeon::terrain::{TorporMultiplier, random_in_playable_area},
     fov,
+    hud::WorldTooltip,
     movement::{MovementModifiers, Viewer},
     palette::{TargetDescription, Targetable},
+    sprite::SvgSprite,
     util::safegeo::SafeMultiPolygon,
 };
 
@@ -21,9 +23,8 @@ use crate::{
     item::{Inventory, Item, ItemKind, item_name, random_item_kind},
     monster::{MONSTER_MAX_HP, MONSTER_SPEED, Monster, MonsterDrop, MonsterState, Stats},
     player::{MoveTarget, PLAYER_SPEED, Player},
-    sprite::{SvgSprite, sprite_spec},
+    sprite::sprite_spec,
     status_effect::StatusEffects,
-    ui::WorldTooltip,
 };
 
 pub fn populate(

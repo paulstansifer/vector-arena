@@ -1,14 +1,14 @@
-use std::collections::HashMap;
-
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, egui};
+use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use pyri_tooltip::prelude::*;
-
-use geo::Contains;
 
 use avian2d::{diagnostics::ui::PhysicsDiagnosticsUiSettings, prelude::RigidBody};
 
-use rogue_angles::{fov::CurrentFovState, palette::CommandPaletteState};
+use rogue_angles::{
+    fov::CurrentFovState,
+    hud::{MessageLog, draw_stat_bar, show_world_entity_tooltip},
+    palette::CommandPaletteState,
+};
 
 use crate::{
     DungeonDepth, GameState,
@@ -22,60 +22,11 @@ use crate::{
 
 const BAR_WIDTH: f32 = 140.0;
 const BAR_HEIGHT: f32 = 22.0; // 4px taller than egui's default 18px interact_size
-const BAR_ROUNDING: u8 = 3;
 
 /// Exact height of the top message bar (content + egui panel frame margins).
 pub const TOP_PANEL_HEIGHT: f32 = 30.0;
 /// Exact height of the bottom HUD bar; used as `exact_height` so world alignment is guaranteed.
 pub const BOTTOM_PANEL_HEIGHT: f32 = 34.0;
-
-#[derive(Component, Default)]
-pub struct WorldTooltip(pub String);
-
-#[derive(Resource, Default)]
-pub struct MessageLog {
-    // Empty strings are tombstones for entries that were moved to the end.
-    messages: Vec<String>,
-    // (prefix, entity) -> (repeat_count, index into messages)
-    repeating: HashMap<(String, Entity), (usize, usize)>,
-}
-
-impl MessageLog {
-    pub fn push(&mut self, msg: impl Into<String>) { self.messages.push(msg.into()); }
-
-    /// Push a collapsible message. Repeated calls with the same `prefix`+`entity`
-    /// key move the entry to the end and show a repeat count: `"{prefix} (3x){suffix}"`.
-    pub fn push_repeating(
-        &mut self,
-        prefix: impl Into<String>,
-        entity: Entity,
-        suffix: impl Into<String>,
-    ) {
-        let prefix = prefix.into();
-        let suffix = suffix.into();
-        let key = (prefix.clone(), entity);
-        if let Some((count, idx)) = self.repeating.get_mut(&key) {
-            *count += 1;
-            let c = *count;
-            self.messages[*idx] = String::new(); // tombstone old slot
-            *idx = self.messages.len();
-            self.messages.push(format!("{prefix} ({c}x){suffix}"));
-        } else {
-            let idx = self.messages.len();
-            self.messages.push(format!("{prefix}{suffix}"));
-            self.repeating.insert(key, (1, idx));
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.messages.clear();
-        self.repeating.clear();
-    }
-
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &str> {
-        self.messages.iter().filter(|s| !s.is_empty()).map(|s| s.as_str())
-    }
-}
 
 #[derive(Resource, Default)]
 struct UiState {
@@ -95,10 +46,6 @@ fn count_mp_vertices(mp: &rogue_angles::util::safegeo::SafeMultiPolygon) -> usiz
         .flat_map(|p| std::iter::once(p.exterior()).chain(p.interiors()))
         .map(|ls| ls.coords().count())
         .sum()
-}
-
-pub fn enable_ui_input_absorption(mut egui_settings: ResMut<EguiGlobalSettings>) {
-    egui_settings.enable_absorb_bevy_input_system = true;
 }
 
 pub struct UiPlugin;
@@ -397,6 +344,8 @@ fn render_hud(
         ui.horizontal(|ui| {
             draw_stat_bar(
                 ui,
+                BAR_WIDTH,
+                BAR_HEIGHT,
                 stats.hp / stats.max_hp,
                 egui::Color32::from_rgb(180, 40, 40),
                 &format!("HP {}/{}", stats.hp as i32, stats.max_hp as i32),
@@ -406,6 +355,8 @@ fn render_hud(
 
             draw_stat_bar(
                 ui,
+                BAR_WIDTH,
+                BAR_HEIGHT,
                 stats.mana / stats.max_mana,
                 egui::Color32::from_rgb(40, 80, 200),
                 &format!("MP {}/{}", stats.mana as i32, stats.max_mana as i32),
@@ -415,6 +366,8 @@ fn render_hud(
 
             draw_stat_bar(
                 ui,
+                BAR_WIDTH,
+                BAR_HEIGHT,
                 boredom.seconds / BOREDOM_MAX,
                 egui::Color32::from_rgb(110, 110, 110),
                 &format!("Boredom: {}s", boredom.seconds as u32),
@@ -482,33 +435,6 @@ fn render_menu(ctx: &egui::Context) -> MenuActions {
             }
         });
     actions
-}
-
-fn draw_stat_bar(ui: &mut egui::Ui, ratio: f32, color: egui::Color32, label: &str) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(BAR_WIDTH, BAR_HEIGHT), egui::Sense::hover());
-    let painter = ui.painter_at(rect);
-
-    painter.rect_filled(rect, BAR_ROUNDING, egui::Color32::from_rgb(40, 40, 40));
-
-    let clamped = ratio.clamp(0.0, 1.0);
-    if clamped > 0.0 {
-        let fill_w = rect.width() * clamped;
-        let fill_rect = egui::Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
-        let rounding = if clamped >= 1.0 {
-            egui::CornerRadius::same(BAR_ROUNDING)
-        } else {
-            egui::CornerRadius { nw: BAR_ROUNDING, sw: BAR_ROUNDING, ne: 0, se: 0 }
-        };
-        painter.rect_filled(fill_rect, rounding, color);
-    }
-
-    painter.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        label,
-        egui::FontId::default(),
-        egui::Color32::WHITE,
-    );
 }
 
 /// Draw the item shape into an exact rect (shared by HUD and palette).
@@ -621,132 +547,3 @@ fn draw_cooldown_arc(painter: egui::Painter, rect: egui::Rect, fraction: f32) {
     }));
 }
 
-fn show_world_entity_tooltip(
-    mut contexts: EguiContexts,
-    camera_query: Query<(&Camera, &GlobalTransform)>,
-    entity_query: Query<(&Transform, &WorldTooltip)>,
-    windows: Query<&Window>,
-    current_fov: Option<Res<CurrentFovState>>,
-) -> Result {
-    let ctx = contexts.ctx_mut()?;
-    let window = match windows.single() {
-        Ok(w) => w,
-        Err(_) => return Ok(()),
-    };
-
-    let Some(mouse_pos) = window.cursor_position() else {
-        return Ok(());
-    };
-
-    let (camera, camera_transform) = match camera_query.single() {
-        Ok(cam) => cam,
-        Err(_) => return Ok(()),
-    };
-
-    let world_pos = match camera.viewport_to_world_2d(camera_transform, mouse_pos) {
-        Ok(pos) => pos,
-        Err(_) => return Ok(()),
-    };
-
-    let hover_distance = 20.0;
-    for (transform, tooltip) in entity_query.iter() {
-        let pos = transform.translation.truncate();
-        if pos.distance(world_pos) < hover_distance {
-            if let Some(ref fov) = current_fov
-                && !fov.0.contains(&geo::Point::new(pos.x, pos.y))
-            {
-                continue;
-            }
-            make_egui_tooltip(
-                ctx,
-                egui::Id::new(("world_tooltip", tooltip.0.as_str())),
-                mouse_pos,
-                |ui| {
-                    ui.label(&tooltip.0);
-                },
-            );
-            return Ok(());
-        }
-    }
-
-    Ok(())
-}
-
-fn make_egui_tooltip(
-    ctx: &egui::Context,
-    id: egui::Id,
-    cursor_pos: Vec2,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    egui::Area::new(id)
-        .kind(egui::UiKind::Popup)
-        .order(egui::Order::Tooltip)
-        .pivot(egui::Align2::RIGHT_BOTTOM)
-        .fixed_pos(egui::pos2(cursor_pos.x - 4.0, cursor_pos.y - 4.0))
-        .default_width(ctx.style().spacing.tooltip_width)
-        .sense(egui::Sense::hover())
-        .show(ctx, |ui| {
-            egui::Frame::popup(&ctx.style()).show(ui, add_contents);
-        });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bevy::prelude::Entity;
-
-    fn entity(n: u32) -> Entity { Entity::from_raw_u32(n).unwrap() }
-
-    #[test]
-    fn test_push_repeating_first_call_no_count() {
-        let mut log = MessageLog::default();
-        let e = entity(1);
-        log.push_repeating("hit", e, " for 5");
-        let msgs: Vec<&str> = log.iter().collect();
-        assert_eq!(msgs, vec!["hit for 5"]);
-    }
-
-    #[test]
-    fn test_push_repeating_second_call_shows_count() {
-        let mut log = MessageLog::default();
-        let e = entity(1);
-        log.push_repeating("hit", e, " for 5");
-        log.push_repeating("hit", e, " for 5");
-        let msgs: Vec<&str> = log.iter().collect();
-        assert_eq!(msgs, vec!["hit (2x) for 5"]);
-    }
-
-    #[test]
-    fn test_push_repeating_moves_entry_to_end() {
-        let mut log = MessageLog::default();
-        let e = entity(1);
-        log.push("first");
-        log.push_repeating("hit", e, "!");
-        log.push("middle");
-        log.push_repeating("hit", e, "!");
-        let msgs: Vec<&str> = log.iter().collect();
-        assert_eq!(msgs, vec!["first", "middle", "hit (2x)!"]);
-    }
-
-    #[test]
-    fn test_push_repeating_different_entities_not_collapsed() {
-        let mut log = MessageLog::default();
-        let e1 = entity(1);
-        let e2 = entity(2);
-        log.push_repeating("hit", e1, "!");
-        log.push_repeating("hit", e2, "!");
-        assert_eq!(log.iter().count(), 2);
-    }
-
-    #[test]
-    fn test_iter_skips_tombstones() {
-        let mut log = MessageLog::default();
-        let e = entity(1);
-        log.push("a");
-        log.push_repeating("x", e, "");
-        log.push("b");
-        log.push_repeating("x", e, ""); // creates tombstone at index 1
-        // "a", tombstone, "b", "x (2x)" → iter should yield 3 live entries
-        assert_eq!(log.iter().count(), 3);
-    }
-}

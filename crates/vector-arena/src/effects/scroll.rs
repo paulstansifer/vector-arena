@@ -12,6 +12,8 @@ use rogue_angles::{
     AGENT_RADIUS, GameLayer,
     dungeon::terrain::{self, DungeonState, random_near},
     fov::{self, ExplorationState, NeverExploredMeshMarker, WALL_FOV_DEPTH},
+    hud::{MessageLog, WorldTooltip},
+    sprite::SvgSprite,
 };
 
 use crate::{
@@ -23,8 +25,7 @@ use crate::{
     item::{Item, item_name, random_item_kind},
     monster::Monster,
     populate_level::spawn_monster,
-    sprite::{SvgSprite, sprite_spec},
-    ui::{MessageLog, WorldTooltip},
+    sprite::sprite_spec,
 };
 
 #[derive(Event)]

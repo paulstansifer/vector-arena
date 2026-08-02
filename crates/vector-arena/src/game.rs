@@ -24,6 +24,7 @@ use rogue_angles::{
         spawn_rubble_piece,
     },
     fov::{self as fov, MOVABLE_Z, OpaqueVertices, TERRAIN_Z},
+    hud::{MessageLog, enable_ui_input_absorption},
     nav::{self as nav, DungeonNavMesh, NavMeshIslandMarker, TORPOR_NAV_COST, playable_area_to_nav_mesh},
     palette::{self, EntityLabels, LabelPool, LocationDescriptions, LocationLabels},
     status_effects::{StatusEffectsAppExt, tick_status_effects},
@@ -63,7 +64,7 @@ use crate::{
     sprite::SpritePlugin,
     status_effect::{StatusEffect, StatusEffects, apply_confusion_to_velocity, sync_movement_modifiers},
     time_scale::cast_time_scale_votes,
-    ui::{MessageLog, UiPlugin, enable_ui_input_absorption},
+    ui::UiPlugin,
     visuals::indicator::{render_state_indicators, tick_state_indicators},
 };
 
@@ -333,7 +334,7 @@ pub fn spawn_game_world(
 /// The core game plugin.
 ///
 /// Set `headless = true` to skip all egui-dependent plugins/systems (UiPlugin,
-/// CommandPalettePlugin, SpritePlugin, SvgPlugin). In that mode the resources
+/// CommandPalettePlugin, SpritePlugin's egui half). In that mode the resources
 /// those plugins would have provided are initialized manually so gameplay
 /// systems that depend on them (palette commands, item logic, etc.) still work.
 pub struct GamePlugin {
@@ -360,14 +361,15 @@ impl Plugin for GamePlugin {
 
         if self.headless {
             // In headless mode, skip egui-dependent plugins and stub their resources.
-            // SvgPlugin + insert_svg_components are kept so SVG sprites (player, items) render.
-            // Only the egui texture-registration and interactive-input systems are dropped —
-            // the headless runner drives the palette directly via
+            // SvgSpritePlugin (world-mesh half of the sprite pipeline) is kept so SVG sprites
+            // (player, items) render. Only the egui texture-registration and interactive-input
+            // systems are dropped — the headless runner drives the palette directly via
             // `rogue_angles::palette::execute_path_string`, which only needs the registry and
             // label resources below, not the keyboard/rendering systems `CommandPalettePlugin`
             // would otherwise add.
-            use crate::sprite::{SpriteCache, SpriteEguiTextures, insert_svg_components};
-            app.add_plugins(bevy_svg::prelude::SvgPlugin)
+            use crate::sprite::{SpriteEguiTextures, register_svg_assets};
+            app.add_plugins(rogue_angles::sprite::SvgSpritePlugin)
+                .add_systems(Startup, register_svg_assets)
                 .init_resource::<MessageLog>()
                 .init_resource::<Boredom>()
                 .init_resource::<palette::CommandPaletteState>()
@@ -378,16 +380,9 @@ impl Plugin for GamePlugin {
                 .init_resource::<palette::DefaultEntityAction>()
                 .add_systems(Update, palette::assign_entity_labels)
                 .add_systems(Update, palette::release_entity_labels)
-                .init_resource::<SpriteCache>()
-                .init_resource::<SpriteEguiTextures>()
-                .add_systems(Update, insert_svg_components);
+                .init_resource::<SpriteEguiTextures>();
         } else {
-            app.add_plugins((
-                bevy_svg::prelude::SvgPlugin,
-                UiPlugin,
-                CommandPalettePlugin,
-                SpritePlugin,
-            ));
+            app.add_plugins((UiPlugin, CommandPalettePlugin, SpritePlugin));
         }
 
         app.init_state::<GameState>()

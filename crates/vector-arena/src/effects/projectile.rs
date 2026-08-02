@@ -13,6 +13,8 @@ use rogue_angles::{
     dungeon::terrain::TorporMultiplier,
     effects::crumble_terrain::Rubble,
     fov,
+    hud::{MessageLog, WorldTooltip},
+    sprite::SvgSprite,
     palette::{
         CommandInvocation, EntryOutcome, PaletteCommand, PaletteRegistry, Target, TargetFilter,
     },
@@ -25,9 +27,8 @@ use crate::{
         AlertedByMissile, Monster, MonsterDrop, MonsterShootFreeze, Stats, WANDER_ARRIVE_DIST,
     },
     player::Player,
-    sprite::{SvgSprite, sprite_spec},
+    sprite::sprite_spec,
     status_effect::{StatusEffects, confusion_strength, displacing_strength, missile_multiplier},
-    ui::{MessageLog, WorldTooltip},
 };
 
 pub const MISSILE_KEY: &str = "z";

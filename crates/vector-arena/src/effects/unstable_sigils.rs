@@ -8,7 +8,7 @@
 //   – pushes everything in radius 100 radially outward
 use std::f32::consts::TAU;
 
-use rogue_angles::util::safegeo::SafeMultiPolygon;
+use rogue_angles::{sprite::SvgSprite, util::safegeo::SafeMultiPolygon};
 use avian2d::prelude::*;
 use bevy::{
     asset::RenderAssetUsages,
@@ -26,6 +26,7 @@ use rogue_angles::{
         Fragile, RubbleMaterial, create_circle_polygon, subtract_polygon_from_terrain,
     },
     fov,
+    hud::{MessageLog, WorldTooltip},
     nav::DungeonNavMesh,
 };
 
@@ -33,8 +34,7 @@ use crate::{
     item::{Item, item_name},
     monster::{Monster, MonsterDrop, Stats},
     player::Player,
-    sprite::{SvgSprite, sprite_spec},
-    ui::{MessageLog, WorldTooltip},
+    sprite::sprite_spec,
 };
 
 const SIGIL_POINT_RADIUS: f32 = 12.0;

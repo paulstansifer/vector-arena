@@ -14,6 +14,7 @@ pub const WAND_COOLDOWN_SECS: f32 = 15.0;
 use rogue_angles::{
     GameLayer,
     dungeon::terrain::{DungeonState, random_in_playable_area},
+    hud::{MessageLog, WorldTooltip},
     identity::IdentityTable,
     palette::{
         CommandInvocation, EntryOutcome, IconId, LabelPool, PaletteCommand, PaletteEntry,
@@ -32,7 +33,6 @@ use crate::{
     monster::{Monster, Stats},
     player::{Boredom, ExplorationGoal, Player},
     status_effect::{StatusEffect, StatusEffects},
-    ui::{MessageLog, WorldTooltip},
 };
 
 // TODO: use the 'strum' crate to get lowercase colors and ALL CAPS scroll titles.

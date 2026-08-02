@@ -9,10 +9,12 @@
 pub mod dungeon;
 pub mod effects;
 pub mod fov;
+pub mod hud;
 pub mod identity;
 pub mod movement;
 pub mod nav;
 pub mod palette;
+pub mod sprite;
 pub mod status_effects;
 pub mod time_scale;
 pub mod util;

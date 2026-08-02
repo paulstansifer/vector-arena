@@ -13,6 +13,7 @@ use bevy_egui::egui;
 use rogue_angles::{
     dungeon::terrain::{DungeonState, random_near},
     fov::CurrentFovState,
+    hud::WorldTooltip,
     palette::{CommandPaletteState, EntityLabels, TargetDescription, Targetable},
 };
 
@@ -173,7 +174,7 @@ pub fn refresh_monster_tooltips(
             Entity,
             &Stats,
             &MonsterState,
-            &mut crate::ui::WorldTooltip,
+            &mut WorldTooltip,
             &mut TargetDescription,
             Option<&StatusEffects>,
         ),

@@ -30,13 +30,13 @@ use vector_arena::{
 /// monster 10 = 14 units) is far narrower.
 #[test]
 fn missile_hits_monster_at_various_distances() {
+    use rogue_angles::hud::MessageLog;
     use vector_arena::{
         effects::projectile::{
             MISSILE_SPEED, MagicMissile, apply_damage_on_hit, apply_hit_flash_on_hit,
             apply_knockback_on_hit, detect_missile_hits,
         },
         monster::{Monster, Stats},
-        ui::MessageLog,
     };
 
     const MONSTER_HP: f32 = 20.0;

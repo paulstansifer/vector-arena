@@ -1,7 +1,91 @@
 # Splitting Vector Arena into `rogue-angles` + a demo game
 
-Status: **in progress.** Phases 0–5 done (2 absorbed phase 3 — see below);
-phases 6–8 pending.
+Status: **in progress.** Phases 0–6 done (2 absorbed phase 3 — see below);
+phases 7–8 pending.
+
+## Phase 6 notes (presentation split)
+
+Two moves, both landed as one commit.
+
+**SVG-to-texture rendering pipeline** (`rogue_angles::sprite`): this was the
+one architecturally significant call in this phase, surfaced to the user
+before implementation rather than decided unilaterally — `rogue-angles` had
+zero UI-toolkit dependency until now (the command palette deliberately emits
+plain data, letting the game decide how to render it), and moving
+`sprite.rs`'s `bevy_svg`/`resvg`-based pipeline into the engine means every
+game built on it inherits an opinionated egui/SVG icon system whether it
+wants one or not. The user chose to move it in, so `rogue-angles` now
+depends on `bevy_egui`/`bevy_svg`/`resvg`/`egui_extras`, and owns
+`SvgSprite`/`SpriteEguiData`/`SpriteCache`, SVG parameterization
+(color/text substitution), tessellation to a `bevy_svg` mesh, and
+rasterization to an egui texture — plus the embedded default font
+(`LiberationSans-Regular.ttf`, moved from `vector-arena/fonts/` to
+`rogue-angles/fonts/`) needed to render text-parameterized SVGs reliably.
+
+What the engine still doesn't own: any actual sprite art. A game registers
+its own SVG bytes into the new `SvgSource` resource (by the same
+`svg_path` string `SvgSprite` already carried, typically via
+`include_bytes!` in a `Startup` system), rather than the engine shipping
+sprites of its own or hardcoding a path→bytes match statement the way
+`vector-arena`'s old `get_embedded_svg` did. `vector-arena`'s `sprite.rs`
+shrank to just its own vocabulary: `sprite_spec`/`potion_hex`/
+`scroll_letter`/`wand_hex` (which `ItemKind` maps to which asset/param),
+`SpriteEguiTextures` (an `ItemKind`-keyed cache the HUD/palette read,
+separate from the engine's own `(path, param)`-keyed one), and
+`register_svg_assets`.
+
+The world-mesh half of the pipeline (`SvgSpritePlugin`: `bevy_svg`'s own
+plugin + `SpriteCache`/`SvgSource` + `insert_svg_components`) and the
+egui-texture half (`register_egui_sprites`, a plain system) are separate on
+purpose: the world-mesh half needs no egui context and is safe to add in
+headless mode (matching how `GamePlugin` already split egui-dependent vs.
+egui-independent systems for the headless runner), while the egui half only
+makes sense wherever a game actually wires up `EguiPrimaryContextPass`.
+Syncing the engine's per-entity `SpriteEguiData` into the game's
+`ItemKind`-keyed `SpriteEguiTextures` is a small lazy game-side system
+(`sync_item_egui_textures`) that checks a `HashMap` entry rather than an
+`Added<SpriteEguiData>` query filter chained in the same frame — the
+engine's insert goes through `Commands`, which isn't guaranteed visible to
+`Added<T>` in a later system of the same pass without an explicit sync
+point, so the idempotent lazy check sidesteps that ordering hazard entirely
+rather than risking a one-frame-late icon.
+
+**Generic HUD chrome** (`rogue_angles::hud`): `MessageLog` (already
+`String`-only, flagged since phase 1 as "should move but nothing forced
+it"), `WorldTooltip` + `show_world_entity_tooltip` (proximity-based world
+tooltips, already only touching `Transform` and the engine's own
+`fov::CurrentFovState`), and `draw_stat_bar` (a labeled progress-bar
+primitive, now parameterized by `width`/`height` instead of hardcoding this
+game's specific bar dimensions) all moved with no behavior change. HP/MP/
+boredom bars, item icons, the depth/descend/menu bar, and the game-over
+screen stay entirely in `vector-arena`'s `ui.rs`, as planned — those are
+this game's vocabulary, not chrome.
+
+**Not done, and not needed**: the plan flagged "untangle the `ui.rs` ↔
+`command_palette.rs` cycle" as a phase-6 task. Investigated first rather
+than done reflexively — there is no cycle. `command_palette.rs` (already a
+thin egui shell over the engine's `palette` module since phase 2+3) doesn't
+import from `ui.rs` at all; `ui.rs` only references
+`command_palette::palette_system`/`handle_world_click_for_palette` for
+system registration, which isn't a type-level dependency. This was
+apparently resolved as a side effect of the phase 2+3 palette rework, not
+something left over to fix here.
+
+Verification: `cargo test --workspace` 139/139 green throughout both
+sub-changes (test counts shifted between crates as `MessageLog`'s tests
+moved with it — same total). Two headless smoke tests (`wait 2s; snap ...`),
+one after each sub-change, visually confirm sprites, doors, and the goto
+command all still work correctly with the pipeline now living in the engine.
+
+One environment note from this phase, unrelated to the code: mid-phase the
+session's disk allowance was exhausted by accumulated `target/` build
+artifacts (28G), which surfaced as a rustc internal compiler error
+("No space left on device") that could easily be misread as a real
+compilation bug. Deleting `target/` and rebuilding from scratch resolved it
+immediately with no code changes — worth remembering if a future phase hits
+the same wall, especially since this phase's dependency additions
+(`bevy_egui`/`bevy_svg`/`resvg` now built twice into the dependency graph
+briefly during the transition) made the build artifacts unusually large.
 
 ## Phase 5 notes (status-effect and item-identification frameworks)
 
