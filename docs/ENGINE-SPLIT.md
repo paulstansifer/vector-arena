@@ -1,9 +1,77 @@
 # Splitting Vector Arena into `rogue-angles` + a demo game
 
-Status: **phases 0–7 done** (2 absorbed phase 3 — see below). Phase 8
-(acceptance-test example game) was explicitly skipped at the user's
-direction. Post-split refinement continues ad hoc as it comes up; see the
-addendum below for the first one.
+Status: **all phases done** (2 absorbed phase 3 — see below). Phase 8 was
+initially skipped at the user's direction, then commissioned afterward with
+its own brief; see its notes below. Post-split refinement continues ad hoc
+as it comes up; see the HUD-chrome addendum below for the first one.
+
+## Phase 8 notes (acceptance-test example game: `gauntlet`)
+
+A second, deliberately different game built on `rogue-angles`, per the
+user's brief: monsters have a telegraphed lunge attack that deals contact
+damage; the player's only tool is a shot that crumbles a small circle of
+terrain on a wall hit, or harmlessly knocks back and briefly slows a
+monster it hits (no kill loop — monsters are a permanent hazard to dodge,
+never a target); depth 5's exit is an "amulet of winning" instead of a
+staircase, and touching it wins the game. No inventory, no command palette.
+Lives at `crates/gauntlet`, workspace member, `cargo run -p gauntlet` (or
+`cargo test -p gauntlet`); not part of `default-members` or the GitHub
+Pages deploy, so it doesn't change what bare `cargo run`/`cargo test` or
+`deploy.yml` do.
+
+**What this proved about the engine boundary** (the actual point of phase
+8): `rogue-angles` compiles and runs correctly as the foundation for a
+second game with no changes to the engine itself. Concretely, `gauntlet`
+reuses — unmodified — the dungeon/level generation (`RoomRegistry::stock()`,
+the same stock room kinds vector-arena uses), terrain/collision sync,
+navmesh steering, FOV/exploration, `crumble_terrain` (the dig shot calls
+`create_circle_polygon`/`subtract_polygon_from_terrain` directly, with its
+own — smaller — radius than vector-arena's wand-of-crumbling), the generic
+status-effect framework (its own `StatusEffect::Slowed`, the same
+`StatusKind`/`StatusEffects<K>` vector-arena's much larger effect set uses),
+and this session's HUD-chrome primitives (`render_message_bar`,
+`draw_stat_bar`; `MessageLog`/`WorldTooltip`). It also proved something
+more interesting by omission: **the command palette, the SVG sprite
+pipeline, and `draw_icon_slot` are all genuinely optional.** `gauntlet` has
+no items and no multi-step commands, so it never touches
+`rogue_angles::palette` at all; it renders every entity as a plain
+`Mesh2d`/`ColorMaterial` shape rather than pulling in `rogue_angles::sprite`
+and any SVG assets. Nothing in the engine forced either module on it. The
+one wart flagged in phase 7 — `GameLayer::Missile`/`Rope` being
+game-specific variants baked into the engine's shared physics-layer enum —
+turned out not to block this game after all: `gauntlet` also has a
+projectile-like shot, so it reuses `GameLayer::Missile` as-is.
+`GameLayer::Rope` simply goes unused, which is harmless.
+
+**Simplifications made deliberately, not from constraint:** monsters carry
+no `Stats`/HP at all (only the player does — there's nothing to damage
+them), so the AI state machine (`Sleeping → Wandering ⇄ Seeking →
+LungeWindup → Lunging → Tired`) is meaningfully different code from
+vector-arena's, not a reskin. The exit (staircase or amulet) triggers
+automatically on proximity rather than requiring a command, since there's
+no palette to route it through. Room-kind-specific extras from the shared
+registry that vector-arena spawns contents into (`VaultRoom`'s
+`vault_center` marker, `RubbleRoom`'s pre-seeded rubble) are read from
+`LevelPlan` but intentionally left unhandled — an empty vault room and a
+debris-free rubble room are still valid, playable spaces, and handling them
+wasn't needed to prove the boundary.
+
+**Verification:** `cargo test --workspace` all green, including two new
+`gauntlet` integration tests — a startup smoke test (reaches `InLevel`,
+spawns exactly one player, a sane monster count, exactly one staircase, no
+amulet) and a depth-progression test that drives four forced descends and
+asserts depth 5 has exactly one amulet and zero staircases (the user's
+core new requirement, checked directly rather than only by inspection).
+One honest gap: unlike vector-arena, `gauntlet` has no scripted headless
+screenshot runner, so — unlike every other phase in this doc — there's no
+pixel-level visual confirmation that the shapes actually render correctly
+on screen. The integration tests confirm the right entities exist with the
+right components; they don't confirm what a player would see. Building the
+screenshot tooling was judged out of scope for this session, given `cargo
+test`'s coverage of the parts that were actually novel/risky (the AI state
+machine, the dig-shot collision/terrain-crumble logic, the depth-5 exit
+swap) and that the render path itself (plain `Mesh2d`/`ColorMaterial`
+shapes) is far lower-risk than vector-arena's SVG pipeline was.
 
 ## Post-phase-7 addendum: more opinionated HUD chrome
 

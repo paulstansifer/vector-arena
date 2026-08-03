@@ -14,6 +14,7 @@ This repo is a Cargo workspace:
 | Crate | Path | Role |
 | ----- | ---- | ---- |
 | `vector-arena` | `crates/vector-arena` | The game — bins `game` and `headless`. Bare `cargo run`/`cargo test` target this. |
+| `gauntlet` | `crates/gauntlet` | A second, deliberately different game on the same engine (lunge-attacking monsters, a terrain-crumbling/knockback shot, no inventory) — the phase-8 acceptance test that the engine boundary is real. `cargo run -p gauntlet` / `cargo test -p gauntlet`. |
 | `rogue-angles` | `crates/rogue-angles` | The engine: geometry, level generation, FOV, navmesh steering, the command palette, and generic status-effect/identification/HUD frameworks. |
 | `bevy_verlet`  | `crates/bevy_verlet`  | Vendored third-party fork, excluded from the workspace. |
 

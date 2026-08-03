@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/rogue-angles", "crates/vector-arena"]
+members = ["crates/rogue-angles", "crates/vector-arena", "crates/gauntlet"]
 # `bevy_verlet` is a vendored third-party fork consumed as a plain path
 # dependency. Keeping it out of the workspace means its example-only
 # dev-dependencies (bevy_pbr, x11, tonemapping LUTs, …) are never built, which
