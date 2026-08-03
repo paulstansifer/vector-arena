@@ -39,7 +39,7 @@ pub struct Targetable;
 #[derive(Component, Default)]
 pub struct TargetDescription(pub String);
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Target {
     Entity(Entity),
     Point(Vec2),
@@ -422,6 +422,40 @@ fn run_command(world: &mut World, path: PalettePath, target: Option<Target>) {
     state.selected_idx = 0;
 }
 
+enum TargetSplit {
+    /// `path`'s last token isn't completing a `PickTarget` node — nothing to pull out.
+    NotTarget,
+    /// It is, and the letter resolved: the stem path (without the letter) plus its target.
+    Resolved(PalettePath, Target),
+    /// It is, but the letter didn't resolve to anything (stale/invalid label).
+    Unresolved,
+}
+
+/// If `path`'s last token is a target letter completing a `PickTarget` node (i.e. the path
+/// minus its last token resolves to `PickTarget`), resolves that letter via
+/// `resolve_letter_target`. `build_target_entries` only bakes a target letter into
+/// `PaletteEntry.key`/`description` text, not into `PaletteEntry.outcome` (which is just
+/// `Run`), so every caller that dispatches a selected/typed/clicked entry needs this
+/// re-resolution step — shared here so `select_entry` and `execute_path_string` can't drift
+/// out of sync on it again.
+fn split_and_resolve_target(world: &mut World, path: &[String]) -> TargetSplit {
+    if path.len() < 2 {
+        return TargetSplit::NotTarget;
+    }
+    let Some(EntryOutcome::PickTarget { .. }) = resolve_outcome(world, &path[..path.len() - 1])
+    else {
+        return TargetSplit::NotTarget;
+    };
+    let letter_str = &path[path.len() - 1];
+    let Some(letter) = letter_str.chars().next().filter(|_| letter_str.chars().count() == 1) else {
+        return TargetSplit::Unresolved;
+    };
+    match resolve_letter_target(world, letter) {
+        Some(target) => TargetSplit::Resolved(path[..path.len() - 1].to_vec(), target),
+        None => TargetSplit::Unresolved,
+    }
+}
+
 /// Given a chosen entry (from typing, arrow+Enter, or a clicked row), either
 /// navigate deeper or execute — shared by every input source that picks an
 /// entry by its already-known `PaletteEntry`.
@@ -429,7 +463,14 @@ pub fn select_entry(world: &mut World, entry: &PaletteEntry) {
     match &entry.outcome {
         EntryOutcome::Run => {
             let path = committed_path(&entry.key);
-            run_command(world, path, None);
+            match split_and_resolve_target(world, &path) {
+                TargetSplit::Resolved(stem, target) => run_command(world, stem, Some(target)),
+                TargetSplit::NotTarget => run_command(world, path, None),
+                // The entry came from CurrentPaletteEntries, already built against a valid
+                // target, so this shouldn't happen — but if the label went stale this frame,
+                // do nothing rather than run the command with no target (the original bug).
+                TargetSplit::Unresolved => {}
+            }
         }
         EntryOutcome::Submenu(_) | EntryOutcome::PickTarget { .. } => {
             let mut state = world.resource_mut::<CommandPaletteState>();
@@ -480,23 +521,21 @@ pub fn execute_path_string(world: &mut World, input: &str) -> bool {
     if path.is_empty() {
         return false;
     }
-    if path.len() >= 2
-        && let Some(EntryOutcome::PickTarget { .. }) = resolve_outcome(world, &path[..path.len() - 1])
-    {
-        let letter_str = &path[path.len() - 1];
-        let Some(letter) = letter_str.chars().next().filter(|_| letter_str.chars().count() == 1)
-        else {
-            return false;
-        };
-        let Some(target) = resolve_letter_target(world, letter) else { return false };
-        run_command(world, path[..path.len() - 1].to_vec(), Some(target));
-        return true;
+    match split_and_resolve_target(world, &path) {
+        TargetSplit::Resolved(stem, target) => {
+            run_command(world, stem, Some(target));
+            true
+        }
+        TargetSplit::Unresolved => false,
+        TargetSplit::NotTarget => {
+            if matches!(resolve_outcome(world, &path), Some(EntryOutcome::Run)) {
+                run_command(world, path, None);
+                true
+            } else {
+                false
+            }
+        }
     }
-    if matches!(resolve_outcome(world, &path), Some(EntryOutcome::Run)) {
-        run_command(world, path, None);
-        return true;
-    }
-    false
 }
 
 /// Escape: close the palette and discard whatever was typed.
@@ -630,4 +669,97 @@ pub fn handle_palette_keyboard(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Records the `target` the fake command's handler was invoked with. `None` at the outer
+    /// level means the handler never ran at all.
+    #[derive(Resource, Default)]
+    struct Recorded(Option<Option<Target>>);
+
+    fn record_invocation(In(invocation): In<CommandInvocation>, mut recorded: ResMut<Recorded>) {
+        recorded.0 = Some(invocation.target);
+    }
+
+    /// Sets up a world with a "g" command whose outcome is `PickTarget`, and location `h`
+    /// assigned to `loc`, mirroring what a real game's goto-style command looks like once
+    /// `LocationLabels` has an assignment.
+    fn make_pick_target_app(loc: Vec2) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Recorded>();
+        app.init_resource::<CommandPaletteState>();
+        app.init_resource::<LocationLabels>();
+        app.init_resource::<EntityLabels>();
+        app.init_resource::<PaletteRegistry>();
+
+        let handler = app.world_mut().register_system(record_invocation);
+        app.world_mut().resource_mut::<LocationLabels>().slots[(b'h' - b'a') as usize] = Some(loc);
+        app.world_mut().resource_mut::<PaletteRegistry>().commands.push(PaletteCommand {
+            key: "g".to_string(),
+            description: "Go to".to_string(),
+            icon: None,
+            outcome: EntryOutcome::PickTarget { verb: "Go to".to_string(), filter: TargetFilter::Any },
+            handler,
+        });
+        app
+    }
+
+    /// Regression test: selecting a target-entry built the way `build_target_entries` builds
+    /// them (`outcome: EntryOutcome::Run`, with the target letter only in `key`'s text, not in
+    /// `outcome`) must still dispatch the resolved `Target` to the handler — not silently drop
+    /// it. This is exactly the path `handle_palette_keyboard` takes for typed-letter and
+    /// arrow+Enter selection, and `palette_system` takes for a clicked row.
+    #[test]
+    fn select_entry_on_target_entry_resolves_and_dispatches_target() {
+        let loc = Vec2::new(42.0, 7.0);
+        let mut app = make_pick_target_app(loc);
+
+        let entry = PaletteEntry {
+            key: "g h".to_string(),
+            description: "Go to location h".to_string(),
+            icon: None,
+            outcome: EntryOutcome::Run,
+        };
+        select_entry(app.world_mut(), &entry);
+
+        let recorded = app.world().resource::<Recorded>();
+        assert_eq!(
+            recorded.0,
+            Some(Some(Target::Point(loc))),
+            "handler should have been invoked with the resolved target, not None"
+        );
+
+        let state = app.world().resource::<CommandPaletteState>();
+        assert!(!state.open, "palette should close after a successful dispatch");
+    }
+
+    /// `execute_path_string` (used by the headless scripting harness) exercises the same
+    /// target-letter resolution as `select_entry` — verify they agree.
+    #[test]
+    fn execute_path_string_resolves_location_letter() {
+        let loc = Vec2::new(42.0, 7.0);
+        let mut app = make_pick_target_app(loc);
+
+        let ran = execute_path_string(app.world_mut(), "g h");
+        assert!(ran, "execute_path_string should report success for a resolvable target letter");
+
+        let recorded = app.world().resource::<Recorded>();
+        assert_eq!(recorded.0, Some(Some(Target::Point(loc))));
+    }
+
+    /// A letter with no assigned location (e.g. never explored) must not silently dispatch
+    /// with no target — `execute_path_string` should report failure and leave the handler
+    /// un-run, matching `select_entry`'s "do nothing" behavior for the same case.
+    #[test]
+    fn execute_path_string_fails_for_unassigned_letter() {
+        let mut app = make_pick_target_app(Vec2::ZERO);
+        // "z" was never assigned a location.
+        let ran = execute_path_string(app.world_mut(), "g z");
+        assert!(!ran);
+        assert_eq!(app.world().resource::<Recorded>().0, None, "handler should not have run");
+    }
 }
