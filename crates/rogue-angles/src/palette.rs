@@ -53,6 +53,20 @@ pub enum TargetFilter {
     LocationsOnly,
 }
 
+// ── Shared label-map scan: first free letter from a range, reverse lookup ──
+
+/// The first of `candidates` not already used as a value in `letters` — the allocation policy
+/// shared by `EntityLabels` and `LabelPool<K>`, which otherwise differ only in their key type
+/// and candidate letter range.
+fn first_unused_letter<K>(letters: &HashMap<K, char>, candidates: impl Iterator<Item = char>) -> Option<char> {
+    candidates.into_iter().find(|c| !letters.values().any(|l| l == c))
+}
+
+/// The key mapped to `letter`, if any — the reverse-lookup half of the same shared shape.
+fn key_for_letter<K: Copy>(letters: &HashMap<K, char>, letter: char) -> Option<K> {
+    letters.iter().find(|&(_, &l)| l == letter).map(|(&k, _)| k)
+}
+
 // ── Entity labels: uppercase + digits ───────────────────────────────────────
 
 #[derive(Resource, Default)]
@@ -65,18 +79,15 @@ impl EntityLabels {
         if self.letters.contains_key(&entity) {
             return;
         }
-        for letter in ('1'..='9').chain('A'..='Z') {
-            if !self.letters.values().any(|&l| l == letter) {
-                self.letters.insert(entity, letter);
-                return;
-            }
+        if let Some(letter) = first_unused_letter(&self.letters, ('1'..='9').chain('A'..='Z')) {
+            self.letters.insert(entity, letter);
         }
     }
 
     pub fn letter_for(&self, entity: Entity) -> Option<char> { self.letters.get(&entity).copied() }
 
     pub fn entity_for_letter(&self, letter: char) -> Option<Entity> {
-        self.letters.iter().find(|&(_, &l)| l == letter).map(|(&e, _)| e)
+        key_for_letter(&self.letters, letter)
     }
 
     /// Release every assigned letter immediately, e.g. at a level transition.
@@ -123,20 +134,14 @@ impl<K: Copy + Eq + std::hash::Hash + Send + Sync + 'static> LabelPool<K> {
         if let Some(&letter) = self.letters.get(&key) {
             return Some(letter);
         }
-        for letter in 'a'..='z' {
-            if !self.letters.values().any(|&l| l == letter) {
-                self.letters.insert(key, letter);
-                return Some(letter);
-            }
-        }
-        None
+        let letter = first_unused_letter(&self.letters, 'a'..='z')?;
+        self.letters.insert(key, letter);
+        Some(letter)
     }
 
     pub fn get(&self, key: K) -> Option<char> { self.letters.get(&key).copied() }
 
-    pub fn key_for_letter(&self, letter: char) -> Option<K> {
-        self.letters.iter().find(|&(_, &l)| l == letter).map(|(&k, _)| k)
-    }
+    pub fn key_for_letter(&self, letter: char) -> Option<K> { key_for_letter(&self.letters, letter) }
 }
 
 // ── Location labels: lowercase a-z waypoints, 8 reserved direction slots ───
@@ -206,6 +211,11 @@ pub enum EntryOutcome {
     PickTarget { verb: String, filter: TargetFilter },
     /// This path is complete; selecting it runs the owning command's handler.
     Run,
+    /// A `PickTarget` node's target-letter completion, as built by `build_target_entries`:
+    /// `root` is the command path that led to the `PickTarget` (i.e. `key` minus its trailing
+    /// letter), and `target` is the already-resolved target — carried as data here rather than
+    /// left for the dispatcher to re-parse out of `key`'s display text.
+    RunTarget { root: PalettePath, target: Target },
 }
 
 #[derive(Clone)]
@@ -265,24 +275,23 @@ fn is_in_fov(world: &World, pos: Vec2) -> bool {
         .is_none_or(|fov| fov.0.contains(&geo::Point::new(pos.x, pos.y)))
 }
 
-/// Whether `pos` has ever been seen, per `ExplorationState` (the same criterion
+/// Whether `pos` has ever been seen, per `ExplorationState::is_explored` — the same criterion
 /// `compute_goto_assignments`-style policy code uses to decide which points get a location
-/// letter in the first place — `LocationLabels` entries are static points, not mobile like
+/// letter in the first place. `LocationLabels` entries are static points, not mobile like
 /// `Targetable` entities, so once explored they stay selectable even when no longer in the
-/// player's *current* FOV; requiring both would defeat the point of a remembered waypoint).
+/// player's *current* FOV; requiring both would defeat the point of a remembered waypoint.
 fn is_explored(world: &World, pos: Vec2) -> bool {
-    world
-        .get_resource::<ExplorationState>()
-        .is_none_or(|exp| !exp.0.contains(&geo::Point::new(pos.x, pos.y)))
+    world.get_resource::<ExplorationState>().is_none_or(|exp| exp.is_explored(pos))
 }
 
 fn build_target_entries(
     world: &mut World,
-    prefix: &str,
+    stem: &[String],
     verb: &str,
     filter: TargetFilter,
 ) -> Vec<PaletteEntry> {
     let mut entries = Vec::new();
+    let prefix = stem.join(" ");
 
     if filter != TargetFilter::LocationsOnly {
         let mut query = world
@@ -301,7 +310,10 @@ fn build_target_entries(
                 key: format!("{prefix} {letter}"),
                 description: desc.unwrap_or_else(|| format!("target {letter}")),
                 icon: None,
-                outcome: EntryOutcome::Run,
+                outcome: EntryOutcome::RunTarget {
+                    root: stem.to_vec(),
+                    target: Target::Entity(entity),
+                },
             });
         }
     }
@@ -325,7 +337,7 @@ fn build_target_entries(
                 key: format!("{prefix} {letter}"),
                 description,
                 icon: None,
-                outcome: EntryOutcome::Run,
+                outcome: EntryOutcome::RunTarget { root: stem.to_vec(), target: Target::Point(*pos) },
             });
         }
     }
@@ -353,7 +365,7 @@ fn resolve_outcome(world: &mut World, path: &[String]) -> Option<EntryOutcome> {
         // A PickTarget's next token is always a resolved target; that path is terminal.
         EntryOutcome::PickTarget { .. } => Some(EntryOutcome::Run),
         // Typed past a terminal node — no further entries.
-        EntryOutcome::Run => None,
+        EntryOutcome::Run | EntryOutcome::RunTarget { .. } => None,
     }
 }
 
@@ -378,9 +390,9 @@ pub fn compute_entries(world: &mut World, committed: &[String]) -> Vec<PaletteEn
             world.run_system_with(system_id, committed.to_vec()).unwrap_or_default()
         }
         Some(EntryOutcome::PickTarget { verb, filter }) => {
-            build_target_entries(world, &committed.join(" "), &verb, filter)
+            build_target_entries(world, committed, &verb, filter)
         }
-        Some(EntryOutcome::Run) | None => Vec::new(),
+        Some(EntryOutcome::Run) | Some(EntryOutcome::RunTarget { .. }) | None => Vec::new(),
     }
 }
 
@@ -433,55 +445,14 @@ fn run_command(world: &mut World, path: PalettePath, target: Option<Target>) {
     state.selected_idx = 0;
 }
 
-enum TargetSplit {
-    /// `path`'s last token isn't completing a `PickTarget` node — nothing to pull out.
-    NotTarget,
-    /// It is, and the letter resolved: the stem path (without the letter) plus its target.
-    Resolved(PalettePath, Target),
-    /// It is, but the letter didn't resolve to anything (stale/invalid label).
-    Unresolved,
-}
-
-/// If `path`'s last token is a target letter completing a `PickTarget` node (i.e. the path
-/// minus its last token resolves to `PickTarget`), resolves that letter via
-/// `resolve_letter_target`. `build_target_entries` only bakes a target letter into
-/// `PaletteEntry.key`/`description` text, not into `PaletteEntry.outcome` (which is just
-/// `Run`), so every caller that dispatches a selected/typed/clicked entry needs this
-/// re-resolution step — shared here so `select_entry` and `execute_path_string` can't drift
-/// out of sync on it again.
-fn split_and_resolve_target(world: &mut World, path: &[String]) -> TargetSplit {
-    if path.len() < 2 {
-        return TargetSplit::NotTarget;
-    }
-    let Some(EntryOutcome::PickTarget { .. }) = resolve_outcome(world, &path[..path.len() - 1])
-    else {
-        return TargetSplit::NotTarget;
-    };
-    let letter_str = &path[path.len() - 1];
-    let Some(letter) = letter_str.chars().next().filter(|_| letter_str.chars().count() == 1) else {
-        return TargetSplit::Unresolved;
-    };
-    match resolve_letter_target(world, letter) {
-        Some(target) => TargetSplit::Resolved(path[..path.len() - 1].to_vec(), target),
-        None => TargetSplit::Unresolved,
-    }
-}
-
 /// Given a chosen entry (from typing, arrow+Enter, or a clicked row), either
 /// navigate deeper or execute — shared by every input source that picks an
 /// entry by its already-known `PaletteEntry`.
 pub fn select_entry(world: &mut World, entry: &PaletteEntry) {
     match &entry.outcome {
-        EntryOutcome::Run => {
-            let path = committed_path(&entry.key);
-            match split_and_resolve_target(world, &path) {
-                TargetSplit::Resolved(stem, target) => run_command(world, stem, Some(target)),
-                TargetSplit::NotTarget => run_command(world, path, None),
-                // The entry came from CurrentPaletteEntries, already built against a valid
-                // target, so this shouldn't happen — but if the label went stale this frame,
-                // do nothing rather than run the command with no target (the original bug).
-                TargetSplit::Unresolved => {}
-            }
+        EntryOutcome::Run => run_command(world, committed_path(&entry.key), None),
+        EntryOutcome::RunTarget { root, target } => {
+            run_command(world, root.clone(), Some(*target));
         }
         EntryOutcome::Submenu(_) | EntryOutcome::PickTarget { .. } => {
             let mut state = world.resource_mut::<CommandPaletteState>();
@@ -520,33 +491,36 @@ pub fn resolve_letter_target(world: &World, letter: char) -> Option<Target> {
     }
 }
 
-/// Directly execute a full space-separated command path (e.g. `"w a A"`),
-/// bypassing the keyboard/click UI entirely — for programmatic driving such
-/// as a headless scripting harness. If the path's last token is a target
-/// letter for a `PickTarget` node, it's resolved via `resolve_letter_target`
-/// and passed as the invocation's target; otherwise the whole path must
-/// already resolve to `Run`. Returns `false` if the path doesn't resolve to a
+/// Directly execute a full space-separated command path (e.g. `"w a A"`), bypassing the
+/// keyboard/click UI entirely — for programmatic driving such as a headless scripting harness.
+/// If the path's stem resolves to a `PickTarget` node, the last token is looked up against the
+/// *actual* entries `compute_entries` would show interactively (the same ones a player would
+/// pick from), so this can never resolve a target differently than the UI does. Otherwise the
+/// whole path must already resolve to `Run`. Returns `false` if the path doesn't resolve to a
 /// runnable command (in which case nothing happens).
 pub fn execute_path_string(world: &mut World, input: &str) -> bool {
     let path = committed_path(input);
     if path.is_empty() {
         return false;
     }
-    match split_and_resolve_target(world, &path) {
-        TargetSplit::Resolved(stem, target) => {
-            run_command(world, stem, Some(target));
-            true
-        }
-        TargetSplit::Unresolved => false,
-        TargetSplit::NotTarget => {
-            if matches!(resolve_outcome(world, &path), Some(EntryOutcome::Run)) {
-                run_command(world, path, None);
-                true
-            } else {
-                false
-            }
-        }
+    if path.len() >= 2
+        && let Some(EntryOutcome::PickTarget { .. }) = resolve_outcome(world, &path[..path.len() - 1])
+    {
+        let stem = &path[..path.len() - 1];
+        let full_key = path.join(" ");
+        let Some(EntryOutcome::RunTarget { root, target }) =
+            compute_entries(world, stem).into_iter().find(|e| e.key == full_key).map(|e| e.outcome)
+        else {
+            return false;
+        };
+        run_command(world, root, Some(target));
+        return true;
     }
+    if matches!(resolve_outcome(world, &path), Some(EntryOutcome::Run)) {
+        run_command(world, path, None);
+        return true;
+    }
+    false
 }
 
 /// Escape: close the palette and discard whatever was typed.
@@ -592,12 +566,11 @@ pub fn open_palette_on_keypress(
         state.selected_idx = 0;
         return;
     }
-    let Some(key) = keyboard.get_just_pressed().find(|k| matches!(k, Key::Character(_))).cloned()
-    else {
+    let Some((key, ch)) = keyboard.get_just_pressed().find_map(|k| {
+        if let Key::Character(s) = k { s.chars().next().map(|c| (k.clone(), c)) } else { None }
+    }) else {
         return;
     };
-    let Key::Character(ref s) = key else { unreachable!() };
-    let Some(ch) = s.chars().next() else { return };
     keyboard.clear_just_pressed(key);
 
     if let Some(entity) = labels.entity_for_letter(ch)
@@ -736,22 +709,19 @@ mod tests {
         app
     }
 
-    /// Regression test: selecting a target-entry built the way `build_target_entries` builds
-    /// them (`outcome: EntryOutcome::Run`, with the target letter only in `key`'s text, not in
-    /// `outcome`) must still dispatch the resolved `Target` to the handler — not silently drop
-    /// it. This is exactly the path `handle_palette_keyboard` takes for typed-letter and
+    /// Regression test: selecting a real target-entry (as `build_target_entries` produces,
+    /// `outcome: EntryOutcome::RunTarget`) must dispatch its carried `Target` to the handler.
+    /// This is exactly the path `handle_palette_keyboard` takes for typed-letter and
     /// arrow+Enter selection, and `palette_system` takes for a clicked row.
     #[test]
     fn select_entry_on_target_entry_resolves_and_dispatches_target() {
         let loc = Vec2::new(42.0, 7.0);
         let mut app = make_pick_target_app(loc);
 
-        let entry = PaletteEntry {
-            key: "g h".to_string(),
-            description: "Go to location h".to_string(),
-            icon: None,
-            outcome: EntryOutcome::Run,
-        };
+        // Use the real entry `compute_entries` (== `build_target_entries`) produces, the same
+        // one the interactive UI would show and select from — not a hand-built stand-in.
+        let entries = compute_entries(app.world_mut(), &["g".to_string()]);
+        let entry = entries.into_iter().find(|e| e.key == "g h").expect("g h should be a candidate");
         select_entry(app.world_mut(), &entry);
 
         let recorded = app.world().resource::<Recorded>();

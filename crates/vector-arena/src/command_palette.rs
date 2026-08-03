@@ -138,7 +138,8 @@ pub fn palette_system(
 
             for entry in &entries.0 {
                 let is_selected = entry.key == selected_key;
-                let is_complete = matches!(entry.outcome, EntryOutcome::Run);
+                let is_complete =
+                    matches!(entry.outcome, EntryOutcome::Run | EntryOutcome::RunTarget { .. });
                 let row_size = egui::vec2(ui.available_width(), row_height);
                 let (row_rect, _) = ui.allocate_exact_size(row_size, egui::Sense::hover());
 
@@ -172,11 +173,10 @@ pub fn palette_system(
 
                 child.label(palette_row_label(&entry.key, &entry.description, is_complete, is_selected));
 
-                let (hovered, clicked) = ui.input(|inp| {
-                    let in_row = inp.pointer.hover_pos().is_some_and(|p| row_rect.contains(p));
-                    (in_row, in_row && inp.pointer.button_clicked(PointerButton::Primary))
+                let clicked = ui.input(|inp| {
+                    inp.pointer.hover_pos().is_some_and(|p| row_rect.contains(p))
+                        && inp.pointer.button_clicked(PointerButton::Primary)
                 });
-                let _ = hovered;
                 if clicked {
                     clicked_entry = Some(entry.clone());
                 }

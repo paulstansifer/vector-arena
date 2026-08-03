@@ -62,10 +62,7 @@ pub fn compute_goto_assignments(
     };
     let player_pos = player_transform.translation.truncate();
 
-    let is_explored = |p: Vec2| {
-        use geo::Contains;
-        !exploration_state.0.contains(&geo::Point::new(p.x, p.y))
-    };
+    let is_explored = |p: Vec2| exploration_state.is_explored(p);
 
     use rogue_angles::palette::{
         DIR_DOWN, DIR_DOWN_LEFT, DIR_DOWN_RIGHT, DIR_LEFT, DIR_RIGHT, DIR_UP, DIR_UP_LEFT,
@@ -101,13 +98,15 @@ pub fn compute_goto_assignments(
     let item_points =
         item_query.iter().map(|tf| tf.translation.truncate()).filter(|&p| is_explored(p));
     let mut candidates: Vec<Vec2> = map_points.chain(item_points).collect();
+    // Only relative order matters, so compare squared distance and skip the sqrt — this runs
+    // unconditionally every frame (not just while the palette is open).
     candidates.sort_by(|a, b| {
         player_pos
-            .distance(*a)
-            .partial_cmp(&player_pos.distance(*b))
+            .distance_squared(*a)
+            .partial_cmp(&player_pos.distance_squared(*b))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    candidates.dedup_by(|a, b| a.distance(*b) < 1.0);
+    candidates.dedup_by(|a, b| a.distance_squared(*b) < 1.0);
 
     let mut cand_iter = candidates.into_iter();
     for i in 0..26usize {

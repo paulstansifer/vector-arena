@@ -5,7 +5,7 @@
 // FOV each frame. `Opaque`/`OpaqueVertices` mark sight-blocking entities; doors use local-space
 // polygon vertices so they cast correct shadows as they swing.
 use bevy::prelude::*;
-use geo::{Intersects, Line as GeoLine, LineString, MultiPolygon, Polygon};
+use geo::{Contains, Intersects, Line as GeoLine, LineString, MultiPolygon, Polygon};
 use std::ops::Range;
 
 use crate::{
@@ -183,6 +183,14 @@ pub struct NeverExploredMeshMarker;
 
 #[derive(Resource)]
 pub struct ExplorationState(pub SafeMultiPolygon);
+
+impl ExplorationState {
+    /// Whether `pos` has ever been seen — `self.0` is the *unexplored* (fog) region, so this
+    /// is the negation of containment. The one criterion for "has this point been explored,"
+    /// shared by anything that needs it (e.g. deciding which points get a location label, or
+    /// which of those labels stay selectable) rather than each caller re-deriving it.
+    pub fn is_explored(&self, pos: Vec2) -> bool { !self.0.contains(&geo::Point::new(pos.x, pos.y)) }
+}
 
 #[derive(Resource)]
 pub struct CurrentFovState(pub SafeMultiPolygon);
