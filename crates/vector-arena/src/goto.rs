@@ -9,6 +9,7 @@ use bevy_landmass::prelude::*;
 use rogue_angles::{
     dungeon::terrain::PointsOfInterest,
     fov::ExplorationState,
+    hud::world_to_screen_pos,
     palette::{
         CommandInvocation, CommandPaletteState, CommandPaletteWatchesClicks, EntryOutcome,
         LocationDescriptions, LocationLabels, PaletteCommand, PaletteRegistry, Target,
@@ -143,17 +144,9 @@ pub fn render_goto_markers(
 
     for (i, opt_pos) in location_labels.slots.iter().enumerate() {
         let Some(pos) = opt_pos else { continue };
-        let world_pos = pos.extend(0.0);
-        let viewport_pos = match camera.world_to_viewport(camera_transform, world_pos) {
-            Ok(vp) => vp,
-            Err(_) => continue,
-        };
-
-        if viewport_pos.x < 0.0 || viewport_pos.y < 0.0 {
+        let Some(screen_pos) = world_to_screen_pos(camera, camera_transform, pos.extend(0.0)) else {
             continue;
-        }
-
-        let screen_pos = egui::Pos2::new(viewport_pos.x, viewport_pos.y);
+        };
         let radius = 10.0;
         let circle_color = egui::Color32::from_rgba_unmultiplied(100, 150, 255, 150);
 

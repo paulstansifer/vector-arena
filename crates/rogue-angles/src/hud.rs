@@ -196,6 +196,21 @@ fn draw_cooldown_arc(painter: egui::Painter, rect: egui::Rect, fraction: f32) {
     }));
 }
 
+/// Projects `world_pos` through `camera` into an egui screen position ready to draw an overlay
+/// marker/label at — `None` if the point is behind the camera, or lands off the top/left of the
+/// viewport (a negative coordinate; bevy's projection doesn't itself distinguish "off-screen"
+/// from "valid but negative," so overlays that don't want to draw off-canvas need this check).
+/// The common shape behind "draw a marker over this world entity" — every such overlay in this
+/// kind of game ends up wanting a screen position, not a raw `Vec2`.
+pub fn world_to_screen_pos(
+    camera: &Camera,
+    camera_transform: &GlobalTransform,
+    world_pos: Vec3,
+) -> Option<egui::Pos2> {
+    let vp = camera.world_to_viewport(camera_transform, world_pos).ok()?;
+    (vp.x >= 0.0 && vp.y >= 0.0).then(|| egui::Pos2::new(vp.x, vp.y))
+}
+
 /// Shows a floating tooltip near the cursor for any `WorldTooltip`-carrying entity within
 /// `hover_distance` of the mouse's world position — and currently visible per
 /// `fov::CurrentFovState`, if present. Skips entirely if there's no window, camera, or cursor.

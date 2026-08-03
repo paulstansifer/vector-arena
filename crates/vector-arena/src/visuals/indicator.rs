@@ -6,7 +6,10 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
-use rogue_angles::fov::{CurrentFovState, is_currently_visible};
+use rogue_angles::{
+    fov::{CurrentFovState, is_currently_visible},
+    hud::world_to_screen_pos,
+};
 
 #[derive(Component)]
 pub struct StateIndicator {
@@ -50,16 +53,13 @@ pub fn render_state_indicators(
         if !is_currently_visible(current_fov.as_deref(), pos) {
             continue;
         }
-        let Ok(viewport_pos) = camera.world_to_viewport(camera_transform, transform.translation)
+        let Some(mut screen_pos) = world_to_screen_pos(camera, camera_transform, transform.translation)
         else {
             continue;
         };
-        if viewport_pos.x < 0.0 || viewport_pos.y < 0.0 {
-            continue;
-        }
+        screen_pos.y -= 18.0; // draw above the entity, not on top of it
         // Fade out over the last half-second:
         let alpha = (indicator.timer / 0.5).clamp(0.0, 1.0);
-        let screen_pos = egui::Pos2::new(viewport_pos.x, viewport_pos.y - 18.0);
         painter.text(
             screen_pos,
             egui::Align2::CENTER_CENTER,

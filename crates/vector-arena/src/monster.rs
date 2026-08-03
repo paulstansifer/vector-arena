@@ -13,7 +13,7 @@ use bevy_egui::egui;
 use rogue_angles::{
     dungeon::terrain::{DungeonState, random_near},
     fov::{CurrentFovState, is_currently_visible},
-    hud::WorldTooltip,
+    hud::{WorldTooltip, world_to_screen_pos},
     palette::{CommandPaletteState, EntityLabels, TargetDescription, Targetable},
 };
 
@@ -353,14 +353,10 @@ pub fn render_monster_markers(
         if !is_currently_visible(current_fov.as_deref(), pos) {
             continue;
         }
-        let Ok(viewport_pos) = camera.world_to_viewport(camera_transform, transform.translation)
+        let Some(screen_pos) = world_to_screen_pos(camera, camera_transform, transform.translation)
         else {
             continue;
         };
-        if viewport_pos.x < 0.0 || viewport_pos.y < 0.0 {
-            continue;
-        }
-        let screen_pos = egui::Pos2::new(viewport_pos.x, viewport_pos.y);
         painter.circle_filled(
             screen_pos,
             10.0,
