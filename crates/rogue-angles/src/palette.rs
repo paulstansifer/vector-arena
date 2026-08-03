@@ -13,7 +13,6 @@
 use std::collections::HashMap;
 
 use bevy::{ecs::system::SystemId, input::keyboard::Key, prelude::*};
-use geo::Contains;
 
 use crate::fov::{CurrentFovState, ExplorationState};
 
@@ -270,9 +269,7 @@ pub struct CurrentPaletteEntries(pub Vec<PaletteEntry>);
 fn committed_path(input: &str) -> PalettePath { input.split_whitespace().map(String::from).collect() }
 
 fn is_in_fov(world: &World, pos: Vec2) -> bool {
-    world
-        .get_resource::<CurrentFovState>()
-        .is_none_or(|fov| fov.0.contains(&geo::Point::new(pos.x, pos.y)))
+    crate::fov::is_currently_visible(world.get_resource::<CurrentFovState>(), pos)
 }
 
 /// Whether `pos` has ever been seen, per `ExplorationState::is_explored` — the same criterion

@@ -8,9 +8,8 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiGlobalSettings, egui};
-use geo::Contains;
 
-use crate::fov::CurrentFovState;
+use crate::fov::{CurrentFovState, is_currently_visible};
 
 const BAR_ROUNDING: u8 = 3;
 
@@ -231,9 +230,7 @@ pub fn show_world_entity_tooltip(
     for (transform, tooltip) in entity_query.iter() {
         let pos = transform.translation.truncate();
         if pos.distance(world_pos) < hover_distance {
-            if let Some(ref fov) = current_fov
-                && !fov.0.contains(&geo::Point::new(pos.x, pos.y))
-            {
+            if !is_currently_visible(current_fov.as_deref(), pos) {
                 continue;
             }
             make_egui_tooltip(ctx, egui::Id::new(("world_tooltip", tooltip.0.as_str())), mouse_pos, |ui| {

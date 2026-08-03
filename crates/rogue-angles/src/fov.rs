@@ -195,6 +195,21 @@ impl ExplorationState {
 #[derive(Resource)]
 pub struct CurrentFovState(pub SafeMultiPolygon);
 
+impl CurrentFovState {
+    /// Whether `pos` is inside the player's *current* field of view — unlike
+    /// `ExplorationState::is_explored`, this is momentary: it says nothing about whether the
+    /// point has ever been seen before or since. The one containment check shared by anything
+    /// that needs to know "is this world point currently visible" (world tooltips, on-screen
+    /// entity markers, the palette's target list) rather than each caller re-deriving it.
+    pub fn is_visible(&self, pos: Vec2) -> bool { self.0.contains(&geo::Point::new(pos.x, pos.y)) }
+}
+
+/// `current_fov` absent (e.g. FOV not wired up, headless/test contexts) is treated as "nothing
+/// is hidden" — permissive by default, matching `is_in_fov`/`is_explored`'s existing fallback.
+pub fn is_currently_visible(current_fov: Option<&CurrentFovState>, pos: Vec2) -> bool {
+    current_fov.is_none_or(|fov| fov.is_visible(pos))
+}
+
 pub fn spawn_fov_meshes(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,

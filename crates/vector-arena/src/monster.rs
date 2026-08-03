@@ -6,13 +6,13 @@ use rogue_angles::util::safegeo::SafeMultiPolygon;
 use avian2d::prelude::LinearVelocity;
 use bevy::prelude::*;
 use bevy_landmass::prelude::*;
-use geo::{Contains, Intersects};
+use geo::Intersects;
 
 use bevy_egui::egui;
 
 use rogue_angles::{
     dungeon::terrain::{DungeonState, random_near},
-    fov::CurrentFovState,
+    fov::{CurrentFovState, is_currently_visible},
     hud::WorldTooltip,
     palette::{CommandPaletteState, EntityLabels, TargetDescription, Targetable},
 };
@@ -350,9 +350,7 @@ pub fn render_monster_markers(
     for (entity, transform) in monster_query.iter() {
         let Some(letter) = labels.letter_for(entity) else { continue };
         let pos = transform.translation.truncate();
-        if let Some(ref fov) = current_fov
-            && !fov.0.contains(&geo::Point::new(pos.x, pos.y))
-        {
+        if !is_currently_visible(current_fov.as_deref(), pos) {
             continue;
         }
         let Ok(viewport_pos) = camera.world_to_viewport(camera_transform, transform.translation)

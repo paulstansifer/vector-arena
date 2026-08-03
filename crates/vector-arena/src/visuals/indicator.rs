@@ -6,8 +6,7 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
-use rogue_angles::fov::CurrentFovState;
-use geo::Contains;
+use rogue_angles::fov::{CurrentFovState, is_currently_visible};
 
 #[derive(Component)]
 pub struct StateIndicator {
@@ -48,9 +47,7 @@ pub fn render_state_indicators(
 
     for (transform, indicator) in query.iter() {
         let pos = transform.translation.truncate();
-        if let Some(ref fov) = current_fov
-            && !fov.0.contains(&geo::Point::new(pos.x, pos.y))
-        {
+        if !is_currently_visible(current_fov.as_deref(), pos) {
             continue;
         }
         let Ok(viewport_pos) = camera.world_to_viewport(camera_transform, transform.translation)
