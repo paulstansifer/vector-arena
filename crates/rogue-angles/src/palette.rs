@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use bevy::{ecs::system::SystemId, input::keyboard::Key, prelude::*};
 use geo::Contains;
 
-use crate::fov::CurrentFovState;
+use crate::fov::{CurrentFovState, ExplorationState};
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 
@@ -265,6 +265,17 @@ fn is_in_fov(world: &World, pos: Vec2) -> bool {
         .is_none_or(|fov| fov.0.contains(&geo::Point::new(pos.x, pos.y)))
 }
 
+/// Whether `pos` has ever been seen, per `ExplorationState` (the same criterion
+/// `compute_goto_assignments`-style policy code uses to decide which points get a location
+/// letter in the first place — `LocationLabels` entries are static points, not mobile like
+/// `Targetable` entities, so once explored they stay selectable even when no longer in the
+/// player's *current* FOV; requiring both would defeat the point of a remembered waypoint).
+fn is_explored(world: &World, pos: Vec2) -> bool {
+    world
+        .get_resource::<ExplorationState>()
+        .is_none_or(|exp| !exp.0.contains(&geo::Point::new(pos.x, pos.y)))
+}
+
 fn build_target_entries(
     world: &mut World,
     prefix: &str,
@@ -300,7 +311,7 @@ fn build_target_entries(
         let slots = loc_labels.slots;
         for (i, opt_pos) in slots.iter().enumerate() {
             let Some(pos) = opt_pos else { continue };
-            if !is_in_fov(world, *pos) {
+            if !is_explored(world, *pos) {
                 continue;
             }
             let letter = (b'a' + i as u8) as char;
@@ -551,8 +562,20 @@ pub fn close_on_escape(keyboard: Res<ButtonInput<KeyCode>>, mut state: ResMut<Co
 /// (instant commands like "." fire immediately; everything else opens with
 /// that key typed), or on a `Targetable` entity's bare letter (runs
 /// `DefaultEntityAction`, if the game set one).
+///
+/// Clears whatever key it acts on from `just_pressed` before returning. Without that,
+/// `handle_palette_keyboard` — which runs later this same frame, per Bevy's documented
+/// multiple-systems-reading-the-same-`just_pressed` caveat — would see the identical keypress
+/// again and process it a second time as if it had just been typed into the freshly-opened
+/// palette. Concretely: opening on "g" seeds `input = "g "`; without clearing, the same "g"
+/// keystroke then reads as `typed_char = 'g'` too, producing candidate key "g g" — which,
+/// whenever the letter 'g' itself happens to be an assigned (now-selectable) target, silently
+/// self-selects and runs the command immediately, closing the palette before the player typed
+/// anything else. The player's next real keystroke then lands on a freshly-closed palette and
+/// is processed as a brand new top-level keypress instead of the second letter of what they
+/// meant to type.
 pub fn open_palette_on_keypress(
-    keyboard: Res<ButtonInput<Key>>,
+    mut keyboard: ResMut<ButtonInput<Key>>,
     mut state: ResMut<CommandPaletteState>,
     registry: Res<PaletteRegistry>,
     labels: Res<EntityLabels>,
@@ -563,16 +586,20 @@ pub fn open_palette_on_keypress(
         return;
     }
     if keyboard.just_pressed(Key::Space) {
+        keyboard.clear_just_pressed(Key::Space);
         state.open = true;
         state.input.clear();
         state.selected_idx = 0;
         return;
     }
-    let Some(ch) = keyboard.get_just_pressed().find_map(|k| {
-        if let Key::Character(s) = k { s.chars().next() } else { None }
-    }) else {
+    let Some(key) = keyboard.get_just_pressed().find(|k| matches!(k, Key::Character(_))).cloned()
+    else {
         return;
     };
+    let Key::Character(ref s) = key else { unreachable!() };
+    let Some(ch) = s.chars().next() else { return };
+    keyboard.clear_just_pressed(key);
+
     if let Some(entity) = labels.entity_for_letter(ch)
         && let Some(default_key) = default_action.0.clone()
     {
@@ -693,6 +720,7 @@ mod tests {
         app.init_resource::<Recorded>();
         app.init_resource::<CommandPaletteState>();
         app.init_resource::<LocationLabels>();
+        app.init_resource::<LocationDescriptions>();
         app.init_resource::<EntityLabels>();
         app.init_resource::<PaletteRegistry>();
 
@@ -761,5 +789,85 @@ mod tests {
         let ran = execute_path_string(app.world_mut(), "g z");
         assert!(!ran);
         assert_eq!(app.world().resource::<Recorded>().0, None, "handler should not have run");
+    }
+
+    /// Regression test: `LocationLabels` entries (static, remembered points) must stay
+    /// selectable once explored even after the player looks away — unlike `Targetable`
+    /// entities, which do need to be currently in FOV since they can move. Before the fix,
+    /// `build_target_entries` gated *both* on `CurrentFovState`, so a location dropped out of
+    /// the palette's candidate list the moment it left the player's current view, even though
+    /// `LocationLabels` itself (assigned by exploration, not current visibility) still had it.
+    #[test]
+    fn build_target_entries_includes_explored_but_out_of_current_fov_location() {
+        use crate::util::safegeo::SafeMultiPolygon;
+
+        let loc = Vec2::new(42.0, 7.0);
+        let mut app = make_pick_target_app(loc);
+        // Nothing is currently visible...
+        app.insert_resource(CurrentFovState(SafeMultiPolygon::empty()));
+        // ...but nothing is unexplored either (i.e. everything has been seen at some point).
+        app.insert_resource(ExplorationState(SafeMultiPolygon::empty()));
+
+        let entries = compute_entries(app.world_mut(), &["g".to_string()]);
+        assert!(
+            entries.iter().any(|e| e.key == "g h"),
+            "an explored-but-not-currently-visible location should still be a selectable entry, got {:?}",
+            entries.iter().map(|e| &e.key).collect::<Vec<_>>()
+        );
+    }
+
+    /// Regression test for the interactive keyboard path specifically (not `select_entry` or
+    /// `execute_path_string` directly, both already covered above): opening the palette on a
+    /// command letter that also happens to be an assigned, selectable location letter (e.g.
+    /// "g" the command colliding with location letter "g") must only seed the input — it must
+    /// not *also* immediately self-select and run that location as the target. Before the fix,
+    /// `open_palette_on_keypress` and `handle_palette_keyboard` both read the same "just
+    /// pressed" keystroke in the same frame (Bevy's documented multiple-systems caveat), so the
+    /// opening keystroke was silently reprocessed as if it were the *next* keystroke too.
+    #[test]
+    fn opening_palette_does_not_self_select_a_colliding_letter() {
+        let loc = Vec2::new(5.0, 5.0);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Recorded>();
+        app.init_resource::<CommandPaletteState>();
+        app.init_resource::<LocationLabels>();
+        app.init_resource::<EntityLabels>();
+        app.init_resource::<PaletteRegistry>();
+        app.init_resource::<DefaultEntityAction>();
+        app.init_resource::<CurrentPaletteEntries>();
+        app.init_resource::<LocationDescriptions>();
+        app.insert_resource(ButtonInput::<Key>::default());
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        let handler = app.world_mut().register_system(record_invocation);
+        // Location letter "g" collides with the command's own key "g".
+        app.world_mut().resource_mut::<LocationLabels>().slots[(b'g' - b'a') as usize] = Some(loc);
+        app.world_mut().resource_mut::<PaletteRegistry>().commands.push(PaletteCommand {
+            key: "g".to_string(),
+            description: "Go to".to_string(),
+            icon: None,
+            outcome: EntryOutcome::PickTarget { verb: "Go to".to_string(), filter: TargetFilter::Any },
+            handler,
+        });
+
+        app.add_systems(
+            Update,
+            (open_palette_on_keypress, update_palette_entries, handle_palette_keyboard).chain(),
+        );
+
+        app.world_mut().resource_mut::<ButtonInput<Key>>().press(Key::Character("g".into()));
+        app.update();
+
+        let state = app.world().resource::<CommandPaletteState>();
+        assert_eq!(state.input, "g ", "the opening keystroke should only seed the input");
+        assert!(state.open, "palette should still be open, awaiting the target letter");
+
+        let recorded = app.world().resource::<Recorded>();
+        assert_eq!(
+            recorded.0, None,
+            "the command handler must not have run yet from the single opening keystroke"
+        );
     }
 }
