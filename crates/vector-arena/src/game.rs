@@ -430,7 +430,7 @@ impl Plugin for GamePlugin {
                 Update,
                 directional_move_system
                     .after(nav::apply_nav_velocity)
-                    .after(palette::open_palette_on_keypress),
+                    .after(palette::handle_palette_keyboard),
             )
             .add_systems(Update, rotate_player_to_velocity.after(move_player))
             .add_systems(Update, advance_exploration.after(move_player))

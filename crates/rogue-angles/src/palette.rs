@@ -12,7 +12,11 @@
 // below plus `submit_click_target` / `select_entry` for click-driven input.
 use std::collections::HashMap;
 
-use bevy::{ecs::system::SystemId, input::keyboard::Key, prelude::*};
+use bevy::{
+    ecs::system::SystemId,
+    input::{ButtonState, keyboard::{Key, KeyboardInput}},
+    prelude::*,
+};
 
 use crate::fov::{CurrentFovState, ExplorationState};
 
@@ -529,147 +533,161 @@ pub fn close_on_escape(keyboard: Res<ButtonInput<KeyCode>>, mut state: ResMut<Co
     }
 }
 
-/// Opens the palette on Space (empty), on a registered root command's key
-/// (instant commands like "." fire immediately; everything else opens with
-/// that key typed), or on a `Targetable` entity's bare letter (runs
-/// `DefaultEntityAction`, if the game set one).
-///
-/// Clears whatever key it acts on from `just_pressed` before returning. Without that,
-/// `handle_palette_keyboard` — which runs later this same frame, per Bevy's documented
-/// multiple-systems-reading-the-same-`just_pressed` caveat — would see the identical keypress
-/// again and process it a second time as if it had just been typed into the freshly-opened
-/// palette. Concretely: opening on "g" seeds `input = "g "`; without clearing, the same "g"
-/// keystroke then reads as `typed_char = 'g'` too, producing candidate key "g g" — which,
-/// whenever the letter 'g' itself happens to be an assigned (now-selectable) target, silently
-/// self-selects and runs the command immediately, closing the palette before the player typed
-/// anything else. The player's next real keystroke then lands on a freshly-closed palette and
-/// is processed as a brand new top-level keypress instead of the second letter of what they
-/// meant to type.
-pub fn open_palette_on_keypress(
-    mut keyboard: ResMut<ButtonInput<Key>>,
-    mut state: ResMut<CommandPaletteState>,
-    registry: Res<PaletteRegistry>,
-    labels: Res<EntityLabels>,
-    default_action: Res<DefaultEntityAction>,
-    mut commands: Commands,
-) {
-    if state.open {
-        return;
-    }
-    if keyboard.just_pressed(Key::Space) {
-        keyboard.clear_just_pressed(Key::Space);
-        state.open = true;
-        state.input.clear();
-        state.selected_idx = 0;
-        return;
-    }
-    let Some((key, ch)) = keyboard.get_just_pressed().find_map(|k| {
-        if let Key::Character(s) = k { s.chars().next().map(|c| (k.clone(), c)) } else { None }
-    }) else {
-        return;
-    };
-    keyboard.clear_just_pressed(key);
-
-    if let Some(entity) = labels.entity_for_letter(ch)
-        && let Some(default_key) = default_action.0.clone()
-    {
-        commands.queue(move |world: &mut World| {
-            run_command(world, vec![default_key], Some(Target::Entity(entity)));
-        });
-        return;
-    }
-    if let Some(cmd) = registry.commands.iter().find(|c| c.key == ch.to_string()) {
-        if matches!(cmd.outcome, EntryOutcome::Run) {
-            let key = cmd.key.clone();
-            commands.queue(move |world: &mut World| {
-                run_command(world, vec![key], None);
-            });
-        } else {
-            state.open = true;
-            state.input = format!("{ch} ");
-            state.selected_idx = 0;
-        }
-    }
+/// One relevant keystroke, in the arrival order `KeyboardInput` events carry — unlike
+/// `ButtonInput<T>`'s `just_pressed`, which is backed by a `HashSet` with no ordering guarantee.
+/// That distinction is the whole reason this type (and reading `EventReader<KeyboardInput>`
+/// instead of `ButtonInput`) exists: when two character keys are pressed within the same Bevy
+/// frame — a real occurrence under a frame hitch or just fast typing — `ButtonInput` has already
+/// destroyed which one came first by the time a system reads it. Concretely, typing "g" then "h"
+/// in the same frame used to sometimes have `find_map` over `get_just_pressed()` see "h" before
+/// "g": "h" isn't a registered root command, so it was silently discarded, and "g" alone survived
+/// to open the palette a frame late with nothing left to complete it — reproducing the reported
+/// "'g h' behaves like just tapping 'h'" bug. Reading the ordered event stream instead means "g"
+/// is always processed (opening the palette) before "h" is processed (completing it).
+#[derive(Clone, Copy)]
+enum PaletteKey {
+    Space,
+    Char(char),
+    Up,
+    Down,
+    Enter,
+    Backspace,
 }
 
-/// Typing, backspace, arrow navigation, and Enter — the palette's keyboard
-/// state machine. Typing a character that exactly names one of
-/// `CurrentPaletteEntries` (computed from the input as of frame start, i.e.
-/// before this keystroke) auto-selects it immediately — matching the "type
-/// the whole thing, no Enter needed" feel the single-character-token grammar
-/// is built around. Enter does the same for whatever's currently typed/typed
-/// via arrow navigation.
-pub fn handle_palette_keyboard(
-    keyboard: Res<ButtonInput<Key>>,
-    keyboard_codes: Res<ButtonInput<KeyCode>>,
-    entries: Res<CurrentPaletteEntries>,
-    mut commands: Commands,
-) {
-    let up = keyboard_codes.just_pressed(KeyCode::ArrowUp);
-    let down = keyboard_codes.just_pressed(KeyCode::ArrowDown);
-    let enter = keyboard_codes.just_pressed(KeyCode::Enter);
-    let backspace = keyboard_codes.just_pressed(KeyCode::Backspace);
-    let typed_char = keyboard
-        .get_just_pressed()
-        .find_map(|k| if let Key::Character(s) = k { s.chars().next() } else { None });
+/// Typing, backspace, arrow navigation, and Enter — the palette's entire keyboard state machine,
+/// including opening it. (A single system, not the previous open/type split, because a same-frame
+/// sequence like "g" then "h" needs the "g" event's `state.open` transition to be visible to the
+/// "h" event processed right after it — two separate systems can't do that without also relying on
+/// `ButtonInput`'s unordered `just_pressed`, which is the bug this replaced.)
+///
+/// Every event is resolved against freshly recomputed entries (`compute_entries`), not the
+/// once-per-frame `CurrentPaletteEntries` snapshot `update_palette_entries` produces for
+/// rendering — that snapshot is stale for a second keystroke landing in the same frame.
+pub fn handle_palette_keyboard(mut key_events: MessageReader<KeyboardInput>, mut commands: Commands) {
+    let ordered: Vec<PaletteKey> = key_events
+        .read()
+        .filter(|e| e.state == ButtonState::Pressed && !e.repeat)
+        .filter_map(|e| match &e.logical_key {
+            Key::Space => Some(PaletteKey::Space),
+            Key::Character(s) => s.chars().next().map(PaletteKey::Char),
+            Key::ArrowUp => Some(PaletteKey::Up),
+            Key::ArrowDown => Some(PaletteKey::Down),
+            Key::Enter => Some(PaletteKey::Enter),
+            Key::Backspace => Some(PaletteKey::Backspace),
+            _ => None,
+        })
+        .collect();
+    if ordered.is_empty() {
+        return;
+    }
+    commands.queue(move |world: &mut World| {
+        for key in ordered {
+            handle_one_palette_key(world, key);
+        }
+    });
+}
 
-    if !up && !down && !enter && !backspace && typed_char.is_none() {
+/// Opens the palette on Space (empty), on a `Targetable` entity's bare letter (runs
+/// `DefaultEntityAction`, if the game set one), or on a registered root command's key (instant
+/// commands like "." fire immediately; everything else opens with that key typed). While open:
+/// typing a character that exactly names one of the current entries auto-selects it immediately
+/// — matching the "type the whole thing, no Enter needed" feel the single-character-token grammar
+/// is built around. Enter does the same for whatever's currently typed or reached via arrow nav.
+fn handle_one_palette_key(world: &mut World, key: PaletteKey) {
+    if !world.resource::<CommandPaletteState>().open {
+        match key {
+            PaletteKey::Space => {
+                let mut state = world.resource_mut::<CommandPaletteState>();
+                state.open = true;
+                state.input.clear();
+                state.selected_idx = 0;
+            }
+            PaletteKey::Char(ch) => open_palette_for_char(world, ch),
+            PaletteKey::Up | PaletteKey::Down | PaletteKey::Enter | PaletteKey::Backspace => {}
+        }
         return;
     }
 
-    let entries = entries.0.clone();
-    commands.queue(move |world: &mut World| {
-        if !world.resource::<CommandPaletteState>().open {
-            return;
-        }
-        let n = entries.len();
-
-        if up || down {
+    match key {
+        PaletteKey::Space => {}
+        PaletteKey::Up | PaletteKey::Down => {
+            let committed = committed_path(&world.resource::<CommandPaletteState>().input);
+            let entries = compute_entries(world, &committed);
+            let n = entries.len();
             if n == 0 {
                 return;
             }
             let current_key = world.resource::<CommandPaletteState>().input.trim().to_string();
             let current = entries.iter().position(|e| e.key == current_key).unwrap_or(0);
-            let next = if down { (current + 1) % n } else { (current + n - 1) % n };
+            let next =
+                if matches!(key, PaletteKey::Down) { (current + 1) % n } else { (current + n - 1) % n };
             let mut state = world.resource_mut::<CommandPaletteState>();
             state.input = entries[next].key.clone();
             state.selected_idx = next;
-            return;
         }
-
-        if backspace {
+        PaletteKey::Backspace => {
             let mut state = world.resource_mut::<CommandPaletteState>();
             state.input.pop();
             if state.input.ends_with(' ') {
                 state.input.pop();
             }
-            return;
         }
-
-        if enter {
+        PaletteKey::Enter => {
+            let committed = committed_path(&world.resource::<CommandPaletteState>().input);
+            let entries = compute_entries(world, &committed);
             let current_key = world.resource::<CommandPaletteState>().input.trim().to_string();
-            if let Some(entry) = entries.iter().find(|e| e.key == current_key).cloned() {
+            if let Some(entry) = entries.into_iter().find(|e| e.key == current_key) {
                 select_entry(world, &entry);
             }
-            return;
         }
-
-        if let Some(ch) = typed_char {
-            let committed = committed_path(&world.resource::<CommandPaletteState>().input);
+        PaletteKey::Char(ch) => {
+            let input = world.resource::<CommandPaletteState>().input.clone();
+            let committed = committed_path(&input);
             let candidate_key = if committed.is_empty() {
                 ch.to_string()
             } else {
                 format!("{} {ch}", committed.join(" "))
             };
-            if let Some(entry) = entries.iter().find(|e| e.key == candidate_key).cloned() {
+            let entries = compute_entries(world, &committed);
+            if let Some(entry) = entries.into_iter().find(|e| e.key == candidate_key) {
                 select_entry(world, &entry);
             }
         }
-    });
+    }
+}
+
+fn open_palette_for_char(world: &mut World, ch: char) {
+    let entity = world.resource::<EntityLabels>().entity_for_letter(ch);
+    if let Some(entity) = entity {
+        let default_key = world.resource::<DefaultEntityAction>().0.clone();
+        if let Some(default_key) = default_key {
+            run_command(world, vec![default_key], Some(Target::Entity(entity)));
+            return;
+        }
+    }
+
+    let matched = world
+        .resource::<PaletteRegistry>()
+        .commands
+        .iter()
+        .find(|c| c.key == ch.to_string())
+        .map(|c| (c.key.clone(), matches!(c.outcome, EntryOutcome::Run)));
+    let Some((key, is_run)) = matched else { return };
+
+    if is_run {
+        run_command(world, vec![key], None);
+    } else {
+        let mut state = world.resource_mut::<CommandPaletteState>();
+        state.open = true;
+        state.input = format!("{ch} ");
+        state.selected_idx = 0;
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use bevy::input::keyboard::NativeKeyCode;
+
     use super::*;
 
     /// Records the `target` the fake command's handler was invoked with. `None` at the outer
@@ -679,6 +697,24 @@ mod tests {
 
     fn record_invocation(In(invocation): In<CommandInvocation>, mut recorded: ResMut<Recorded>) {
         recorded.0 = Some(invocation.target);
+    }
+
+    /// A "key `ch` was pressed" `KeyboardInput` event. `key_code`/`text`/`window` are irrelevant
+    /// to `handle_palette_keyboard` (it only reads `logical_key` and `state`), so they're filled
+    /// with placeholders.
+    fn char_key_event(ch: char) -> KeyboardInput {
+        KeyboardInput {
+            key_code: KeyCode::Unidentified(NativeKeyCode::Unidentified),
+            logical_key: Key::Character(ch.to_string().into()),
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        }
+    }
+
+    fn send_key(app: &mut App, event: KeyboardInput) {
+        app.world_mut().resource_mut::<Messages<KeyboardInput>>().write(event);
     }
 
     /// Sets up a world with a "g" command whose outcome is `PickTarget`, and location `h`
@@ -783,20 +819,13 @@ mod tests {
         );
     }
 
-    /// Regression test for the interactive keyboard path specifically (not `select_entry` or
-    /// `execute_path_string` directly, both already covered above): opening the palette on a
-    /// command letter that also happens to be an assigned, selectable location letter (e.g.
-    /// "g" the command colliding with location letter "g") must only seed the input — it must
-    /// not *also* immediately self-select and run that location as the target. Before the fix,
-    /// `open_palette_on_keypress` and `handle_palette_keyboard` both read the same "just
-    /// pressed" keystroke in the same frame (Bevy's documented multiple-systems caveat), so the
-    /// opening keystroke was silently reprocessed as if it were the *next* keystroke too.
-    #[test]
-    fn opening_palette_does_not_self_select_a_colliding_letter() {
-        let loc = Vec2::new(5.0, 5.0);
-
+    /// Sets up a world identical to `make_pick_target_app`, but wired for the interactive
+    /// keyboard path (`handle_palette_keyboard` reading `KeyboardInput` events) instead of the
+    /// programmatic `select_entry`/`execute_path_string` paths the earlier tests exercise.
+    fn make_keyboard_app(loc: Vec2) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_message::<KeyboardInput>();
         app.init_resource::<Recorded>();
         app.init_resource::<CommandPaletteState>();
         app.init_resource::<LocationLabels>();
@@ -805,12 +834,9 @@ mod tests {
         app.init_resource::<DefaultEntityAction>();
         app.init_resource::<CurrentPaletteEntries>();
         app.init_resource::<LocationDescriptions>();
-        app.insert_resource(ButtonInput::<Key>::default());
-        app.insert_resource(ButtonInput::<KeyCode>::default());
 
         let handler = app.world_mut().register_system(record_invocation);
-        // Location letter "g" collides with the command's own key "g".
-        app.world_mut().resource_mut::<LocationLabels>().slots[(b'g' - b'a') as usize] = Some(loc);
+        app.world_mut().resource_mut::<LocationLabels>().slots[(b'h' - b'a') as usize] = Some(loc);
         app.world_mut().resource_mut::<PaletteRegistry>().commands.push(PaletteCommand {
             key: "g".to_string(),
             description: "Go to".to_string(),
@@ -819,12 +845,23 @@ mod tests {
             handler,
         });
 
-        app.add_systems(
-            Update,
-            (open_palette_on_keypress, update_palette_entries, handle_palette_keyboard).chain(),
-        );
+        app.add_systems(Update, (handle_palette_keyboard, update_palette_entries).chain());
+        app
+    }
 
-        app.world_mut().resource_mut::<ButtonInput<Key>>().press(Key::Character("g".into()));
+    /// Regression test for the interactive keyboard path specifically (not `select_entry` or
+    /// `execute_path_string` directly, both already covered above): opening the palette on a
+    /// command letter that also happens to be an assigned, selectable location letter (e.g.
+    /// "g" the command colliding with location letter "g") must only seed the input — it must
+    /// not *also* immediately self-select and run that location as the target.
+    #[test]
+    fn opening_palette_does_not_self_select_a_colliding_letter() {
+        let loc = Vec2::new(5.0, 5.0);
+        // Location letter "g" collides with the command's own key "g".
+        let mut app = make_keyboard_app(loc);
+        app.world_mut().resource_mut::<LocationLabels>().slots[(b'g' - b'a') as usize] = Some(loc);
+
+        send_key(&mut app, char_key_event('g'));
         app.update();
 
         let state = app.world().resource::<CommandPaletteState>();
@@ -836,5 +873,62 @@ mod tests {
             recorded.0, None,
             "the command handler must not have run yet from the single opening keystroke"
         );
+    }
+
+    /// Full two-keystroke sequence across two frames, matching an actual player typing "g"
+    /// then "h" with a pause in between: presses "g" in frame 1, then "h" in frame 2, and checks
+    /// the second keystroke actually navigates.
+    #[test]
+    fn typing_g_then_h_across_two_frames_navigates_to_location_h() {
+        let loc = Vec2::new(9.0, 3.0);
+        let mut app = make_keyboard_app(loc);
+
+        send_key(&mut app, char_key_event('g'));
+        app.update();
+
+        let state = app.world().resource::<CommandPaletteState>();
+        assert_eq!(state.input, "g ", "frame 1 should have opened and seeded the input");
+        assert!(state.open);
+
+        send_key(&mut app, char_key_event('h'));
+        app.update();
+
+        let recorded = app.world().resource::<Recorded>();
+        assert_eq!(
+            recorded.0,
+            Some(Some(Target::Point(loc))),
+            "typing 'h' after 'g' should navigate to location h, not act like a bare 'h' tap"
+        );
+        let state = app.world().resource::<CommandPaletteState>();
+        assert!(!state.open, "palette should have closed after the successful dispatch");
+    }
+
+    /// The actual regression this fix targets: "g" and "h" landing as two separate
+    /// `KeyboardInput` events *in the same frame* (a real occurrence — a frame hitch or fast
+    /// typing can coalesce multiple keydowns into one frame) must still be processed in arrival
+    /// order, opening on "g" and then completing with "h", rather than losing one of them. Before
+    /// the fix, both keys were read via `ButtonInput::get_just_pressed()`, backed by an unordered
+    /// `HashSet` — if "h" happened to be visited before "g", it matched no root command, was
+    /// silently discarded, and "g" alone survived to open the palette a frame late with the "h"
+    /// keystroke already lost. This is exactly the "'g h' behaves like just tapping 'h'" bug
+    /// report; reading `EventReader<KeyboardInput>` (arrival-ordered, unlike `ButtonInput`) and
+    /// processing every event from a single frame sequentially against live state fixes it.
+    #[test]
+    fn typing_g_then_h_in_the_same_frame_navigates_to_location_h() {
+        let loc = Vec2::new(11.0, -4.0);
+        let mut app = make_keyboard_app(loc);
+
+        send_key(&mut app, char_key_event('g'));
+        send_key(&mut app, char_key_event('h'));
+        app.update();
+
+        let recorded = app.world().resource::<Recorded>();
+        assert_eq!(
+            recorded.0,
+            Some(Some(Target::Point(loc))),
+            "'g' then 'h' in the same frame should navigate to location h, not act like a bare 'h' tap"
+        );
+        let state = app.world().resource::<CommandPaletteState>();
+        assert!(!state.open, "palette should have closed after the successful dispatch");
     }
 }

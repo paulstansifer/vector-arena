@@ -24,16 +24,13 @@ impl Plugin for CommandPalettePlugin {
             .init_resource::<palette::DefaultEntityAction>()
             .add_systems(Update, palette::assign_entity_labels)
             .add_systems(Update, palette::release_entity_labels)
-            .add_systems(Update, palette::open_palette_on_keypress)
             .add_systems(Update, palette::close_on_escape)
+            .add_systems(Update, palette::handle_palette_keyboard.after(palette::close_on_escape))
             .add_systems(
                 Update,
-                palette::update_palette_entries
-                    .after(palette::open_palette_on_keypress)
-                    .after(palette::close_on_escape),
+                palette::update_palette_entries.after(palette::handle_palette_keyboard),
             )
-            .add_systems(Update, palette::update_watches_clicks.after(palette::update_palette_entries))
-            .add_systems(Update, palette::handle_palette_keyboard.after(palette::update_palette_entries));
+            .add_systems(Update, palette::update_watches_clicks.after(palette::update_palette_entries));
     }
 }
 
