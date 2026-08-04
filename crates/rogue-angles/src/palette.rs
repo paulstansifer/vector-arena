@@ -603,8 +603,9 @@ fn handle_one_palette_key(world: &mut World, key: PaletteKey) {
                 state.selected_idx = 0;
             }
             PaletteKey::Char(ch) => {
-                open_palette_for_char(world, ch);
-                release_key_if_palette_closed(world, ch);
+                if open_palette_for_char(world, ch) {
+                    release_key(world, ch);
+                }
             }
             PaletteKey::Up | PaletteKey::Down | PaletteKey::Enter | PaletteKey::Backspace => {}
         }
@@ -653,20 +654,29 @@ fn handle_one_palette_key(world: &mut World, key: PaletteKey) {
             };
             let entries = compute_entries(world, &committed);
             if let Some(entry) = entries.into_iter().find(|e| e.key == candidate_key) {
+                let dispatches = matches!(entry.outcome, EntryOutcome::Run | EntryOutcome::RunTarget { .. });
                 select_entry(world, &entry);
+                if dispatches {
+                    release_key(world, ch);
+                }
             }
-            release_key_if_palette_closed(world, ch);
         }
     }
 }
 
-/// If handling a character keystroke just closed the palette (a command ran to completion),
-/// force-release that key's continuous `pressed` state in `ButtonInput<Key>` — not just the
-/// one-shot `KeyboardInput` event this system already consumed.
+/// Force-releases `ch`'s continuous `pressed` state in `ButtonInput<Key>` — not just the one-shot
+/// `KeyboardInput` event this system already consumed — after a character keystroke has just
+/// dispatched a command (a terminal `Run`/`RunTarget` outcome, never a mere `Submenu`/`PickTarget`
+/// step that only narrows the input and leaves the palette open). Only call this when a command
+/// actually ran; releasing on every keystroke that happens to leave the palette closed would also
+/// hit ordinary bare keys that were never part of a command at all (e.g. "h" typed for movement
+/// with the palette closed the whole time, which matches no registered command and does nothing
+/// palette-side) — exactly the regression a first version of this fix introduced, which broke
+/// plain "h"-to-move-left by force-releasing "h" on every such no-op keystroke.
 ///
-/// Without this, a still-physically-held key (typing "h" to complete "g h" takes real key-hold
-/// time — tens of milliseconds, several frames at 60fps, not a rare race) keeps reading as
-/// `pressed` to any other system, most importantly `directional_move_system`'s `hjkl`/`yubn`
+/// Without this at all, a still-physically-held key (typing "h" to complete "g h" takes real
+/// key-hold time — tens of milliseconds, several frames at 60fps, not a rare race) keeps reading
+/// as `pressed` to any other system, most importantly `directional_move_system`'s `hjkl`/`yubn`
 /// movement bindings: the moment this command closes the palette, that system's `palette.open`
 /// guard no longer blocks it, so it sees the still-held "h" as a fresh directional-move input and
 /// immediately overwrites the `MoveTarget` the "go to location h" command just set — in the very
@@ -674,19 +684,19 @@ fn handle_one_palette_key(world: &mut World, key: PaletteKey) {
 /// tapping 'h'" bug exactly. Releasing the key here (rather than leaving it to the real key-up
 /// event) is safe: it only clears the tracked *state*, not the hardware key; a genuine release
 /// event later is a harmless no-op, and a fresh physical press is unaffected.
-fn release_key_if_palette_closed(world: &mut World, ch: char) {
-    if !world.resource::<CommandPaletteState>().open {
-        world.resource_mut::<ButtonInput<Key>>().release(Key::Character(ch.to_string().into()));
-    }
+fn release_key(world: &mut World, ch: char) {
+    world.resource_mut::<ButtonInput<Key>>().release(Key::Character(ch.to_string().into()));
 }
 
-fn open_palette_for_char(world: &mut World, ch: char) {
+/// Returns `true` if a command was actually dispatched (`run_command` called) for `ch`, as
+/// opposed to the palette merely opening (still awaiting more input) or nothing matching at all.
+fn open_palette_for_char(world: &mut World, ch: char) -> bool {
     let entity = world.resource::<EntityLabels>().entity_for_letter(ch);
     if let Some(entity) = entity {
         let default_key = world.resource::<DefaultEntityAction>().0.clone();
         if let Some(default_key) = default_key {
             run_command(world, vec![default_key], Some(Target::Entity(entity)));
-            return;
+            return true;
         }
     }
 
@@ -696,15 +706,17 @@ fn open_palette_for_char(world: &mut World, ch: char) {
         .iter()
         .find(|c| c.key == ch.to_string())
         .map(|c| (c.key.clone(), matches!(c.outcome, EntryOutcome::Run)));
-    let Some((key, is_run)) = matched else { return };
+    let Some((key, is_run)) = matched else { return false };
 
     if is_run {
         run_command(world, vec![key], None);
+        true
     } else {
         let mut state = world.resource_mut::<CommandPaletteState>();
         state.open = true;
         state.input = format!("{ch} ");
         state.selected_idx = 0;
+        false
     }
 }
 
@@ -996,6 +1008,37 @@ mod tests {
             "the key that just completed the command must have its held state force-released, \
              or a game's continuous-hold movement binding on that same letter would immediately \
              override the command's effect on this very frame"
+        );
+    }
+
+    /// Regression test for the fix above: a bare keystroke that never matches any command (the
+    /// ordinary case for a game's own movement keys — "h" typed with the palette closed the
+    /// whole time, and no "h" root command registered) must be left completely alone, including
+    /// its `ButtonInput<Key>` held state. A first version of the fix released the key whenever
+    /// handling it left the palette closed, which also fired here (it was *already* closed, and
+    /// stayed closed) and silently cleared "h"'s held state on every such keystroke — breaking
+    /// plain "h"-to-move-left, since a game's directional-move system reads exactly that state.
+    #[test]
+    fn a_keystroke_matching_no_command_does_not_touch_its_held_state() {
+        let loc = Vec2::new(1.0, 2.0);
+        let mut app = make_keyboard_app(loc);
+        // No command is registered for "j"; the palette starts, and stays, closed.
+
+        send_key(&mut app, char_key_event('j'));
+        app.world_mut().resource_mut::<ButtonInput<Key>>().press(Key::Character("j".into()));
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Recorded>().0,
+            None,
+            "no command should have run for an unmatched key"
+        );
+        assert!(!app.world().resource::<CommandPaletteState>().open);
+        let keyboard = app.world().resource::<ButtonInput<Key>>();
+        assert!(
+            keyboard.pressed(Key::Character("j".into())),
+            "a keystroke that matched no command must not have its held state touched, or a \
+             game's plain movement binding on that letter would stop working entirely"
         );
     }
 }
