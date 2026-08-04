@@ -1,34 +1,16 @@
-[package]
-name = "vector-arena"
-version = "0.1.0"
-edition = "2024"
-default-run = "game"
+[workspace]
+resolver = "3"
+members = ["crates/rogue-angles", "crates/vector-arena", "crates/gauntlet"]
+# `bevy_verlet` is a vendored third-party fork consumed as a plain path
+# dependency. Keeping it out of the workspace means its example-only
+# dev-dependencies (bevy_pbr, x11, tonemapping LUTs, …) are never built, which
+# matches how it was consumed before the workspace split.
+exclude = ["crates/bevy_verlet"]
+# Bare `cargo run` / `cargo build` should still mean "the game".
+default-members = ["crates/vector-arena"]
 
-[[bin]]
-name = "game"
-path = "src/main.rs"
-
-[dependencies]
-# Renderer backend is selected per-target below: native uses `default_platform`
-# (which includes the WebGL2/`webgl2` backend), while wasm uses `webgl2`.
-bevy = { version = "0.18.1", default-features = false, features = [
-    "2d",
-    "debug",
-    "bevy_dev_tools",
-] }
-avian2d = { version = "0.5", features = ["bevy_diagnostic", "diagnostic_ui"] }
-bevy_mesh = "0.18"
-geo = "0.32"
-rand = "0.8"
-bevy_landmass = "0.11.1"
-bevy_egui = "0.39.1"
-pyri_tooltip = "0.6.0"
-bevy_verlet = { path = "crates/bevy_verlet", default-features = false }
-bevy_svg = "0.18.0" # default-features includes both 2d and 3d; 2d-only build has a cfg bug in the crate
-egui_extras = { version = "0.33", features = ["svg_text"] } # svg_text enables resvg/text+system-fonts for scroll letter rendering
-resvg = { version = "0.45.1", default-features = false } # for usvg::Options passed to egui_extras
-bevy_enoki = "0.6.0"
-
+# Profiles only take effect at the workspace root; these moved here verbatim
+# from the pre-split vector-arena manifest.
 [profile.dev]
 opt-level = 1 # Suggested by the Bevy docs
 
@@ -40,23 +22,3 @@ debug = "line-tables-only" # Let's try to save some disk space
 opt-level = "s"   # Optimize for size
 lto = true
 codegen-units = 1
-
-
-# Native: the full platform meta-feature (windowing, multithreading, WebGL2-style
-# native GL backend, Linux display servers, gamepads, etc.).
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bevy = { version = "0.18.1", default-features = false, features = ["default_platform"] }
-
-# web:
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-# WebGL2 backend. We deliberately omit `multi_threaded` (wasm threads need
-# cross-origin isolation headers that GitHub Pages doesn't set) and the
-# native-only x11/wayland features.
-bevy = { version = "0.18.1", default-features = false, features = [
-    "std",
-    "bevy_winit",
-    "default_font",
-    "webgl2",
-] }
-getrandom = { version = "0.3", features = ["wasm_js"] }
-getrandom_0_2 = { package = "getrandom", version = "0.2", features = ["js"] }

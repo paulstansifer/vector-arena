@@ -1,0 +1,30 @@
+[package]
+name = "rogue-angles"
+version = "0.1.0"
+edition = "2024"
+description = "An engine for 2D geometric free-movement roguelikes"
+
+[dependencies]
+bevy = { version = "0.18.1", default-features = false, features = ["2d"] }
+avian2d = "0.5"
+bevy_landmass = "0.11.1"
+bevy_mesh = "0.18"
+geo = "0.32"
+rand = "0.8"
+bevy_egui = "0.39.1"
+bevy_svg = "0.18.0" # default-features includes both 2d and 3d; 2d-only build has a cfg bug in the crate
+egui_extras = { version = "0.33", features = ["svg_text"] } # svg_text enables resvg/text+system-fonts for scroll letter rendering
+resvg = { version = "0.45.1", default-features = false } # for usvg::Options passed to egui_extras
+
+# Native: bevy_landmass needs the platform meta-feature for anything beyond
+# pure computation (matches the game crate's split, since `cargo test` builds
+# this crate's own unit tests natively too).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy = { version = "0.18.1", default-features = false, features = ["default_platform"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bevy = { version = "0.18.1", default-features = false, features = [
+    "std",
+    "bevy_winit",
+    "webgl2",
+] }
