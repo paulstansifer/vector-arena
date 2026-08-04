@@ -602,7 +602,10 @@ fn handle_one_palette_key(world: &mut World, key: PaletteKey) {
                 state.input.clear();
                 state.selected_idx = 0;
             }
-            PaletteKey::Char(ch) => open_palette_for_char(world, ch),
+            PaletteKey::Char(ch) => {
+                open_palette_for_char(world, ch);
+                release_key_if_palette_closed(world, ch);
+            }
             PaletteKey::Up | PaletteKey::Down | PaletteKey::Enter | PaletteKey::Backspace => {}
         }
         return;
@@ -652,7 +655,28 @@ fn handle_one_palette_key(world: &mut World, key: PaletteKey) {
             if let Some(entry) = entries.into_iter().find(|e| e.key == candidate_key) {
                 select_entry(world, &entry);
             }
+            release_key_if_palette_closed(world, ch);
         }
+    }
+}
+
+/// If handling a character keystroke just closed the palette (a command ran to completion),
+/// force-release that key's continuous `pressed` state in `ButtonInput<Key>` — not just the
+/// one-shot `KeyboardInput` event this system already consumed.
+///
+/// Without this, a still-physically-held key (typing "h" to complete "g h" takes real key-hold
+/// time — tens of milliseconds, several frames at 60fps, not a rare race) keeps reading as
+/// `pressed` to any other system, most importantly `directional_move_system`'s `hjkl`/`yubn`
+/// movement bindings: the moment this command closes the palette, that system's `palette.open`
+/// guard no longer blocks it, so it sees the still-held "h" as a fresh directional-move input and
+/// immediately overwrites the `MoveTarget` the "go to location h" command just set — in the very
+/// same frame, deterministically, every time, matching the reported "'g h' behaves like just
+/// tapping 'h'" bug exactly. Releasing the key here (rather than leaving it to the real key-up
+/// event) is safe: it only clears the tracked *state*, not the hardware key; a genuine release
+/// event later is a harmless no-op, and a fresh physical press is unaffected.
+fn release_key_if_palette_closed(world: &mut World, ch: char) {
+    if !world.resource::<CommandPaletteState>().open {
+        world.resource_mut::<ButtonInput<Key>>().release(Key::Character(ch.to_string().into()));
     }
 }
 
@@ -834,6 +858,7 @@ mod tests {
         app.init_resource::<DefaultEntityAction>();
         app.init_resource::<CurrentPaletteEntries>();
         app.init_resource::<LocationDescriptions>();
+        app.insert_resource(ButtonInput::<Key>::default());
 
         let handler = app.world_mut().register_system(record_invocation);
         app.world_mut().resource_mut::<LocationLabels>().slots[(b'h' - b'a') as usize] = Some(loc);
@@ -930,5 +955,47 @@ mod tests {
         );
         let state = app.world().resource::<CommandPaletteState>();
         assert!(!state.open, "palette should have closed after the successful dispatch");
+    }
+
+    /// This is the bug the user actually reported, and it is deterministic, not a race: a real
+    /// keypress stays physically held for many frames (tens of milliseconds), so `ButtonInput`
+    /// marks "h" as `pressed` — not just `just_pressed` — for the whole hold, independent of
+    /// whether anything consumed the corresponding `KeyboardInput` event. A game's continuous-hold
+    /// movement bindings (`hjkl`/`yubn`, gated only on `CommandPaletteState.open`) read that
+    /// `pressed` state directly, so the instant "h" completes "g h" and closes the palette, the
+    /// still-held "h" reads as a fresh directional-move input and overwrites whatever the command
+    /// just did — in the very same frame the command ran, every time, not just under a frame
+    /// hitch. Reordering keystrokes (the earlier fix in this file) does nothing for this, since
+    /// there is no ordering ambiguity here — one key, doing two unrelated things.
+    #[test]
+    fn completing_a_command_releases_the_completing_keys_held_state() {
+        let loc = Vec2::new(1.0, 2.0);
+        let mut app = make_keyboard_app(loc);
+
+        // Frame 1: "g" pressed and, like any real keypress, still physically held afterward.
+        send_key(&mut app, char_key_event('g'));
+        app.world_mut().resource_mut::<ButtonInput<Key>>().press(Key::Character("g".into()));
+        app.update();
+
+        // Frame 2: "h" arrives to complete "g h", and it too is still physically held — exactly
+        // what a real keystroke looks like, no fast typing or frame hitch required.
+        send_key(&mut app, char_key_event('h'));
+        app.world_mut().resource_mut::<ButtonInput<Key>>().press(Key::Character("h".into()));
+        app.update();
+
+        let recorded = app.world().resource::<Recorded>();
+        assert_eq!(
+            recorded.0,
+            Some(Some(Target::Point(loc))),
+            "'h' should have completed 'g h' and navigated to location h"
+        );
+
+        let keyboard = app.world().resource::<ButtonInput<Key>>();
+        assert!(
+            !keyboard.pressed(Key::Character("h".into())),
+            "the key that just completed the command must have its held state force-released, \
+             or a game's continuous-hold movement binding on that same letter would immediately \
+             override the command's effect on this very frame"
+        );
     }
 }
