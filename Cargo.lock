@@ -2914,6 +2914,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gauntlet"
+version = "0.1.0"
+dependencies = [
+ "avian2d",
+ "bevy",
+ "bevy_egui",
+ "bevy_landmass",
+ "geo 0.32.0",
+ "getrandom 0.2.17",
+ "getrandom 0.3.4",
+ "rand 0.8.6",
+ "rogue-angles",
+]
+
+[[package]]
 name = "geo"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5445,6 +5460,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rogue-angles"
+version = "0.1.0"
+dependencies = [
+ "avian2d",
+ "bevy",
+ "bevy_egui",
+ "bevy_landmass",
+ "bevy_mesh",
+ "bevy_svg",
+ "egui_extras",
+ "geo 0.32.0",
+ "rand 0.8.6",
+ "resvg",
+]
+
+[[package]]
 name = "ron"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6458,15 +6489,13 @@ dependencies = [
  "bevy_enoki",
  "bevy_landmass",
  "bevy_mesh",
- "bevy_svg",
  "bevy_verlet",
- "egui_extras",
  "geo 0.32.0",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
  "pyri_tooltip",
  "rand 0.8.6",
- "resvg",
+ "rogue-angles",
 ]
 
 [[package]]
