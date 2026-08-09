@@ -6,7 +6,9 @@ use avian2d::{diagnostics::ui::PhysicsDiagnosticsUiSettings, prelude::RigidBody}
 
 use rogue_angles::{
     fov::CurrentFovState,
-    hud::{MessageLog, draw_icon_slot, draw_stat_bar, render_message_bar, show_world_entity_tooltip},
+    hud::{
+        MessageLog, draw_icon_slot, draw_stat_bar, render_message_bar, show_world_entity_tooltip,
+    },
     palette::CommandPaletteState,
 };
 
@@ -15,7 +17,7 @@ use crate::{
     item::{
         Inventory, ItemIdentities, ItemKind, WAND_COOLDOWN_SECS, WandCooldowns, item_display_name,
     },
-    player::{BOREDOM_MAX, Boredom, Player, tick_boredom},
+    player::{BOREDOM_MAX, Boredom, Player},
     sprite::SpriteEguiTextures,
     status_effect::StatusEffects,
 };
@@ -55,7 +57,6 @@ impl Plugin for UiPlugin {
         app.add_plugins((EguiPlugin::default(), TooltipPlugin::default()))
             .init_resource::<MessageLog>()
             .init_resource::<UiState>()
-            .init_resource::<Boredom>()
             .add_systems(EguiPrimaryContextPass, ui_system)
             .add_systems(EguiPrimaryContextPass, crate::command_palette::palette_system)
             .add_systems(
@@ -67,7 +68,6 @@ impl Plugin for UiPlugin {
             .add_systems(EguiPrimaryContextPass, crate::monster::render_monster_markers)
             .add_systems(Update, crate::monster::refresh_monster_tooltips)
             .add_systems(Update, show_world_entity_tooltip)
-            .add_systems(Update, tick_boredom.run_if(in_state(GameState::InLevel)))
             .add_systems(Update, toggle_perf_overlay);
     }
 }
@@ -482,4 +482,3 @@ fn draw_item_icon(
         Some(&tooltip),
     );
 }
-

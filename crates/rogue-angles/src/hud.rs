@@ -16,6 +16,14 @@ const BAR_ROUNDING: u8 = 3;
 #[derive(Component, Default)]
 pub struct WorldTooltip(pub String);
 
+/// Live entries retained before the log is trimmed. The UI only ever shows the newest entry
+/// (collapsed) or a 200px scroll of them (expanded), so older ones are unreachable; without a
+/// bound both `messages` and its tombstones grow for the entire run, and `iter()` — which is
+/// called per frame by the message bar and walks every tombstone — grows with them.
+const MAX_MESSAGES: usize = 200;
+/// Trim in batches rather than on every push, so the O(n) compaction is amortized.
+const TRIM_SLACK: usize = 100;
+
 #[derive(Resource, Default)]
 pub struct MessageLog {
     // Empty strings are tombstones for entries that were moved to the end.
@@ -25,7 +33,38 @@ pub struct MessageLog {
 }
 
 impl MessageLog {
-    pub fn push(&mut self, msg: impl Into<String>) { self.messages.push(msg.into()); }
+    pub fn push(&mut self, msg: impl Into<String>) {
+        self.messages.push(msg.into());
+        self.trim_if_needed();
+    }
+
+    /// Drops the oldest entries (and every tombstone) once the log has grown past
+    /// `MAX_MESSAGES + TRIM_SLACK`, rewriting `repeating`'s stored indices to match. Entries
+    /// whose slot falls off the front lose their repeat-collapsing key, so the next call with
+    /// that key starts a fresh entry rather than pointing at a stale index.
+    fn trim_if_needed(&mut self) {
+        if self.messages.len() <= MAX_MESSAGES + TRIM_SLACK {
+            return;
+        }
+        let mut remap = vec![None; self.messages.len()];
+        let mut kept: Vec<String> = Vec::with_capacity(MAX_MESSAGES);
+        let first_kept = self.messages.len() - MAX_MESSAGES;
+        for (old_idx, msg) in self.messages.drain(..).enumerate() {
+            if old_idx < first_kept || msg.is_empty() {
+                continue;
+            }
+            remap[old_idx] = Some(kept.len());
+            kept.push(msg);
+        }
+        self.messages = kept;
+        self.repeating.retain(|_, (_, idx)| match remap[*idx] {
+            Some(new_idx) => {
+                *idx = new_idx;
+                true
+            }
+            None => false,
+        });
+    }
 
     /// Push a collapsible message. Repeated calls with the same `prefix`+`entity`
     /// key move the entry to the end and show a repeat count: `"{prefix} (3x){suffix}"`.
@@ -49,6 +88,7 @@ impl MessageLog {
             self.messages.push(format!("{prefix}{suffix}"));
             self.repeating.insert(key, (1, idx));
         }
+        self.trim_if_needed();
     }
 
     pub fn clear(&mut self) {
@@ -67,7 +107,14 @@ pub fn enable_ui_input_absorption(mut egui_settings: ResMut<EguiGlobalSettings>)
 
 /// A labeled progress bar (rounded rect fill + centered text) — HP/MP/boredom-style stat
 /// display. `ratio` is clamped to [0, 1]; `color` is the fill color at full width.
-pub fn draw_stat_bar(ui: &mut egui::Ui, width: f32, height: f32, ratio: f32, color: egui::Color32, label: &str) {
+pub fn draw_stat_bar(
+    ui: &mut egui::Ui,
+    width: f32,
+    height: f32,
+    ratio: f32,
+    color: egui::Color32,
+    label: &str,
+) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let painter = ui.painter_at(rect);
 
@@ -124,12 +171,15 @@ pub fn render_message_bar(
             );
 
             if expanded {
-                egui::ScrollArea::vertical().max_height(200.0).stick_to_bottom(true).show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    for msg in log.iter() {
-                        ui.label(msg);
-                    }
-                });
+                egui::ScrollArea::vertical().max_height(200.0).stick_to_bottom(true).show(
+                    ui,
+                    |ui| {
+                        ui.set_min_width(ui.available_width());
+                        for msg in log.iter() {
+                            ui.label(msg);
+                        }
+                    },
+                );
             }
 
             response.clicked()
@@ -248,9 +298,14 @@ pub fn show_world_entity_tooltip(
             if !is_currently_visible(current_fov.as_deref(), pos) {
                 continue;
             }
-            make_egui_tooltip(ctx, egui::Id::new(("world_tooltip", tooltip.0.as_str())), mouse_pos, |ui| {
-                ui.label(&tooltip.0);
-            });
+            make_egui_tooltip(
+                ctx,
+                egui::Id::new(("world_tooltip", tooltip.0.as_str())),
+                mouse_pos,
+                |ui| {
+                    ui.label(&tooltip.0);
+                },
+            );
             return Ok(());
         }
     }
@@ -321,6 +376,48 @@ mod tests {
         log.push_repeating("hit", e1, "!");
         log.push_repeating("hit", e2, "!");
         assert_eq!(log.iter().count(), 2);
+    }
+
+    #[test]
+    fn test_log_is_bounded() {
+        let mut log = MessageLog::default();
+        for i in 0..10_000 {
+            log.push(format!("msg {i}"));
+        }
+        let msgs: Vec<&str> = log.iter().collect();
+        assert!(msgs.len() <= MAX_MESSAGES + TRIM_SLACK, "log grew to {}", msgs.len());
+        assert_eq!(msgs.last(), Some(&"msg 9999"), "the newest message must survive trimming");
+    }
+
+    /// Trimming rewrites the indices `repeating` stores, so a key that survives must still
+    /// collapse onto its own entry rather than overwriting an unrelated (or out-of-bounds) one.
+    #[test]
+    fn test_repeating_still_collapses_after_trim() {
+        let mut log = MessageLog::default();
+        let e = entity(1);
+        for i in 0..500 {
+            log.push(format!("filler {i}"));
+        }
+        log.push_repeating("hit", e, "!");
+        log.push_repeating("hit", e, "!");
+        let msgs: Vec<&str> = log.iter().collect();
+        assert_eq!(msgs.last(), Some(&"hit (2x)!"));
+        assert_eq!(msgs.iter().filter(|m| m.starts_with("hit")).count(), 1);
+    }
+
+    /// A repeating key whose entry was trimmed away must start over cleanly instead of
+    /// resolving a stale index into the compacted `messages` vec.
+    #[test]
+    fn test_repeating_key_dropped_when_its_entry_is_trimmed() {
+        let mut log = MessageLog::default();
+        let e = entity(1);
+        log.push_repeating("old", e, "!");
+        for i in 0..1_000 {
+            log.push(format!("filler {i}"));
+        }
+        log.push_repeating("old", e, "!");
+        let msgs: Vec<&str> = log.iter().collect();
+        assert_eq!(msgs.last(), Some(&"old!"), "trimmed-away key restarts without a count");
     }
 
     #[test]

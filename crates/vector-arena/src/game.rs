@@ -12,12 +12,14 @@ use rand::SeedableRng;
 
 use rogue_angles::{
     AGENT_RADIUS, GameLayer, LevelEntity, WorldBounds,
-    dungeon::level_generation::{LevelPlan, RoomRegistry},
-    dungeon::terrain::{
-        DungeonCollider, DungeonState, DungeonVisuals, GlassWallsMarker, PointsOfInterest,
-        TerrainMarker, SlowZoneMarker, geometry_to_collider, geometry_to_mesh,
-        glass_wall_border, sync_dungeon_to_entities, sync_glass_walls_to_entities,
-        update_slow_zone_multipliers,
+    dungeon::{
+        level_generation::{LevelPlan, RoomRegistry},
+        terrain::{
+            DungeonCollider, DungeonState, DungeonVisuals, GlassWallsMarker, PointsOfInterest,
+            SlowZoneMarker, TerrainMarker, geometry_to_collider, geometry_to_mesh,
+            glass_wall_border, sync_dungeon_to_entities, sync_glass_walls_to_entities,
+            update_slow_zone_multipliers,
+        },
     },
     effects::crumble_terrain::{
         Fragile, RubbleMaterial, handle_right_click_excavation, on_crumble_terrain_request,
@@ -25,7 +27,10 @@ use rogue_angles::{
     },
     fov::{self as fov, MOVABLE_Z, OpaqueVertices, TERRAIN_Z},
     hud::{MessageLog, enable_ui_input_absorption},
-    nav::{self as nav, DungeonNavMesh, NavMeshIslandMarker, SLOW_ZONE_NAV_COST, playable_area_to_nav_mesh},
+    nav::{
+        self as nav, DungeonNavMesh, NavMeshIslandMarker, SLOW_ZONE_NAV_COST,
+        playable_area_to_nav_mesh,
+    },
     palette::{self, EntityLabels, LabelPool, LocationDescriptions, LocationLabels},
     status_effects::{StatusEffectsAppExt, tick_status_effects},
     time_scale::arbitrate_time_scale,
@@ -49,7 +54,7 @@ use crate::{
             animate_sigil, detect_sigil_contact, explode_sigil, tick_sigil_explosions,
         },
     },
-    fov::update_staircase_fog_copy,
+    fov::{staircase_fog_copy_is_stale, update_staircase_fog_copy},
     goto,
     item::{
         Inventory, ItemIdentities, ItemKind, WandCooldowns, animate_pickup, on_wand_attraction,
@@ -59,10 +64,13 @@ use crate::{
     player::{
         Boredom, Player, advance_exploration, check_player_death, directional_move_system,
         move_player, register_player_commands, rotate_player_to_velocity, set_target_on_click,
+        tick_boredom,
     },
     populate_level,
     sprite::SpritePlugin,
-    status_effect::{StatusEffect, StatusEffects, apply_confusion_to_velocity, sync_movement_modifiers},
+    status_effect::{
+        StatusEffect, StatusEffects, apply_confusion_to_velocity, sync_movement_modifiers,
+    },
     time_scale::cast_time_scale_votes,
     ui::UiPlugin,
     visuals::indicator::{render_state_indicators, tick_state_indicators},
@@ -113,7 +121,15 @@ fn on_enter_restart(
     wand_cooldowns.clear();
     *boredom = Boredom::default();
     identities.randomize(&mut rand::rngs::StdRng::seed_from_u64(seed_val));
-    spawn_game_world(&mut commands, &mut meshes, &mut materials, &mut nav_meshes, 1, None, seed_val);
+    spawn_game_world(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut nav_meshes,
+        1,
+        None,
+        seed_val,
+    );
     next_state.set(GameState::InLevel);
 }
 
@@ -371,7 +387,6 @@ impl Plugin for GamePlugin {
             app.add_plugins(rogue_angles::sprite::SvgSpritePlugin)
                 .add_systems(Startup, register_svg_assets)
                 .init_resource::<MessageLog>()
-                .init_resource::<Boredom>()
                 .init_resource::<palette::CommandPaletteState>()
                 .init_resource::<palette::CommandPaletteWatchesClicks>()
                 .init_resource::<palette::CurrentPaletteEntries>()
@@ -387,6 +402,8 @@ impl Plugin for GamePlugin {
 
         app.init_state::<GameState>()
             .init_resource::<SavedPlayer>()
+            // Owned here rather than by `UiPlugin`, since `tick_boredom` runs in both modes.
+            .init_resource::<Boredom>()
             .init_resource::<LabelPool<ItemKind>>()
             .init_resource::<ItemIdentities>()
             .init_resource::<WandCooldowns>();
@@ -435,6 +452,11 @@ impl Plugin for GamePlugin {
             .add_systems(Update, rotate_player_to_velocity.after(move_player))
             .add_systems(Update, advance_exploration.after(move_player))
             .add_systems(Update, check_player_death.run_if(in_state(GameState::InLevel)))
+            // Boredom is a gameplay clock that damages the player, not HUD chrome, so it lives
+            // here rather than in `UiPlugin` — where it was previously registered, and so never
+            // ticked at all in headless mode (tests, the scripted runner) even though every
+            // other gameplay system did.
+            .add_systems(Update, tick_boredom.run_if(in_state(GameState::InLevel)))
             .add_systems(Update, monster::update_monster_ai)
             .add_systems(
                 Update,
@@ -454,7 +476,12 @@ impl Plugin for GamePlugin {
                     .after(update_slow_zone_multipliers),
             )
             .add_systems(Update, fov::update_fov.after(sync_movement_modifiers))
-            .add_systems(Update, update_staircase_fog_copy.after(fov::update_fov))
+            .add_systems(
+                Update,
+                update_staircase_fog_copy
+                    .after(fov::update_fov)
+                    .run_if(staircase_fog_copy_is_stale),
+            )
             .add_systems(
                 Update,
                 if self.headless {

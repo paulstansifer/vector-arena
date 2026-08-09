@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Check, lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # No `cargo fmt --check` step on purpose: rustfmt.toml sets nightly-only
+      # options, and unstable rustfmt output shifts between nightlies, so a
+      # floating-nightly gate would fail the build on unrelated PRs. Formatting is
+      # already handled locally by the `cargo +nightly fmt` PostToolUse hook in
+      # .claude/settings.json. Pin a nightly here if you ever want it enforced.
+
+      # Bevy's system dependencies, plus the llvmpipe software rasterizer that
+      # tests/game_tests.rs needs — it builds a real render app and fails with
+      # "Unable to find a GPU!" on a bare runner. Kept in sync with the list in
+      # DEVELOPING.md ("System dependencies (Linux)").
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev libxkbcommon-dev libasound2-dev libudev-dev \
+            libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev \
+            libgl1-mesa-dev mesa-vulkan-drivers libvulkan1
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+
+      - name: Tests
+        run: cargo test --workspace
+
+  wasm:
+    name: WASM build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The deploy workflow only runs on pushes to main, so without this a pull
+      # request can break the wasm build without anyone noticing until it lands.
+      - name: Build for wasm32
+        run: cargo build -p vector-arena --target wasm32-unknown-unknown

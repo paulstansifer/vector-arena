@@ -75,14 +75,14 @@ fn test_fov_point_explosion() {
     }
 
     for pt in &points {
-        let (new_exp, _, _, _) = update_fov_from_pov(
+        let update = update_fov_from_pov(
             *pt,
             600.0,
             &terrain_geometry.solid_rock,
             &world_bounds,
             &exploration_state.0,
         );
-        exploration_state.0 = new_exp;
+        exploration_state.0 = update.exploration;
         if let Some(pw) = &pw {
             pw.show(make_frame(&terrain_geometry.solid_rock, &exploration_state.0, *pt));
         }
@@ -93,14 +93,14 @@ fn test_fov_point_explosion() {
 
     for extra_pass in 0..10 {
         for pt in &points {
-            let (new_exp, _, _, _) = update_fov_from_pov(
+            let update = update_fov_from_pov(
                 Vec2::new(pt.x + 0.01 * (extra_pass as f32), pt.y + 0.01 * (extra_pass as f32)),
                 600.0,
                 &terrain_geometry.solid_rock,
                 &world_bounds,
                 &exploration_state.0,
             );
-            exploration_state.0 = new_exp;
+            exploration_state.0 = update.exploration;
             if let Some(pw) = &pw {
                 pw.show(make_frame(&terrain_geometry.solid_rock, &exploration_state.0, *pt));
             }

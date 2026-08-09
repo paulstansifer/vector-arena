@@ -510,7 +510,9 @@ pub fn icon_id_for_item(item: ItemKind) -> IconId {
     IconId(ALL_ITEM_KINDS.iter().position(|k| *k == item).unwrap_or(0) as u32)
 }
 
-pub fn item_for_icon_id(id: IconId) -> Option<ItemKind> { ALL_ITEM_KINDS.get(id.0 as usize).copied() }
+pub fn item_for_icon_id(id: IconId) -> Option<ItemKind> {
+    ALL_ITEM_KINDS.get(id.0 as usize).copied()
+}
 
 pub fn register_item_commands(world: &mut World) {
     let quaff_submenu_id = world.register_system(quaff_submenu);
@@ -652,6 +654,8 @@ fn wave_submenu(
 }
 
 const WAND_MANA_COST: f32 = 5.0;
+/// HP every potion restores, on top of its identified effect.
+const POTION_HEAL: f32 = 15.0;
 
 /// Verify `target` passes `filter`, then remove its first occurrence from inventory.
 fn find_and_remove_item(
@@ -697,8 +701,10 @@ fn execute_quaff(
         return;
     };
     let ItemKind::Potion(color) = item else { return };
-    let gained = 20.0_f32.min(stats.max_hp - stats.hp);
-    stats.hp = (stats.hp + 15.0).min(stats.max_hp);
+    // Compute the gain from the amount actually healed, not a separate literal: these were
+    // 20.0 and 15.0 respectively, so a quaff at low HP claimed "+20 HP" while restoring 15.
+    let gained = POTION_HEAL.min(stats.max_hp - stats.hp).max(0.0);
+    stats.hp = (stats.hp + POTION_HEAL).min(stats.max_hp);
     let mut rng = rand::thread_rng();
     let (kind, duration) = potion_status_effect(identities.potion_effect(color), &mut rng);
     player_effects.add(kind, duration);
@@ -779,9 +785,7 @@ fn execute_read(
         }
         ScrollEffect::Forgetting => match identities.forget(&mut rand::thread_rng()) {
             Some((_n, type_word)) => {
-                log.push(format!(
-                    "You're not as sure as you used to be about those {type_word}s."
-                ));
+                log.push(format!("You're not as sure as you used to be about those {type_word}s."));
             }
             None => {
                 log.push("You don't remember having forgotten anything.");
@@ -933,7 +937,7 @@ pub fn on_monster_confusion(
     if count == 0 {
         log.push("You hear perfectly normal laughter in the distance.");
     } else if count == 1 {
-        log.push(format!("The monster seems confused!"));
+        log.push("The monster seems confused!");
     } else {
         log.push(format!("{count} monsters start acting confused!"));
     }
@@ -1074,7 +1078,9 @@ mod tests {
         pool
     }
 
-    fn keys(entries: &[PaletteEntry]) -> Vec<&str> { entries.iter().map(|e| e.key.as_str()).collect() }
+    fn keys(entries: &[PaletteEntry]) -> Vec<&str> {
+        entries.iter().map(|e| e.key.as_str()).collect()
+    }
 
     #[test]
     fn quaff_uses_stable_letters() {
